@@ -1,14 +1,13 @@
 
 import {supabase} from './supabase.js';
 import {priorityNames,roleNames,invitationStatus,statusNames} from './labels.js';
+import {el,show} from './utils.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
 let invitationFlow=initialHash.get('type')==='invite'||initialQuery.get('type')==='invite'||initialHash.get('type')==='recovery';
 const callbackError=initialHash.get('error_description')||initialQuery.get('error_description');
-const el=id=>document.getElementById(id);
 let accessibleFacilities=[];let busy=false;let currentUser=null;let myMemberships=[];let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let refreshTimer=null;let ackRows=[];let settingsRows=[];let notificationSupport=true;
-const show=(id,on)=>el(id).classList.toggle('hidden',!on);
 const status=(msg,isError=false)=>{el('status').textContent=msg;el('status').className=isError?'error':'ok'};
 function draw(id,rows,empty){const node=el(id);node.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;node.append(p);return}for(const r of rows){const div=document.createElement('div');div.className='item';const b=document.createElement('strong');b.textContent=r.name;div.append(b);if(r.organization_id){const s=document.createElement('div');s.className='badge';s.textContent='Unternehmens-ID: '+r.organization_id.slice(0,8)+'…';div.append(s)}node.append(div)}}
 async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),supabase.from('facilities').select('id,name,organization_id').order('name')]);if(o.error)throw o.error;if(f.error)throw f.error;draw('orgs',o.data||[],'Keine sichtbaren Unternehmen.');draw('facilities',f.data||[],'Keine sichtbaren Betriebe.');accessibleFacilities=f.data||[];const select=el('defect-facility');const previous=select.value;select.replaceChildren();for(const facility of accessibleFacilities){const option=document.createElement('option');option.value=facility.id;option.textContent=facility.name;select.append(option)}if(accessibleFacilities.some(x=>x.id===previous))select.value=previous;el('save-defect').disabled=!accessibleFacilities.length;el('summary').textContent=`Verbindung erfolgreich. ${o.data.length} Unternehmen und ${f.data.length} Betriebe geladen.`;status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
