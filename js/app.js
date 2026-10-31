@@ -2,12 +2,13 @@
 import {supabase} from './supabase.js';
 import {priorityNames,roleNames,invitationStatus,statusNames} from './labels.js';
 import {el,show,status} from './utils.js';
+import {state} from './state.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
 let invitationFlow=initialHash.get('type')==='invite'||initialQuery.get('type')==='invite'||initialHash.get('type')==='recovery';
 const callbackError=initialHash.get('error_description')||initialQuery.get('error_description');
-let accessibleFacilities=[];let busy=false;let currentUser=null;let myMemberships=[];let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let refreshTimer=null;let ackRows=[];let settingsRows=[];let notificationSupport=true;
+let accessibleFacilities=[];let currentUser=null;let myMemberships=[];let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let refreshTimer=null;let ackRows=[];let settingsRows=[];let notificationSupport=true;
 function draw(id,rows,empty){const node=el(id);node.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;node.append(p);return}for(const r of rows){const div=document.createElement('div');div.className='item';const b=document.createElement('strong');b.textContent=r.name;div.append(b);if(r.organization_id){const s=document.createElement('div');s.className='badge';s.textContent='Unternehmens-ID: '+r.organization_id.slice(0,8)+'…';div.append(s)}node.append(div)}}
 async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),supabase.from('facilities').select('id,name,organization_id').order('name')]);if(o.error)throw o.error;if(f.error)throw f.error;draw('orgs',o.data||[],'Keine sichtbaren Unternehmen.');draw('facilities',f.data||[],'Keine sichtbaren Betriebe.');accessibleFacilities=f.data||[];const select=el('defect-facility');const previous=select.value;select.replaceChildren();for(const facility of accessibleFacilities){const option=document.createElement('option');option.value=facility.id;option.textContent=facility.name;select.append(option)}if(accessibleFacilities.some(x=>x.id===previous))select.value=previous;el('save-defect').disabled=!accessibleFacilities.length;el('summary').textContent=`Verbindung erfolgreich. ${o.data.length} Unternehmen und ${f.data.length} Betriebe geladen.`;status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
 function inviteFacilityOptions(){const sel=el('invite-facility');const prev=sel.value;sel.replaceChildren();for(const f of accessibleFacilities.filter(isManager)){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}if([...sel.options].some(o=>o.value===prev))sel.value=prev;el('invite-card').classList.toggle('hidden',!sel.options.length);el('invite-submit').disabled=!sel.options.length;}
@@ -145,11 +146,10 @@ async function loadDefects(){
   box.append(card);
  }
 }
-el('defect-form').addEventListener('submit',async event=>{event.preventDefault();if(busy)return;const facility=accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}busy=true;el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await supabase.auth.getUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await supabase.from('defects').insert(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{busy=false;el('save-defect').disabled=!accessibleFacilities.length}});
+el('defect-form').addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await supabase.auth.getUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await supabase.from('defects').insert(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;el('save-defect').disabled=!accessibleFacilities.length}});
 el('refresh-defects').addEventListener('click',loadDefects);
 el('defect-filter').addEventListener('change',()=>{el('nav-mine').classList.toggle('active',el('defect-filter').value==='mine');el('nav-all').classList.toggle('active',el('defect-filter').value!=='mine');loadDefects()});
 for(const [id,mode] of [['nav-mine','mine'],['nav-all','all']])el(id).addEventListener('click',()=>{el('defect-filter').value=mode;el('defect-filter').dispatchEvent(new Event('change'));el('defect-list').scrollIntoView({behavior:'smooth',block:'start'})});
-let updateInProgress=false;
 async function acceptInvitation(){
  const {data,error}=await supabase.rpc('accept_staff_invitation');
  if(error)throw error;
@@ -158,8 +158,8 @@ async function acceptInvitation(){
  return data;
 }
 async function update(){
- if(updateInProgress)return;
- updateInProgress=true;
+ if(state.updateInProgress)return;
+ state.updateInProgress=true;
  try{
   const {data:{user},error}=await supabase.auth.getUser();
   if(error && !['Auth session missing!','Auth session missing'].includes(error.message))throw error;
@@ -184,7 +184,7 @@ async function update(){
    await load();
   }else status(callbackError?'Einladungslink ungültig oder abgelaufen: '+callbackError:'Bitte mit deinem Tageswerk-Testkonto anmelden.',!!callbackError);
  }catch(e){status('Verbindung/Anmeldung fehlgeschlagen: '+e.message,true);show('login',true);show('app',false)}
- finally{updateInProgress=false}
+ finally{state.updateInProgress=false}
 }
 el('setup-form').addEventListener('submit',async e=>{
  e.preventDefault();const msg=el('setup-message'),btn=el('setup-submit');
