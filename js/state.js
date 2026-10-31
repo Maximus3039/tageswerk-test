@@ -5,5 +5,6 @@ export const state = {
   settingsRows: [],
   refreshTimer: null,
   accessibleFacilities: [],
-  myMemberships: []
+  myMemberships: [],
+  staff: []
 };

@@ -8,7 +8,7 @@ const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
 let invitationFlow=initialHash.get('type')==='invite'||initialQuery.get('type')==='invite'||initialHash.get('type')==='recovery';
 const callbackError=initialHash.get('error_description')||initialQuery.get('error_description');
-let currentUser=null;let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let ackRows=[];
+let currentUser=null;let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let ackRows=[];
 function draw(id,rows,empty){const node=el(id);node.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;node.append(p);return}for(const r of rows){const div=document.createElement('div');div.className='item';const b=document.createElement('strong');b.textContent=r.name;div.append(b);if(r.organization_id){const s=document.createElement('div');s.className='badge';s.textContent='Unternehmens-ID: '+r.organization_id.slice(0,8)+'…';div.append(s)}node.append(div)}}
 async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),supabase.from('facilities').select('id,name,organization_id').order('name')]);if(o.error)throw o.error;if(f.error)throw f.error;draw('orgs',o.data||[],'Keine sichtbaren Unternehmen.');draw('facilities',f.data||[],'Keine sichtbaren Betriebe.');state.accessibleFacilities=f.data||[];const select=el('defect-facility');const previous=select.value;select.replaceChildren();for(const facility of state.accessibleFacilities){const option=document.createElement('option');option.value=facility.id;option.textContent=facility.name;select.append(option)}if(state.accessibleFacilities.some(x=>x.id===previous))select.value=previous;el('save-defect').disabled=!state.accessibleFacilities.length;el('summary').textContent=`Verbindung erfolgreich. ${o.data.length} Unternehmen und ${f.data.length} Betriebe geladen.`;status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
 function inviteFacilityOptions(){const sel=el('invite-facility');const prev=sel.value;sel.replaceChildren();for(const f of state.accessibleFacilities.filter(isManager)){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}if([...sel.options].some(o=>o.value===prev))sel.value=prev;el('invite-card').classList.toggle('hidden',!sel.options.length);el('invite-submit').disabled=!sel.options.length;}
@@ -19,7 +19,7 @@ function staffFacilityOptions(){const select=el('staff-facility');const old=sele
 function renderStaff(){
  const box=el('staff-list');box.replaceChildren();
  const allowed=state.accessibleFacilities.filter(isManager);
- const rows=staff.filter(m=>m.email&&m.role!=='company_admin'&&allowed.some(f=>f.id===m.facility_id));
+ const rows=state.staff.filter(m=>m.email&&m.role!=='company_admin'&&allowed.some(f=>f.id===m.facility_id));
  if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent='Keine sichtbaren Teamzuordnungen.';box.append(p);return}
  for(const m of rows){
   const row=document.createElement('div');row.className='item';
@@ -69,7 +69,7 @@ async function loadPermissions(){
  if(people.error)throw people.error;
  state.myMemberships=(members.data||[]).filter(m=>m.user_id===currentUser?.id&&m.is_active!==false);
  const profiles=new Map((people.data||[]).map(p=>[p.id,p.full_name]));
- staff=(members.data||[]).map(m=>({...m,name:profiles.get(m.user_id)||'Mitarbeiter '+m.user_id.slice(0,8)}));
+ state.staff=(members.data||[]).map(m=>({...m,name:profiles.get(m.user_id)||'Mitarbeiter '+m.user_id.slice(0,8)}));
  const managerFacilities=state.accessibleFacilities.filter(isManager);
  if(managerFacilities.length){
   const {data,error}=await supabase.rpc('list_facility_employees');
@@ -77,9 +77,9 @@ async function loadPermissions(){
   else{
    const orgByFacility=new Map(state.accessibleFacilities.map(f=>[f.id,f.organization_id]));
    for(const p of data||[]){
-    const index=staff.findIndex(m=>m.user_id===p.user_id&&m.facility_id===p.facility_id&&m.role===p.role);
+    const index=state.staff.findIndex(m=>m.user_id===p.user_id&&m.facility_id===p.facility_id&&m.role===p.role);
     const record={user_id:p.user_id,organization_id:orgByFacility.get(p.facility_id),facility_id:p.facility_id,role:p.role,name:p.full_name||profiles.get(p.user_id)||'Mitarbeiter '+p.user_id.slice(0,8),email:p.email,is_active:p.is_active};
-    if(index>=0)staff[index]={...staff[index],...record};else staff.push(record);
+    if(index>=0)state.staff[index]={...state.staff[index],...record};else state.staff.push(record);
    }
   }
  }
@@ -101,7 +101,7 @@ async function loadDefects(){
   badges.textContent=[facility?.name||'Betrieb',priorityNames[defect.priority]||defect.priority,statusNames[defect.status]||defect.status||'open',when].join(' · ');
   card.append(title,badges);
   if(defect.description){const p=document.createElement('p');p.textContent=defect.description;card.append(p)}
-  if(defect.assigned_to){const p=document.createElement('p');p.className='help';p.textContent='Zugewiesen an: '+(staff.find(x=>x.user_id===defect.assigned_to)?.name||defect.assigned_to.slice(0,8));card.append(p)}
+  if(defect.assigned_to){const p=document.createElement('p');p.className='help';p.textContent='Zugewiesen an: '+(state.staff.find(x=>x.user_id===defect.assigned_to)?.name||defect.assigned_to.slice(0,8));card.append(p)}
   if(facility&&isManager(facility)){
    const manage=document.createElement('div');manage.className='manage';
    const statusLabel=document.createElement('label');statusLabel.textContent='Bearbeitungsstatus';
@@ -109,7 +109,7 @@ async function loadDefects(){
    for(const [value,label] of Object.entries(statusNames)){const o=document.createElement('option');o.value=value;o.textContent=label;statusSelect.append(o)}statusSelect.value=defect.status||'open';
    const assignLabel=document.createElement('label');assignLabel.textContent='Zuweisen an';
    const assign=document.createElement('select');const none=document.createElement('option');none.value='';none.textContent='Nicht zugewiesen';assign.append(none);
-   const eligible=[...new Map(staff.filter(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||m.facility_id===facility.id)).map(m=>[m.user_id,m])).values()];
+   const eligible=[...new Map(state.staff.filter(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||m.facility_id===facility.id)).map(m=>[m.user_id,m])).values()];
    for(const member of eligible){const o=document.createElement('option');o.value=member.user_id;o.textContent=member.name;assign.append(o)}assign.value=defect.assigned_to||'';
    const noteLabel=document.createElement('label');noteLabel.textContent='Bearbeitungsvermerk';
    const note=document.createElement('textarea');note.placeholder='Was wurde veranlasst oder erledigt?';note.maxLength=2000;note.style.minHeight='70px';
@@ -142,7 +142,7 @@ async function loadDefects(){
   const {data:events,error:historyError}=await supabase.from('defect_events').select('created_at,action,note,actor_id').eq('defect_id',defect.id).order('created_at',{ascending:false}).limit(8);
   if(historyError){history.textContent='Verlauf nicht verfügbar: '+historyError.message}
   else if(!events.length){history.textContent='Noch keine Bearbeitungsänderungen.'}
-  else{history.replaceChildren();for(const event of events){const line=document.createElement('div');const person=staff.find(m=>m.user_id===event.actor_id)?.name||'Benutzer';line.textContent=new Date(event.created_at).toLocaleString('de-DE')+' · '+person+' · '+event.action+(event.note?' · '+event.note:'');history.append(line)}}
+  else{history.replaceChildren();for(const event of events){const line=document.createElement('div');const person=state.staff.find(m=>m.user_id===event.actor_id)?.name||'Benutzer';line.textContent=new Date(event.created_at).toLocaleString('de-DE')+' · '+person+' · '+event.action+(event.note?' · '+event.note:'');history.append(line)}}
   box.append(card);
  }
 }
