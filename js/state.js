@@ -3,5 +3,6 @@ export const state = {
   busy: false,
   notificationSupport: true,
   settingsRows: [],
-  refreshTimer: null
+  refreshTimer: null,
+  accessibleFacilities: []
 };
