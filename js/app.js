@@ -1,14 +1,11 @@
 
-import {createClient} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import {supabase} from './supabase.js';
 import {priorityNames,roleNames,invitationStatus,statusNames} from './labels.js';
-const url='https://eqtrifscedpsngsysxvc.supabase.co';
-const key='sb_publishable_bvmFCNOdwzdCoDES7KTfdQ_MZWqlSfN';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
 let invitationFlow=initialHash.get('type')==='invite'||initialQuery.get('type')==='invite'||initialHash.get('type')==='recovery';
 const callbackError=initialHash.get('error_description')||initialQuery.get('error_description');
-const supabase=createClient(url,key,{auth:{detectSessionInUrl:true,autoRefreshToken:true,persistSession:true}});
 const el=id=>document.getElementById(id);
 let accessibleFacilities=[];let busy=false;let currentUser=null;let myMemberships=[];let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let refreshTimer=null;let ackRows=[];let settingsRows=[];let notificationSupport=true;
 const show=(id,on)=>el(id).classList.toggle('hidden',!on);
