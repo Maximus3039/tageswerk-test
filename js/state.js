@@ -1,4 +1,6 @@
 export const state = {
   updateInProgress: false,
-  busy: false
+  busy: false,
+  notificationSupport: true,
+  settingsRows: []
 };
