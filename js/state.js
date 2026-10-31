@@ -4,5 +4,6 @@ export const state = {
   notificationSupport: true,
   settingsRows: [],
   refreshTimer: null,
-  accessibleFacilities: []
+  accessibleFacilities: [],
+  myMemberships: []
 };

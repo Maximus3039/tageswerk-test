@@ -8,7 +8,7 @@ const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
 let invitationFlow=initialHash.get('type')==='invite'||initialQuery.get('type')==='invite'||initialHash.get('type')==='recovery';
 const callbackError=initialHash.get('error_description')||initialQuery.get('error_description');
-let currentUser=null;let myMemberships=[];let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let ackRows=[];
+let currentUser=null;let staff=[];let cachedDefects=[];let currentView="dashboard";let realtimeChannel=null;let ackRows=[];
 function draw(id,rows,empty){const node=el(id);node.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;node.append(p);return}for(const r of rows){const div=document.createElement('div');div.className='item';const b=document.createElement('strong');b.textContent=r.name;div.append(b);if(r.organization_id){const s=document.createElement('div');s.className='badge';s.textContent='Unternehmens-ID: '+r.organization_id.slice(0,8)+'…';div.append(s)}node.append(div)}}
 async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),supabase.from('facilities').select('id,name,organization_id').order('name')]);if(o.error)throw o.error;if(f.error)throw f.error;draw('orgs',o.data||[],'Keine sichtbaren Unternehmen.');draw('facilities',f.data||[],'Keine sichtbaren Betriebe.');state.accessibleFacilities=f.data||[];const select=el('defect-facility');const previous=select.value;select.replaceChildren();for(const facility of state.accessibleFacilities){const option=document.createElement('option');option.value=facility.id;option.textContent=facility.name;select.append(option)}if(state.accessibleFacilities.some(x=>x.id===previous))select.value=previous;el('save-defect').disabled=!state.accessibleFacilities.length;el('summary').textContent=`Verbindung erfolgreich. ${o.data.length} Unternehmen und ${f.data.length} Betriebe geladen.`;status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
 function inviteFacilityOptions(){const sel=el('invite-facility');const prev=sel.value;sel.replaceChildren();for(const f of state.accessibleFacilities.filter(isManager)){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}if([...sel.options].some(o=>o.value===prev))sel.value=prev;el('invite-card').classList.toggle('hidden',!sel.options.length);el('invite-submit').disabled=!sel.options.length;}
@@ -30,7 +30,7 @@ function renderStaff(){
   const badge=document.createElement('span');badge.className='badge '+(m.is_active===false?'inactive':'active');badge.textContent=m.is_active===false?'● Deaktiviert':'● Aktiv';
   row.append(name,meta,badge);
   const actions=document.createElement('div');actions.className='staff-actions';
-  const canChange=m.user_id!==currentUser?.id && !!m.email && (m.role==='employee'||myMemberships.some(x=>x.is_active!==false&&x.role==='company_admin'&&x.organization_id===m.organization_id));
+  const canChange=m.user_id!==currentUser?.id && !!m.email && (m.role==='employee'||state.myMemberships.some(x=>x.is_active!==false&&x.role==='company_admin'&&x.organization_id===m.organization_id));
   const edit=document.createElement('button');edit.type='button';edit.className='secondary';edit.textContent='✎ Namen bearbeiten';
   const form=document.createElement('form');form.className='employee-edit hidden';
   const label=document.createElement('label');label.textContent='Vollständiger Name';
@@ -56,7 +56,7 @@ function renderStaff(){
   row.append(actions,form);box.append(row);
  }
 }
-async function manageStaff(remove){const facility=state.accessibleFacilities.find(f=>f.id===el('staff-facility').value);const email=el('staff-email').value.trim();const role=el('staff-role').value;const msg=el('staff-message');if(!facility||!email){msg.className='error';msg.textContent='Bitte Betrieb und E-Mail eingeben.';return}if(role==='facility_manager'&&!myMemberships.some(m=>m.organization_id===facility.organization_id&&m.role==='company_admin')){msg.className='error';msg.textContent='Nur die Geschäftsführung kann Betriebsleitungen ernennen.';return}el('staff-save').disabled=true;msg.className='help';msg.textContent='Wird gespeichert …';try{const {data,error}=await supabase.rpc('manage_facility_membership',{p_email:email,p_facility_id:facility.id,p_role:role,p_remove:remove});if(error)throw error;msg.className='ok';msg.textContent='✓ '+data;await loadPermissions();await loadDefects()}catch(e){msg.className='error';msg.textContent='Fehler: '+e.message}finally{el('staff-save').disabled=false}}
+async function manageStaff(remove){const facility=state.accessibleFacilities.find(f=>f.id===el('staff-facility').value);const email=el('staff-email').value.trim();const role=el('staff-role').value;const msg=el('staff-message');if(!facility||!email){msg.className='error';msg.textContent='Bitte Betrieb und E-Mail eingeben.';return}if(role==='facility_manager'&&!state.myMemberships.some(m=>m.organization_id===facility.organization_id&&m.role==='company_admin')){msg.className='error';msg.textContent='Nur die Geschäftsführung kann Betriebsleitungen ernennen.';return}el('staff-save').disabled=true;msg.className='help';msg.textContent='Wird gespeichert …';try{const {data,error}=await supabase.rpc('manage_facility_membership',{p_email:email,p_facility_id:facility.id,p_role:role,p_remove:remove});if(error)throw error;msg.className='ok';msg.textContent='✓ '+data;await loadPermissions();await loadDefects()}catch(e){msg.className='error';msg.textContent='Fehler: '+e.message}finally{el('staff-save').disabled=false}}
 el('staff-form').addEventListener('submit',e=>{e.preventDefault();manageStaff(false)});
 
 el('refresh-staff').addEventListener('click',async()=>{try{await loadPermissions();status('✓ Mitarbeiterliste aktualisiert.')}catch(e){status(e.message,true)}});
@@ -67,7 +67,7 @@ async function loadPermissions(){
  ]);
  if(members.error)throw members.error;
  if(people.error)throw people.error;
- myMemberships=(members.data||[]).filter(m=>m.user_id===currentUser?.id&&m.is_active!==false);
+ state.myMemberships=(members.data||[]).filter(m=>m.user_id===currentUser?.id&&m.is_active!==false);
  const profiles=new Map((people.data||[]).map(p=>[p.id,p.full_name]));
  staff=(members.data||[]).map(m=>({...m,name:profiles.get(m.user_id)||'Mitarbeiter '+m.user_id.slice(0,8)}));
  const managerFacilities=state.accessibleFacilities.filter(isManager);
@@ -85,7 +85,7 @@ async function loadPermissions(){
  }
  staffFacilityOptions();inviteFacilityOptions();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();
 }
-function isManager(facility){return myMemberships.some(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||(m.role==='facility_manager'&&m.facility_id===facility.id)))}
+function isManager(facility){return state.myMemberships.some(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||(m.role==='facility_manager'&&m.facility_id===facility.id)))}
 async function loadDefects(){
  const box=el('defect-list');box.replaceChildren();const info=document.createElement('p');info.className='muted';info.textContent='Mängel werden geladen …';box.append(info);
  const {data,error}=await supabase.from('defects').select('id,title,description,priority,status,facility_id,assigned_to,created_at').order('created_at',{ascending:false}).limit(1000);
