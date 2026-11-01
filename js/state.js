@@ -6,5 +6,10 @@ export const state = {
   refreshTimer: null,
   accessibleFacilities: [],
   myMemberships: [],
-  staff: []
+  staff: [],
+  currentUser: null,
+  cachedDefects: [],
+  ackRows: [],
+  realtimeChannel: null,
+  currentView: "dashboard"
 };
