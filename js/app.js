@@ -4,6 +4,7 @@ import {priorityNames,roleNames,invitationStatus,statusNames} from './labels.js'
 import {el,show,status} from './utils.js';
 import {state} from './state.js';
 import {isManager,loadPermissionData} from './permissions.js';
+import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation} from './auth.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
@@ -124,29 +125,22 @@ async function loadDefects(){
   box.append(card);
  }
 }
-el('defect-form').addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await supabase.auth.getUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await supabase.from('defects').insert(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;el('save-defect').disabled=!state.accessibleFacilities.length}});
+el('defect-form').addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await getCurrentUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await supabase.from('defects').insert(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;el('save-defect').disabled=!state.accessibleFacilities.length}});
 el('refresh-defects').addEventListener('click',loadDefects);
 el('defect-filter').addEventListener('change',()=>{el('nav-mine').classList.toggle('active',el('defect-filter').value==='mine');el('nav-all').classList.toggle('active',el('defect-filter').value!=='mine');loadDefects()});
 for(const [id,mode] of [['nav-mine','mine'],['nav-all','all']])el(id).addEventListener('click',()=>{el('defect-filter').value=mode;el('defect-filter').dispatchEvent(new Event('change'));el('defect-list').scrollIntoView({behavior:'smooth',block:'start'})});
-async function acceptInvitation(){
- const {data,error}=await supabase.rpc('accept_staff_invitation');
- if(error)throw error;
- if(data?.success)return data;
- // No invitation is a valid outcome for previously registered managers.
- return data;
-}
 async function update(){
  if(state.updateInProgress)return;
  state.updateInProgress=true;
  try{
-  const {data:{user},error}=await supabase.auth.getUser();
+  const {data:{user},error}=await getCurrentUser();
   if(error && !['Auth session missing!','Auth session missing'].includes(error.message))throw error;
   state.currentUser=user||null;
   el('account').replaceChildren();
   if(user){
    const label=document.createElement('span');label.textContent=user.email+' ';
    const b=document.createElement('button');b.className='secondary';b.textContent='Abmelden';
-   b.onclick=async()=>{const {error}=await supabase.auth.signOut();if(error){status(error.message,true);return}invitationFlow=false;if(state.realtimeChannel){await supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}state.cachedDefects=[];state.ackRows=[];await update()};
+   b.onclick=async()=>{const {error}=await signOut();if(error){status(error.message,true);return}invitationFlow=false;if(state.realtimeChannel){await supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}state.cachedDefects=[];state.ackRows=[];await update()};
    el('account').append(label,b);
   }
   if(user && invitationFlow){
@@ -170,9 +164,9 @@ el('setup-form').addEventListener('submit',async e=>{
  if(password.length<12||password!==el('setup-confirm').value){msg.className='error';msg.textContent='Bitte ein Passwort mit mindestens 12 Zeichen eingeben und identisch wiederholen.';return}
  btn.disabled=true;msg.className='help';msg.textContent='Zugang wird eingerichtet …';
  try{
-  const {data:{user},error:authError}=await supabase.auth.getUser();
+  const {data:{user},error:authError}=await getCurrentUser();
   if(authError||!user)throw new Error('Der Einladungslink ist abgelaufen. Bitte um eine neue Einladung bitten.');
-  const {error:pwError}=await supabase.auth.updateUser({password});
+  const {error:pwError}=await updateUser({password});
   if(pwError)throw pwError;
   const result=await acceptInvitation();
   if(!result?.success){msg.className='error';msg.textContent='Passwort gespeichert, aber die Betriebszuordnung ist noch offen: '+(result?.message||'Keine versendete Einladung gefunden.')+' Bitte Betriebsleitung kontaktieren.';return}
@@ -182,7 +176,7 @@ el('setup-form').addEventListener('submit',async e=>{
  }catch(err){msg.className='error';msg.textContent='Einrichtung fehlgeschlagen: '+err.message}
  finally{btn.disabled=false}
 });
-el('form').addEventListener('submit',async e=>{e.preventDefault();el('submit').disabled=true;status('Anmeldung wird geprüft …');try{const {error}=await supabase.auth.signInWithPassword({email:el('email').value.trim(),password:el('password').value});if(error)throw error;el('password').value='';await update()}catch(err){status('Anmeldung fehlgeschlagen: '+err.message,true)}finally{el('submit').disabled=false}});
+el('form').addEventListener('submit',async e=>{e.preventDefault();el('submit').disabled=true;status('Anmeldung wird geprüft …');try{const {error}=await signInWithPassword({email:el('email').value.trim(),password:el('password').value});if(error)throw error;el('password').value='';await update()}catch(err){status('Anmeldung fehlgeschlagen: '+err.message,true)}finally{el('submit').disabled=false}});
 
 // Tageswerk 2.9: navigation and dashboard. RLS on Supabase remains authoritative.
 function navigate(view){state.currentView=view;for(const v of ['dashboard','defects','more'])show('view-'+v,view==='dashboard'?v==='dashboard':view==='more'?v==='more':v==='defects');
