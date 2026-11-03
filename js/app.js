@@ -5,6 +5,7 @@ import {el,show,status} from './utils.js';
 import {state} from './state.js';
 import {isManager,loadPermissionData} from './permissions.js';
 import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation} from './auth.js';
+import './meter-import.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
