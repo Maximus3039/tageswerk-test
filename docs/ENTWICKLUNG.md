@@ -36,9 +36,22 @@ npm run test:entwicklung
 npm run test:ui:entwicklung
 ```
 
-`npm test` prüft Syntax, Rollen, Excel-Konverter, Zählerzuordnung, historische Uhrzeiten, Vorschau, Importbestätigung, Übernahme, Duplikatschutz und die Zählerregeln. `npm run test:ui` prüft Anmeldung, Importkarte, Vorschau und die gesperrte Übernahme auf Desktop und Smartphone. GitHub Actions führt diese beiden Befehle aus. `npm run test:entwicklung` und `npm run test:ui:entwicklung` bleiben erhalten und prüfen dieselben Import- und Zählerfälle.
+`npm test` prüft Syntax, Rollen, die sichtbare Betriebsgrenze, Excel-Konverter, Zählerzuordnung, historische Uhrzeiten, Vorschau, Importbestätigung, Übernahme, Duplikatschutz, die Zählerregeln und die simulierte Mandantentrennung. `npm run test:ui` prüft Anmeldung, Importkarte, Vorschau und die gesperrte Übernahme auf Desktop und Smartphone. GitHub Actions führt `npm test` und `npm run test:ui` aus und damit auch die Betriebsgrenze und die simulierte Mandantentrennung. `npm run test:entwicklung` und `npm run test:ui:entwicklung` bleiben erhalten.
+
+Die Mandantentests simulieren Mitgliedschaften im Browsercode. Sie beweisen nicht, dass die Datenbank einen Mitarbeiter von einem fremden Betrieb fernhält.
 
 Die SQL-Dateien `tageswerk_2_9_*_tests.sql` bleiben manuelle Prüfungen. GitHub Actions führt sie nicht aus.
+
+## SQL-Stand am 9. November 2026
+
+Keine dieser Dateien erneut ausführen.
+
+- `tageswerk_2_9_historical_import.sql` und `tageswerk_2_9_historical_import_fix_01.sql` sind installiert und liegen im Repository. Die Übernahme von drei Testablesungen ist erfolgt.
+- `tageswerk_2_9_migration.sql` enthält die ältere Fassung von `tageswerk_prepare_reading`. Ein erneutes Ausführen würde die Importfassung zurücksetzen. Die Datei ist nicht Teil des Repository-Stands.
+- `tageswerk_2_9_consumption_periods.sql` und `tageswerk_2_9_consumption_calendar.sql` tragen den Hinweis „noch nicht ausführen“. Die View und die Kalenderfunktion waren am 9. November über die API lesbar. Der Hinweis ist damit veraltet. Die Dateien bleiben lokal.
+- `tageswerk_2_9_meter_replacement.sql` trägt denselben Hinweis. Die Funktion war am 9. November vorhanden. Nicht aufrufen und nicht erneut ausführen.
+- `tageswerk_2_9_meter_reactivation_guard.sql` ist die neuere Fassung von `tageswerk_prepare_meter` und war zum letzten Abgleich nicht die installierte Fassung. Nicht ausführen.
+- Richtlinien für Mängel, Mitgliedschaften, Einladungen und Profile liegen nicht im Repository. `pg_policies` ist über die API nicht lesbar. Die Oberfläche filtert zusätzlich. Das ersetzt die fehlende Datenbankprüfung nicht.
 
 ## Git
 

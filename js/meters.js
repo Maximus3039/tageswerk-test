@@ -2,6 +2,7 @@ import {supabase} from './supabase.js';
 import {el} from './utils.js';
 import {state} from './state.js';
 import {mediumNames,unitNames,meterStatusNames,intervalNames,readingTypeNames} from './labels.js';
+import {membershipCoversFacility} from './permissions.js';
 
 const scheduleNames={current:'Aktuell',soon:'Bald fällig',overdue:'Überfällig'};
 const soonWindowMs=3*24*60*60*1000;
@@ -40,7 +41,7 @@ export function unitsForMedium(medium){return mediumUnits[medium]||[]}
 
 export function membershipAllowsMeterAdmin(facility,memberships,userId){
  if(!facility||!userId)return false;
- return (memberships||[]).some(m=>m.user_id===userId&&m.is_active===true&&m.organization_id===facility.organization_id&&((m.role==='company_admin'&&m.facility_id===null)||(m.role==='facility_manager'&&m.facility_id===facility.id)));
+ return (memberships||[]).some(m=>m.user_id===userId&&membershipCoversFacility(facility,m,false));
 }
 
 export function meterDraftError(draft){
@@ -61,7 +62,7 @@ export function meterDraftError(draft){
 
 export function membershipAllowsMeterReading(facility,memberships,userId){
  if(!facility||!userId)return false;
- return (memberships||[]).some(m=>m.user_id===userId&&m.is_active===true&&m.organization_id===facility.organization_id&&((m.role==='company_admin'&&m.facility_id===null)||((m.role==='facility_manager'||m.role==='employee')&&m.facility_id===facility.id)));
+ return (memberships||[]).some(m=>m.user_id===userId&&membershipCoversFacility(facility,m,true));
 }
 
 export function readingDraftError(draft){
