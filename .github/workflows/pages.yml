@@ -1,0 +1,93 @@
+name: GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/pages.yml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Geprüften Release holen
+        uses: actions/checkout@v4
+        with:
+          ref: 3f85020f1e15f307f6d8a73598da2fed78ec2ad7
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Anwendungsdateien vorbereiten
+        run: node scripts/prepare-netlify.mjs
+
+      - name: Veröffentlichung prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -type f -printf '%P\n' | sort > /tmp/pages-actual.txt
+          cat > /tmp/pages-expected.txt <<'EOF'
+          css/app.css
+          icon-192.png
+          icon-512.png
+          index.html
+          js/app.js
+          js/auth.js
+          js/labels.js
+          js/meter-import-profiles.js
+          js/meter-import-review.js
+          js/meter-import-store.js
+          js/meter-import.js
+          js/meters.js
+          js/mobile.js
+          js/operations-controls.js
+          js/operations-store.js
+          js/operations-ui.js
+          js/operations.js
+          js/permissions.js
+          js/state.js
+          js/supabase.js
+          js/utils.js
+          manifest.webmanifest
+          service-worker.js
+          vendor/xlsx.full.min.js
+          EOF
+          sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
+          diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
+          grep -q '<title>Tageswerk 3.2</title>' dist/index.html
+          grep -q 'src="./js/app.js"' dist/index.html
+          grep -q 'href="./css/app.css"' dist/index.html
+          grep -q 'href="./manifest.webmanifest"' dist/index.html
+          grep -q "register('./service-worker.js')" dist/index.html
+          grep -q '"name": "Tageswerk 3.2"' dist/manifest.webmanifest
+          grep -q '"start_url": "./"' dist/manifest.webmanifest
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.2'" dist/service-worker.js
+          grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
+          if grep -R -E -n 'service_role|sb_secret_' dist; then
+            exit 1
+          fi
+
+      - name: Seitenpaket bereitstellen
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Auf der bestehenden Adresse veröffentlichen
+        id: deployment
+        uses: actions/deploy-pages@v4
