@@ -1,0 +1,24 @@
+---
+description: Eigenständige Entwicklung in der bestehenden Tageswerk-Architektur
+alwaysApply: true
+---
+
+# Entwicklung
+
+Tageswerk bleibt eine Vanilla-ES-Modul-PWA. Kein Frameworkwechsel und keine zweite Implementierung einer vorhandenen Funktion.
+
+- Vorhandene Module zuerst lesen. Neue Logik an `js/app.js`, `js/meters.js` und die Import-Module anschließen.
+- Gemeinsamen Zustand nur über `export const state` in `js/state.js` teilen. `permissions.js`, `auth.js` und `meters.js` importieren `app.js` nicht.
+- Verbrauch nicht speichern. Ablesungen speichern den Stand; Auswertungen berechnen den Verbrauch.
+- Fehler aus der eigenen Änderung selbst beheben und die betroffene Funktion danach erneut prüfen.
+- Oberflächen für Desktop und schmale Viewports mitdenken.
+- Nach einem größeren Paket einmal berichten: Ergebnis, Dateien, Tests, behobene Fehler, nötige Freigaben. Keine Zwischenberichte nach jeder Kleinigkeit.
+- Nur nachfragen, wenn eine fachliche Entscheidung oder eine Freigabegrenze erreicht ist.
+
+```javascript
+// Zustand erweitern, nicht ein zweites State-Objekt anlegen
+import {state} from './state.js';
+state.accessibleFacilities = facilities;
+```
+
+Der historische Excel-Import hat eine Vorschau und noch keine endgültige Übernahme. Diese Übernahme nicht nebenbei einbauen und keine historischen Zählerstände selbst importieren.

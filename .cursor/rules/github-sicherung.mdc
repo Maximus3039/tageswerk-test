@@ -1,23 +1,27 @@
 ---
-description: Nach jedem abgeschlossenen Entwicklungsschritt Prüfungen ausführen und die GitHub-Sicherung auf modularisierung vorbereiten
+description: Entwicklung auf modularisierung, Commits nur nach ausdrücklicher Freigabe
 alwaysApply: true
 ---
 
-# Sicherung nach einem Entwicklungsschritt
+# Git
 
-Repository: `Maximus3039/tageswerk-test`. Entwicklung nur auf `modularisierung`. `main` nicht auschecken, nicht committen und nicht pushen.
+Repository: `Maximus3039/tageswerk-test`. Gearbeitet wird auf `modularisierung`. `main` nicht auschecken, nicht ändern, nicht mergen und nicht pushen.
 
-Wenn ein Entwicklungsschritt abgeschlossen ist:
+- Bestehende uncommittete Änderungen erhalten. Dateien anderer Arbeitsschritte nicht überschreiben oder zurücksetzen.
+- Keine automatischen Commits, Pushes, Force-Pushes oder Deployments.
+- Die Entwicklung nicht nach jedem Schritt für eine Commit-Freigabe unterbrechen. Erst das Paket fertigstellen, prüfen und dann berichten.
+- Commit und Push nur nach ausdrücklicher Freigabe. Vorher Dateiliste und Commit-Nachricht nennen und nur diese Dateien stagen.
+- Keine Zugangsdaten, keine `.env` und keine vertraulichen Dateien stagen.
 
-1. Verfügbare Prüfungen ausführen, mindestens `node --check` für geänderte JavaScript-Dateien und `git diff --check`.
-2. Den Diff auf Fehler, unbeabsichtigte Dateien und Änderungen prüfen, die nicht zum Schritt gehören.
-3. Stoppen, wenn eine Prüfung fehlschlägt oder der Diff unerwartet ist.
-4. Erforderliche manuelle Browsertests nennen. Sie ersetzen keine fehlgeschlagene Prüfung.
-5. Commit und Push erst nach ausdrücklicher Freigabe. Vorher Dateiliste und Commit-Nachricht nennen.
-6. Nur freigegebene Dateien stagen. Keine Zugangsdaten, keine `.env` und keine vertraulichen Dateien.
-7. Mit `git push` auf `origin/modularisierung` übertragen. Kein Force-Push und kein Merge.
-8. Prüfen, dass `HEAD` und `origin/modularisierung` dieselbe Commit-ID haben. Bei Abweichung stoppen und melden.
+Vor einem freigegebenen Commit:
 
-Ohne Freigabe keine Datenbankänderung, kein Commit und kein Push. Bei einem Authentifizierungsfehler stoppen und die Anmeldung erklären, ohne Token oder Passwörter zu verlangen.
+1. `npm test` und bei Oberflächenänderungen `npm run test:ui` ausführen.
+2. `git diff --check` und den Diff auf fremde Änderungen prüfen.
+3. Bei einem Authentifizierungsfehler stoppen und die Anmeldung erklären, ohne Token oder Passwörter zu verlangen.
+4. Nur nach `origin/modularisierung` pushen. Danach `HEAD` und `origin/modularisierung` vergleichen und bei Abweichung stoppen.
 
-Beispiel: Nach dem Auslagern einer Variablen nach `js/state.js` die Prüfungen ausführen, offene Browsertests nennen und auf die Freigabe warten, bevor nur die genannten Dateien committed und gepusht werden.
+```powershell
+git add js/state.js
+git commit -m "Zustand für die Betriebsauswahl an einer Stelle halten."
+git push origin modularisierung
+```
