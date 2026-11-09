@@ -34,4 +34,29 @@ test('Mitarbeiter und deaktivierte Leitungen verwalten den Betrieb nicht', () =>
   {organization_id: organization, facility_id: facility.id, role: 'facility_manager', is_active: false}
  ];
  assert.equal(isManager(facility), false);
+
+ state.myMemberships = [
+  {organization_id: organization, facility_id: null, role: 'company_admin', is_active: false}
+ ];
+ assert.equal(isManager(facility), false);
+ assert.equal(isManager(otherFacility), false);
+});
+
+test('Nur eine ausdrückliche Aktivmitgliedschaft berechtigt zur Verwaltung', () => {
+ state.myMemberships = [
+  {organization_id: organization, facility_id: facility.id, role: 'facility_manager', is_active: null}
+ ];
+ assert.equal(isManager(facility), false);
+
+ state.myMemberships = [
+  {organization_id: organization, facility_id: null, role: 'company_admin', is_active: null}
+ ];
+ assert.equal(isManager(facility), false);
+
+ state.myMemberships = [
+  {organization_id: organization, facility_id: facility.id, role: 'company_admin', is_active: true}
+ ];
+ assert.equal(isManager(facility), false);
+ assert.equal(isManager(otherFacility), false);
+ assert.equal(isManager(foreignFacility), false);
 });

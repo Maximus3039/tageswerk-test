@@ -33,7 +33,7 @@ function renderStaff(){
   const badge=document.createElement('span');badge.className='badge '+(m.is_active===false?'inactive':'active');badge.textContent=m.is_active===false?'● Deaktiviert':'● Aktiv';
   row.append(name,meta,badge);
   const actions=document.createElement('div');actions.className='staff-actions';
-  const canChange=m.user_id!==state.currentUser?.id && !!m.email && (m.role==='employee'||state.myMemberships.some(x=>x.is_active!==false&&x.role==='company_admin'&&x.organization_id===m.organization_id));
+  const canChange=m.user_id!==state.currentUser?.id && !!m.email && (m.role==='employee'||state.myMemberships.some(x=>x.is_active===true&&x.role==='company_admin'&&x.facility_id==null&&x.organization_id===m.organization_id));
   const edit=document.createElement('button');edit.type='button';edit.className='secondary';edit.textContent='✎ Namen bearbeiten';
   const form=document.createElement('form');form.className='employee-edit hidden';
   const label=document.createElement('label');label.textContent='Vollständiger Name';
@@ -90,7 +90,7 @@ async function loadDefects(){
    for(const [value,label] of Object.entries(statusNames)){const o=document.createElement('option');o.value=value;o.textContent=label;statusSelect.append(o)}statusSelect.value=defect.status||'open';
    const assignLabel=document.createElement('label');assignLabel.textContent='Zuweisen an';
    const assign=document.createElement('select');const none=document.createElement('option');none.value='';none.textContent='Nicht zugewiesen';assign.append(none);
-   const eligible=[...new Map(state.staff.filter(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||m.facility_id===facility.id)).map(m=>[m.user_id,m])).values()];
+   const eligible=[...new Map(state.staff.filter(m=>m.is_active===true&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||m.facility_id===facility.id)).map(m=>[m.user_id,m])).values()];
    for(const member of eligible){const o=document.createElement('option');o.value=member.user_id;o.textContent=member.name;assign.append(o)}assign.value=defect.assigned_to||'';
    const noteLabel=document.createElement('label');noteLabel.textContent='Bearbeitungsvermerk';
    const note=document.createElement('textarea');note.placeholder='Was wurde veranlasst oder erledigt?';note.maxLength=2000;note.style.minHeight='70px';

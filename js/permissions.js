@@ -2,7 +2,7 @@ import {supabase} from './supabase.js';
 import {state} from './state.js';
 import {status} from './utils.js';
 
-export function isManager(facility){return state.myMemberships.some(m=>m.is_active!==false&&m.organization_id===facility.organization_id&&(m.role==='company_admin'||(m.role==='facility_manager'&&m.facility_id===facility.id)))}
+export function isManager(facility){return !!facility&&state.myMemberships.some(m=>m.is_active===true&&m.organization_id===facility.organization_id&&((m.role==='company_admin'&&m.facility_id==null)||(m.role==='facility_manager'&&m.facility_id===facility.id)))}
 
 export async function loadPermissionData(){
  const [members,people]=await Promise.all([
