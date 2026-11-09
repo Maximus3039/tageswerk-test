@@ -12,5 +12,6 @@ export const state = {
   cachedDefects: [],
   ackRows: [],
   realtimeChannel: null,
-  currentView: "dashboard"
+  currentView: "dashboard",
+  operationPreview: null
 };

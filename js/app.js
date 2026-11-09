@@ -7,6 +7,7 @@ import {isManager,loadPermissionData,mayAppointManager} from './permissions.js';
 import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation} from './auth.js';
 import {clearFacilityMeters,loadFacilityMeters,resetMeterEditor} from './meters.js';
 import {syncMeterImportAccess} from './meter-import.js';
+import {mountOperations, refreshOperationMetrics} from './operations-ui.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
@@ -191,6 +192,7 @@ function navigate(view){state.currentView=view;for(const v of ['dashboard','defe
  window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.view)));
+mountOperations();
 let consumptionFacilityTouched=false;
 function resetConsumptionPanel(){resetMeterEditor();consumptionFacilityTouched=false;show('consumption-card',false);el('open-consumption').classList.remove('active');el('consumption-facility').replaceChildren();clearFacilityMeters();show('consumption-empty',false);show('consumption-panel',true)}
 function populateConsumptionFacility(){const sel=el('consumption-facility');const previous=sel.value;const facilities=state.accessibleFacilities;const dashboard=el('dashboard-facility').value;sel.replaceChildren();const available=facilities.length>0;show('consumption-empty',!available);show('consumption-panel',available);if(!available)return;for(const f of facilities){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}if(consumptionFacilityTouched&&facilities.some(f=>f.id===previous))sel.value=previous;else if(facilities.some(f=>f.id===dashboard))sel.value=dashboard;else sel.value=facilities[0].id}
@@ -200,7 +202,7 @@ function dashRows(target,rows,empty){const box=el(target);box.replaceChildren();
 function renderDashboard(){if(!el('metric-open'))return;const selected=el('dashboard-facility').value;const data=state.cachedDefects.filter(d=>selected==='all'||d.facility_id===selected);const count=(pred)=>data.filter(pred).length;
  for(const [id,n] of [['open',count(d=>d.status==='open')],['progress',count(d=>d.status==='in_progress')],['resolved',count(d=>d.status==='resolved')],['review',count(d=>d.status==='pending_review')],['mine',count(d=>d.assigned_to===state.currentUser?.id&&d.status!=='resolved')],['critical',count(d=>d.priority==='critical'&&d.status!=='resolved')]])el('metric-'+id).textContent=n;
  dashRows('dash-mine',data.filter(d=>d.assigned_to===state.currentUser?.id&&d.status!=='resolved'),'Keine offenen persönlichen Aufgaben.');dashRows('dash-recent',[...data].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)),'Noch keine Mängel.');
- const facilities=el('dash-facilities');facilities.replaceChildren();for(const f of state.accessibleFacilities.filter(f=>selected==='all'||f.id===selected)){const row=document.createElement('div');row.className='item';row.textContent=f.name+' · '+data.filter(d=>d.facility_id===f.id&&d.status!=='resolved').length+' nicht abgeschlossene Mängel';facilities.append(row)}if(!facilities.childNodes.length)facilities.textContent='Keine berechtigten Betriebe.';renderCriticalAlerts(data)}
+ const facilities=el('dash-facilities');facilities.replaceChildren();for(const f of state.accessibleFacilities.filter(f=>selected==='all'||f.id===selected)){const row=document.createElement('div');row.className='item';row.textContent=f.name+' · '+data.filter(d=>d.facility_id===f.id&&d.status!=='resolved').length+' nicht abgeschlossene Mängel';facilities.append(row)}if(!facilities.childNodes.length)facilities.textContent='Keine berechtigten Betriebe.';renderCriticalAlerts(data);refreshOperationMetrics()}
 el('dashboard-facility').addEventListener('change',()=>{if(!consumptionFacilityTouched){populateConsumptionFacility();if(!el('consumption-card').classList.contains('hidden'))loadFacilityMeters(el('consumption-facility').value)}renderDashboard()});
 el('open-consumption').addEventListener('click',()=>{const card=el('consumption-card');const open=card.classList.contains('hidden');if(open&&!consumptionFacilityTouched)populateConsumptionFacility();show('consumption-card',open);el('open-consumption').classList.toggle('active',open);if(open){loadFacilityMeters(el('consumption-facility').value);card.scrollIntoView({behavior:'smooth',block:'start'})}});
 el('consumption-facility').addEventListener('change',()=>{consumptionFacilityTouched=true;loadFacilityMeters(el('consumption-facility').value)});

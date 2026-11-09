@@ -9,6 +9,7 @@ Tageswerk ist eine mehrbetriebliche PWA ohne Framework. Supabase ist das Backend
 - `js/auth.js`, `js/permissions.js`, `js/state.js`: Anmeldung, Rollen, gemeinsamer Zustand
 - `js/supabase.js`: Supabase-Client
 - `js/meters.js`: Zähler, Ablesungen, Verbrauchsanzeige
+- `js/operations.js`, `js/operations-store.js`, `js/operations-ui.js`: Tagesbericht, Kontrollgang, Wartung, Beschaffung
 - `js/meter-import*.js`: historischer Excel-Import mit Vorschau und bestätigter Übernahme
 - `vendor/xlsx.full.min.js`: lokales SheetJS
 - `tageswerk_2_9_*.sql`: vorbereitete Migrationen und SQL-Prüfungen
@@ -52,6 +53,19 @@ Keine dieser Dateien erneut ausführen.
 - `tageswerk_2_9_meter_replacement.sql` trägt denselben Hinweis. Die Funktion war am 9. November vorhanden. Nicht aufrufen und nicht erneut ausführen.
 - `tageswerk_2_9_meter_reactivation_guard.sql` ist die neuere Fassung von `tageswerk_prepare_meter` und war zum letzten Abgleich nicht die installierte Fassung. Nicht ausführen.
 - Richtlinien für Mängel, Mitgliedschaften, Einladungen und Profile liegen nicht im Repository. `pg_policies` ist über die API nicht lesbar. Die Oberfläche filtert zusätzlich. Das ersetzt die fehlende Datenbankprüfung nicht.
+
+## Betriebsmodule 3.0
+
+Tagesbericht, Kontrollgang, Wartung und Beschaffung nutzen die vorhandene Rollenprüfung und die vorhandene Terminberechnung aus der Zählerfälligkeit. Die Oberfläche schreibt über die angemeldete Sitzung. Ein Eintrag erscheint erst, wenn die Datenbank die gespeicherte Zeile zurückgibt. Fehlt eine Tabelle oder Funktion, bleibt das Formular stehen und die Meldung nennt die fehlende Installation. Eine E-Mail-Zusammenfassung wird nur als Text vorbereitet und nicht versendet.
+
+Installationsreihenfolge nach Freigabe. Die Dateien legen neue Tabellen und Funktionen an und ändern keine bestehenden Zähler- oder Mangelfunktionen. Datei 1 legt `tageswerk_bind_operation_facility` an. Die drei folgenden Dateien verwenden diese Funktion:
+
+1. `tageswerk_3_0_daily_reports.sql`
+2. `tageswerk_3_0_inspections.sql`
+3. `tageswerk_3_0_maintenance.sql`
+4. `tageswerk_3_0_procurement.sql`
+
+Voraussetzung ist die bereits installierte Funktion `tageswerk_meter_role`. Der nächste Wartungstermin wird nicht gespeichert. Nachträge laufen über `tageswerk_update_daily_report`, Kontrollgänge über die Funktionen in der zweiten Datei. Mitarbeiter können Bedarf melden; Genehmigen und Ablehnen prüft der Trigger `tageswerk_review_procurement`.
 
 ## Git
 
