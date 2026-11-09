@@ -235,4 +235,4 @@ function reviewMetersCsv(meters,choices,columns){
  return "\uFEFF"+lines.map(line=>line.join(";")).join("\r\n");
 }
 
-export {REVIEW_EXTRA,needsReview,substantiveHints,parseStand,analyzeReview,reviewRows,assessMerge,mergeImpact,canMerge,dateSpan,reviewReadingsCsv,reviewMetersCsv};
+export {REVIEW_EXTRA,needsReview,substantiveHints,parseStand,analyzeReview,reviewRows,seriesKey,assessMerge,mergeImpact,canMerge,dateSpan,reviewReadingsCsv,reviewMetersCsv};

@@ -5,7 +5,8 @@ import {el,show,status} from './utils.js';
 import {state} from './state.js';
 import {isManager,loadPermissionData} from './permissions.js';
 import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation} from './auth.js';
-import './meter-import.js';
+import {clearFacilityMeters,loadFacilityMeters,resetMeterEditor} from './meters.js';
+import {syncMeterImportAccess} from './meter-import.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
@@ -64,7 +65,7 @@ el('staff-form').addEventListener('submit',e=>{e.preventDefault();manageStaff(fa
 el('refresh-staff').addEventListener('click',async()=>{try{await loadPermissions();status('✓ Mitarbeiterliste aktualisiert.')}catch(e){status(e.message,true)}});
 async function loadPermissions(){
  const managerFacilities=await loadPermissionData();
- staffFacilityOptions();inviteFacilityOptions();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();
+ staffFacilityOptions();inviteFacilityOptions();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();populateConsumptionFacility();syncMeterImportAccess();await loadFacilityMeters(el('consumption-facility').value);
 }
 async function loadDefects(){
  const box=el('defect-list');box.replaceChildren();const info=document.createElement('p');info.className='muted';info.textContent='Mängel werden geladen …';box.append(info);
@@ -155,7 +156,7 @@ async function update(){
    try{const result=await acceptInvitation();if(result?.success)status('✓ Einladung angenommen.');}
    catch(e){status('Einladungsannahme nicht möglich: '+e.message,true)}
    await load();
-  }else status(callbackError?'Einladungslink ungültig oder abgelaufen: '+callbackError:'Bitte mit deinem Tageswerk-Testkonto anmelden.',!!callbackError);
+  }else{resetConsumptionPanel();syncMeterImportAccess();status(callbackError?'Einladungslink ungültig oder abgelaufen: '+callbackError:'Bitte mit deinem Tageswerk-Testkonto anmelden.',!!callbackError);}
  }catch(e){status('Verbindung/Anmeldung fehlgeschlagen: '+e.message,true);show('login',true);show('app',false)}
  finally{state.updateInProgress=false}
 }
@@ -187,6 +188,9 @@ function navigate(view){state.currentView=view;for(const v of ['dashboard','defe
  window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.view)));
+let consumptionFacilityTouched=false;
+function resetConsumptionPanel(){resetMeterEditor();consumptionFacilityTouched=false;show('consumption-card',false);el('open-consumption').classList.remove('active');el('consumption-facility').replaceChildren();clearFacilityMeters();show('consumption-empty',false);show('consumption-panel',true)}
+function populateConsumptionFacility(){const sel=el('consumption-facility');const previous=sel.value;const facilities=state.accessibleFacilities;const dashboard=el('dashboard-facility').value;sel.replaceChildren();const available=facilities.length>0;show('consumption-empty',!available);show('consumption-panel',available);if(!available)return;for(const f of facilities){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}if(consumptionFacilityTouched&&facilities.some(f=>f.id===previous))sel.value=previous;else if(facilities.some(f=>f.id===dashboard))sel.value=dashboard;else sel.value=facilities[0].id}
 function populateDashboardFilters(){const sel=el('dashboard-facility');const old=sel.value;sel.replaceChildren();const all=document.createElement('option');all.value='all';all.textContent='Alle berechtigten Betriebe';sel.append(all);for(const f of state.accessibleFacilities){const opt=document.createElement('option');opt.value=f.id;opt.textContent=f.name;sel.append(opt)}sel.value=state.accessibleFacilities.some(f=>f.id===old)?old:'all';
  const settings=el('settings-facility');const previous=settings.value;settings.replaceChildren();for(const f of state.accessibleFacilities.filter(isManager)){const o=document.createElement('option');o.value=f.id;o.textContent=f.name;settings.append(o)}if([...settings.options].some(o=>o.value===previous))settings.value=previous;el('settings-card').classList.toggle('hidden',!settings.options.length)}
 function dashRows(target,rows,empty){const box=el(target);box.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;box.append(p);return}for(const d of rows.slice(0,8)){const item=document.createElement('div');item.className='dash-row';item.tabIndex=0;item.setAttribute('role','button');const title=document.createElement('strong');title.textContent=d.title;title.className='priority-'+(d.priority||'normal');const detail=document.createElement('small');detail.textContent=(state.accessibleFacilities.find(f=>f.id===d.facility_id)?.name||'Betrieb')+' · '+(priorityNames[d.priority]||'Normal')+' · '+(statusNames[d.status]||d.status);item.append(title,detail);const go=()=>{navigate('defects');el('defect-filter').value='all';loadDefects()};item.onclick=go;item.onkeydown=e=>{if(e.key==='Enter')go()};box.append(item)}}
@@ -195,6 +199,8 @@ function renderDashboard(){if(!el('metric-open'))return;const selected=el('dashb
  dashRows('dash-mine',data.filter(d=>d.assigned_to===state.currentUser?.id&&d.status!=='resolved'),'Keine offenen persönlichen Aufgaben.');dashRows('dash-recent',[...data].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)),'Noch keine Mängel.');
  const facilities=el('dash-facilities');facilities.replaceChildren();for(const f of state.accessibleFacilities.filter(f=>selected==='all'||f.id===selected)){const row=document.createElement('div');row.className='item';row.textContent=f.name+' · '+data.filter(d=>d.facility_id===f.id&&d.status!=='resolved').length+' nicht abgeschlossene Mängel';facilities.append(row)}if(!facilities.childNodes.length)facilities.textContent='Keine berechtigten Betriebe.';renderCriticalAlerts(data)}
 el('dashboard-facility').addEventListener('change',renderDashboard);
+el('open-consumption').addEventListener('click',()=>{const card=el('consumption-card');const open=card.classList.contains('hidden');if(open&&!consumptionFacilityTouched)populateConsumptionFacility();show('consumption-card',open);el('open-consumption').classList.toggle('active',open);if(open){loadFacilityMeters(el('consumption-facility').value);card.scrollIntoView({behavior:'smooth',block:'start'})}});
+el('consumption-facility').addEventListener('change',()=>{consumptionFacilityTouched=true;loadFacilityMeters(el('consumption-facility').value)});
 async function loadCriticalAcks(){if(!state.currentUser)return;const {data,error}=await supabase.from('critical_defect_acknowledgements').select('defect_id,acknowledged_by,acknowledged_at');if(error){state.notificationSupport=false;state.ackRows=[];return}state.notificationSupport=true;state.ackRows=data||[];renderDashboard()}
 function renderCriticalAlerts(data){const box=el('dashboard-alerts');box.replaceChildren();const critical=data.filter(d=>d.priority==='critical'&&d.status!=='resolved');if(!critical.length)return;const heading=document.createElement('div');heading.className='alert-box';const h=document.createElement('strong');h.textContent='🚨 '+critical.length+' kritische Mängel';heading.append(h);const p=document.createElement('p');p.className='help';p.textContent='Bei akuter Gefahr sofort die betrieblichen Sicherheits- und Meldewege nutzen. Die App ersetzt keine Notfallalarmierung.';heading.append(p);if(!state.notificationSupport){const note=document.createElement('p');note.className='help';note.textContent='Kenntnisnahme noch nicht eingerichtet. Bitte die SQL-Migration ausführen.';heading.append(note)}
  for(const d of critical){const f=state.accessibleFacilities.find(x=>x.id===d.facility_id);if(!f)continue;const row=document.createElement('div');row.className='item';const acknowledged=state.ackRows.filter(a=>a.defect_id===d.id);const title=document.createElement('strong');title.textContent=d.title+' · '+f.name;row.append(title);const sub=document.createElement('p');sub.className='help';sub.textContent=acknowledged.length?'Kenntnisnahme dokumentiert: '+new Date(acknowledged[0].acknowledged_at).toLocaleString('de-DE'):'Noch keine Kenntnisnahme dokumentiert';row.append(sub);

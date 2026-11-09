@@ -9,7 +9,7 @@ Tageswerk ist eine mehrbetriebliche PWA ohne Framework. Supabase ist das Backend
 - `js/auth.js`, `js/permissions.js`, `js/state.js`: Anmeldung, Rollen, gemeinsamer Zustand
 - `js/supabase.js`: Supabase-Client
 - `js/meters.js`: Zähler, Ablesungen, Verbrauchsanzeige
-- `js/meter-import*.js`: Excel-Import bis zur serverseitigen Vorschau
+- `js/meter-import*.js`: historischer Excel-Import mit Vorschau und bestätigter Übernahme
 - `vendor/xlsx.full.min.js`: lokales SheetJS
 - `tageswerk_2_9_*.sql`: vorbereitete Migrationen und SQL-Prüfungen
 
@@ -21,7 +21,7 @@ JavaScript, HTML und CSS selbstständig ändern. Vorhandene Funktionen wiederver
 
 Vorher fragen bei SQL-Ausführung, Änderungen an betrieblichen Daten, Sicherheitsarchitektur, Löschen größerer Bereiche, Commits, Pushes, Deployments und neuen kostenpflichtigen Diensten.
 
-Historische Zählerstände nicht selbst importieren. Die Vorschau ist vorhanden. Die endgültige Übernahme fehlt bewusst.
+Historische Zählerstände nicht selbst importieren. Die Vorschau und die bestätigte Übernahme sind in der Oberfläche vorhanden. Ein echter Import braucht eine eigene Freigabe.
 
 SQL-Dateien dürfen vorbereitet werden. Ausführen in Supabase braucht eine Freigabe. Vorhandene Migrationen nicht erneut einspielen. Zweisprachige Blattkürzel wie `Jan 90` liest der Excel-Konverter als Jahr 2090. Testdateien nutzen vierstellige Jahre, zum Beispiel `Jan 2020`.
 
@@ -32,9 +32,11 @@ Die App bleibt ohne Laufzeitabhängigkeiten. Entwicklungsabhängigkeit ist nur P
 ```powershell
 npm test
 npm run test:ui
+npm run test:entwicklung
+npm run test:ui:entwicklung
 ```
 
-`npm test` prüft die Syntax und die lokalen Tests für Rollen, Zählerrechte und Excel-Import. `npm run test:ui` öffnet die Anwendung lokal, blockiert Supabase und prüft Anmeldung und Importkarte auf Desktop und Smartphone.
+`npm test` prüft Syntax, Rollen, Excel-Konverter, Zählerzuordnung, historische Uhrzeiten, Vorschau, Importbestätigung, Übernahme, Duplikatschutz und die Zählerregeln. `npm run test:ui` prüft Anmeldung, Importkarte, Vorschau und die gesperrte Übernahme auf Desktop und Smartphone. GitHub Actions führt diese beiden Befehle aus. `npm run test:entwicklung` und `npm run test:ui:entwicklung` bleiben erhalten und prüfen dieselben Import- und Zählerfälle.
 
 Die SQL-Dateien `tageswerk_2_9_*_tests.sql` bleiben manuelle Prüfungen. GitHub Actions führt sie nicht aus.
 

@@ -12,5 +12,7 @@ test('Die serverseitige Importvorschau ist in der lokalen Entwicklung vorhanden'
  });
  await page.goto('/');
  await expect(page.locator('#import-preview-start')).toHaveCount(1);
+ await expect(page.locator('#import-commit-start')).toHaveCount(1);
+ await expect(page.locator('#import-commit-start')).toBeDisabled();
  expect(writes).toEqual([]);
 });
