@@ -39,6 +39,8 @@ import {
  saveReportDefect,
  saveTemperatureAcknowledgement,
  saveTemperaturePoint,
+ saveTemperaturePointActive,
+ saveTemperaturePointChange,
  saveTemperatureReading,
  supabaseOperationDb
 } from './operations-store.js';
@@ -46,7 +48,8 @@ import {
 const markNames = {ok: 'In Ordnung', notable: 'Auffällig', unchecked: 'Nicht geprüft'};
 const statusNames = {submitted: 'Gemeldet', approved: 'Genehmigt', rejected: 'Abgelehnt', open: 'Offen', completed: 'Abgeschlossen'};
 let installed = false;
-let controlsInstalled = false;
+let temperatureInstalled = false;
+let materialsInstalled = false;
 let section = 'reports';
 let loading = null;
 let pendingFacilityId = '';
@@ -113,8 +116,10 @@ async function commit(task) {
 async function refreshFromDatabase(announce) {
  const loaded = await loadOperations(database(), actor(), context());
  installed = loaded.installed === true;
- controlsInstalled = loaded.controlsInstalled === true;
- state.controlsInstalled = controlsInstalled;
+ temperatureInstalled = loaded.temperatureInstalled === true;
+ materialsInstalled = loaded.materialsInstalled === true;
+ state.temperatureInstalled = temperatureInstalled;
+ state.materialsInstalled = materialsInstalled;
  if (!loaded.ok) {
   if (!state.operationPreview) state.operationPreview = emptyOperations();
   if (announce) say('error', loaded.error);
@@ -455,37 +460,73 @@ function amountLabel(value) {
  return new Intl.NumberFormat('de-DE', {maximumFractionDigits: 3}).format(Number(value));
 }
 
-function controlsNote(host) {
- if (controlsInstalled) return;
+function missingNote(host, ready, message) {
+ if (ready) return;
  const note = document.createElement('p');
  note.className = 'help';
- note.textContent = 'Temperatur und Bestand sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.';
+ note.textContent = message;
  host.append(note);
 }
 
+function intervalLabel(point) {
+ const count = Number(point.intervalCount) || 1;
+ if ((point.intervalUnit || 'day') === 'day' && count === 1) return 'täglich';
+ if (point.intervalUnit === 'week' && count === 1) return 'wöchentlich';
+ if (point.intervalUnit === 'month' && count === 1) return 'monatlich';
+ const unit = point.intervalUnit === 'week' ? 'Wochen' : point.intervalUnit === 'month' ? 'Monate' : 'Tage';
+ return `alle ${count} ${unit}`;
+}
+
 function renderTemperature(host, current) {
- controlsNote(host);
+ missingNote(host, temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
  if (isManager(current)) {
   const name = input();
   const location = input();
   const minimum = input();
   const maximum = input();
+  const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), 'day');
+  const count = input('1');
   minimum.inputMode = 'decimal';
   maximum.inputMode = 'decimal';
-  host.append(labeled('Messstelle', name), labeled('Standort', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum));
-  host.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value}, actor(), new Date().toISOString(), context()))));
+  count.inputMode = 'numeric';
+  host.append(labeled('Messstelle', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
+  host.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
  }
  const missing = new Set(missingTemperaturePoints(data, current.id, new Date().toISOString()).map(point => point.id));
- for (const point of data.temperaturePoints.filter(item => item.facilityId === current.id)) {
+ const points = data.temperaturePoints.filter(item => item.facilityId === current.id).sort((left, right) => Number(left.active === false) - Number(right.active === false) || left.name.localeCompare(right.name, 'de'));
+ for (const point of points) {
   const readings = data.temperatureReadings.filter(item => item.pointId === point.id);
-  const row = item(point.name, [`${point.location} · zulässig ${amountLabel(point.minC)} bis ${amountLabel(point.maxC)} °C`, missing.has(point.id) ? 'Heute fehlt die Kontrolle.' : 'Heute ist eine Messung vorhanden.'], missing.has(point.id));
-  const value = input();
-  value.inputMode = 'decimal';
-  const note = input();
-  note.placeholder = 'Bemerkung, falls nötig';
-  row.append(labeled('Gemessener Wert °C', value), labeled('Bemerkung', note));
-  row.append(button('Messung speichern', 'secondary', () => commit(() => saveTemperatureReading(database(), bundle(), point.id, {value: value.value, note: note.value}, actor(), new Date().toISOString(), context()))));
+  const status = point.active === false ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : missing.has(point.id) ? 'Die Kontrolle ist fällig.' : 'Die nächste Kontrolle ist noch nicht fällig.';
+  const row = item(`${point.name}${point.active === false ? ' · deaktiviert' : ''}`, [`${point.location} · zulässig ${amountLabel(point.minC)} bis ${amountLabel(point.maxC)} °C · ${intervalLabel(point)}`, status], missing.has(point.id));
+  if (isManager(current)) {
+   const actions = document.createElement('div');
+   actions.className = 'point-actions';
+   const editor = document.createElement('div');
+   editor.className = 'point-editor hidden';
+   const name = input(point.name);
+   const location = input(point.location);
+   const minimum = input(String(point.minC));
+   const maximum = input(String(point.maxC));
+   const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), point.intervalUnit || 'day');
+   const count = input(String(point.intervalCount || 1));
+   minimum.inputMode = 'decimal';
+   maximum.inputMode = 'decimal';
+   count.inputMode = 'numeric';
+   editor.append(labeled('Bezeichnung', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
+   editor.append(button('Änderungen speichern', '', () => commit(() => saveTemperaturePointChange(database(), bundle(), point.id, {name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
+   actions.append(button('Bearbeiten', 'secondary', () => { editor.classList.toggle('hidden'); }));
+   actions.append(button(point.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveTemperaturePointActive(database(), bundle(), point.id, point.active === false, actor(), new Date().toISOString(), context()))));
+   row.append(actions, editor);
+  }
+  if (point.active !== false) {
+   const value = input();
+   value.inputMode = 'decimal';
+   const note = input();
+   note.placeholder = 'Bemerkung, falls nötig';
+   row.append(labeled('Gemessener Wert °C', value), labeled('Bemerkung', note));
+   row.append(button('Messung speichern', 'secondary', () => commit(() => saveTemperatureReading(database(), bundle(), point.id, {value: value.value, note: note.value}, actor(), new Date().toISOString(), context()))));
+  }
   for (const reading of readings) {
    const line = document.createElement('p');
    line.className = 'help';
@@ -496,7 +537,7 @@ function renderTemperature(host, current) {
    const line = document.createElement('p');
    line.className = 'help';
    line.textContent = alert.status === 'open'
-    ? `Offene Warnung: ${amountLabel(alert.valueC)} °C`
+    ? `Offene Warnung: ${amountLabel(alert.valueC)} °C außerhalb von ${amountLabel(alert.minC)} bis ${amountLabel(alert.maxC)} °C`
     : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.remark}`;
    row.append(line);
    if (alert.status !== 'open') continue;
@@ -522,7 +563,7 @@ function renderTemperature(host, current) {
 }
 
 function renderStock(host, current) {
- controlsNote(host);
+ missingNote(host, materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
  if (isManager(current)) {
   const name = input();
@@ -576,7 +617,8 @@ function renderStock(host, current) {
 }
 
 function renderNotices(host, current) {
- controlsNote(host);
+ missingNote(host, temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
+ missingNote(host, materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const notices = facilityNotices(bundle(), state.cachedDefects, {
   facilityIds: [current.id],
   now: new Date().toISOString(),

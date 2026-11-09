@@ -405,6 +405,28 @@ export function berlinDay(value) {
  return new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Berlin'}).format(date);
 }
 
+function addCalendarDays(day, count) {
+ const [year, month, date] = day.split('-').map(Number);
+ return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
+}
+
+export function temperatureCheckDue(point, readings, now) {
+ if (!point || point.active === false) return false;
+ const latest = (readings || []).filter(reading => reading.pointId === point.id).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt)))[0];
+ if (!latest) return true;
+ const unit = point.intervalUnit || 'day';
+ const count = Number(point.intervalCount) || 1;
+ if (unit === 'day') {
+  const today = berlinDay(now);
+  const measured = berlinDay(latest.measuredAt);
+  if (!today || !measured) return true;
+  return addCalendarDays(measured, count) <= today;
+ }
+ const due = nextReadingAt(latest.measuredAt, unit, count);
+ if (!due) return true;
+ return due.getTime() <= new Date(now).getTime();
+}
+
 export function materialStock(movements, materialId) {
  let total = 0;
  for (const movement of movements || []) {
@@ -419,14 +441,13 @@ export function materialStock(movements, materialId) {
 export function operationMetrics(bundle, facilityIds, today, now) {
  const allowed = new Set(facilityIds || []);
  const inScope = item => allowed.has(item.facilityId);
- const measuredToday = new Set((bundle?.temperatureReadings || []).filter(reading => inScope(reading) && berlinDay(reading.measuredAt) === today).map(reading => reading.pointId));
  return {
   reportsToday: (bundle?.reports || []).filter(report => inScope(report) && report.reportDate === today).length,
   inspectionsOverdue: (bundle?.runs || []).filter(run => inScope(run) && inspectionOverdue(run, now)).length,
   maintenanceOverdue: (bundle?.assets || []).filter(asset => inScope(asset) && assetOverdue(asset, now)).length,
   procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length,
   temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
-  temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && point.active !== false && !measuredToday.has(point.id)).length,
+  temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && temperatureCheckDue(point, bundle?.temperatureReadings, now)).length,
   stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length
  };
 }

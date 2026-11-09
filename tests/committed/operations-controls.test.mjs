@@ -11,8 +11,10 @@ import {
  recordMovement,
  recordTemperature,
  roleSessionConfirmation,
+ setTemperaturePointActive,
  stockOf,
- temperatureDefectDraft
+ temperatureDefectDraft,
+ updateTemperaturePoint
 } from '../../js/operations-controls.js';
 import {emptyOperations, materialStock, operationMetrics} from '../../js/operations.js';
 import {
@@ -22,6 +24,8 @@ import {
  saveProcurementRequest,
  saveTemperatureAcknowledgement,
  saveTemperaturePoint,
+ saveTemperaturePointActive,
+ saveTemperaturePointChange,
  saveTemperatureReading
 } from '../../js/operations-store.js';
 
@@ -172,7 +176,7 @@ function controlDb(options = {}) {
   rows,
   async select(table) {
    calls.push(['select', table]);
-   if (options.missingControls && ['temperature_points', 'temperature_readings', 'temperature_alerts', 'materials', 'material_movements'].includes(table)) {
+   if ((options.missingControls && ['temperature_points', 'temperature_readings', 'temperature_alerts', 'materials', 'material_movements'].includes(table)) || (options.missingTables || []).includes(table)) {
     return {data: null, error: {code: 'PGRST205', message: 'schema cache'}};
    }
    return {data: (rows[table] || []).map(row => ({...row})), error: null};
@@ -230,6 +234,14 @@ function controlDb(options = {}) {
    if (!current || options.emptyUpdate) return {data: null, error: null};
    if (table === 'temperature_alerts' && current.status !== 'open') {
     return {data: null, error: {code: 'P0001', message: 'Diese Warnung wurde bereits quittiert.'}};
+   }
+   if (table === 'temperature_points') {
+    Object.assign(current, patch);
+    return {data: {...current}, error: null};
+   }
+   if (table === 'temperature_alerts') {
+    Object.assign(current, patch, {acknowledged_by: options.userId, acknowledged_at: now});
+    return {data: {...current}, error: null};
    }
    Object.assign(current, patch, {acknowledged_by: options.userId, acknowledged_at: now});
    return {data: {...current}, error: null};
@@ -328,7 +340,66 @@ test('Materialbuchung, Beschaffung und fremde Zeilen folgen der Datenbank', asyn
  const kept = await loadOperations(controlDb({missingControls: true, rows: {...hiddenRows, daily_reports: [{id: 'report-1', organization_id: facility.organization_id, facility_id: facility.id, report_date: '2026-11-09', incidents: 'Pumpe', handover: '', created_by: employee.userId, created_at: now}]}}), employee, context);
  assert.equal(kept.ok, true);
  assert.equal(kept.installed, true);
- assert.equal(kept.controlsInstalled, false);
+ assert.equal(kept.temperatureInstalled, false);
+ assert.equal(kept.materialsInstalled, false);
  assert.equal(kept.bundle.reports.length, 1);
  assert.equal(kept.bundle.temperaturePoints.length, 0);
+ hiddenRows.temperature_points.push({id: 'own-point', organization_id: facility.organization_id, facility_id: facility.id, name: 'Becken', location: 'Halle', minimum_celsius: '24', maximum_celsius: '28', active: true, created_by: manager.userId, created_at: now});
+ const onlyTemperature = await loadOperations(controlDb({missingTables: ['materials', 'material_movements'], rows: hiddenRows}), employee, context);
+ assert.equal(onlyTemperature.temperatureInstalled, true);
+ assert.equal(onlyTemperature.materialsInstalled, false);
+ assert.equal(onlyTemperature.bundle.temperaturePoints.some(point => point.id === 'own-point'), true);
+ assert.equal(onlyTemperature.bundle.temperaturePoints.some(point => point.id === 'foreign-point'), false);
+ assert.equal(onlyTemperature.bundle.materials.length, 0);
+ const onlyMaterials = await loadOperations(controlDb({missingTables: ['temperature_points', 'temperature_readings', 'temperature_alerts'], rows: {...hiddenRows, materials: [{id: 'material-1', organization_id: facility.organization_id, facility_id: facility.id, name: 'Chlor', location: 'Lager', unit: 'kg', minimum_quantity: '1', created_by: manager.userId, created_at: now}]}}), employee, context);
+ assert.equal(onlyMaterials.temperatureInstalled, false);
+ assert.equal(onlyMaterials.materialsInstalled, true);
+ assert.equal(onlyMaterials.bundle.temperaturePoints.length, 0);
+ assert.equal(onlyMaterials.bundle.materials.length, 1);
+});
+
+test('Messstellen bleiben in der Historie und folgen dem Kontrollintervall', async () => {
+ const created = createTemperaturePoint(emptyOperations(), {facility, name: 'Becken', location: 'Halle', minimum: '24', maximum: '28', intervalUnit: 'day', intervalCount: 1}, manager, now);
+ const measured = recordTemperature(created.bundle, created.point.id, {value: '31', note: 'Zu warm'}, employee, now);
+ const previousAlert = measured.alert.minC;
+ const previousValue = measured.reading.valueC;
+ const changed = updateTemperaturePoint(measured.bundle, created.point.id, {name: 'Becken neu', location: 'Technik', minimum: '10', maximum: '12', intervalUnit: 'week', intervalCount: 2}, manager);
+ assert.equal(changed.ok, true);
+ assert.equal(changed.point.minC, '10');
+ assert.equal(changed.bundle.temperatureAlerts[0].minC, previousAlert);
+ assert.equal(changed.bundle.temperatureReadings[0].valueC, previousValue);
+ assert.equal(updateTemperaturePoint(measured.bundle, created.point.id, {name: 'Fremd', location: 'Weg', minimum: '1', maximum: '2'}, employee).ok, false);
+ assert.equal(updateTemperaturePoint(measured.bundle, created.point.id, {name: 'Fremd', location: 'Weg', minimum: '1', maximum: '2'}, otherEmployee).ok, false);
+ const paused = setTemperaturePointActive(changed.bundle, created.point.id, false, manager);
+ assert.equal(missingTemperaturePoints(paused.bundle, facility.id, now).length, 0);
+ assert.equal(paused.bundle.temperatureReadings.length, 1);
+ const resumed = setTemperaturePointActive(paused.bundle, created.point.id, true, admin);
+ assert.equal(missingTemperaturePoints(resumed.bundle, facility.id, now).length, 0);
+ const weekly = updateTemperaturePoint(measured.bundle, created.point.id, {name: 'Becken', location: 'Halle', minimum: '24', maximum: '28', intervalUnit: 'week', intervalCount: 1}, manager);
+ assert.equal(missingTemperaturePoints(weekly.bundle, facility.id, '2026-11-15T12:00:00.000Z').length, 0);
+ assert.equal(missingTemperaturePoints(weekly.bundle, facility.id, '2026-11-16T12:00:01.000Z').length, 1);
+ const db = controlDb({userId: manager.userId});
+ const saved = await saveTemperaturePoint(db, emptyOperations(), {facility, name: 'Becken', location: 'Halle', minimum: '24', maximum: '28'}, manager, now, context);
+ const reading = await saveTemperatureReading(controlDb({userId: employee.userId, rows: db.rows}), saved.bundle, saved.point.id, {value: '31', note: 'Zu warm'}, employee, now, context);
+ const originalMin = reading.alert.minC;
+ const edited = await saveTemperaturePointChange(db, reading.bundle, saved.point.id, {name: 'Technikbecken', location: 'Keller', minimum: '1', maximum: '3', intervalUnit: 'month', intervalCount: 1}, manager, now, context);
+ assert.equal(edited.ok, true);
+ assert.equal(edited.point.name, 'Technikbecken');
+ assert.equal(edited.point.intervalUnit, 'month');
+ assert.equal(edited.bundle.temperatureAlerts.find(item => item.id === reading.alert.id).minC, originalMin);
+ assert.equal(edited.bundle.temperatureReadings.find(item => item.id === reading.reading.id).valueC, reading.reading.valueC);
+ const employeeDb = controlDb({userId: employee.userId, rows: db.rows});
+ const refused = await saveTemperaturePointChange(employeeDb, edited.bundle, saved.point.id, {name: 'Anders', location: 'Weg', minimum: '1', maximum: '2'}, employee, now, context);
+ assert.equal(refused.ok, false);
+ assert.equal(employeeDb.calls.some(call => call[0] === 'update'), false);
+ const inactivePoint = await saveTemperaturePointActive(employeeDb, edited.bundle, saved.point.id, false, employee, now, context);
+ assert.equal(inactivePoint.ok, false);
+ const deactivated = await saveTemperaturePointActive(db, edited.bundle, saved.point.id, false, manager, now, context);
+ assert.equal(deactivated.ok, true);
+ assert.equal(deactivated.point.active, false);
+ assert.equal(missingTemperaturePoints(deactivated.bundle, facility.id, now).length, 0);
+ assert.equal(deactivated.bundle.temperatureReadings.length, 1);
+ const reactivated = await saveTemperaturePointActive(db, deactivated.bundle, saved.point.id, true, admin, now, context);
+ assert.equal(reactivated.ok, true);
+ assert.equal(reactivated.point.active, true);
 });

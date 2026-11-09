@@ -14,5 +14,6 @@ export const state = {
   realtimeChannel: null,
   currentView: "dashboard",
   operationPreview: null,
-  controlsInstalled: false
+  temperatureInstalled: false,
+  materialsInstalled: false
 };

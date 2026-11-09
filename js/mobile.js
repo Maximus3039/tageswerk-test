@@ -34,7 +34,7 @@ function countLine(count, one, many) {
 export function homeLines(counts) {
  const lines = [
   countLine(counts.inspections, 'offener Kontrollgang', 'offene Kontrollgänge'),
-  counts.controlsInstalled
+  counts.temperatureInstalled
    ? countLine(counts.temperature, 'Temperaturkontrolle ausstehend', 'Temperaturkontrollen ausstehend')
    : 'Temperatur ist noch nicht in der Datenbank installiert.',
   countLine(counts.maintenance, 'Wartung fällig', 'Wartungen fällig'),
@@ -125,13 +125,13 @@ export function workAgenda(bundle, options = {}) {
  return items.sort((left, right) => rank[left.bucket] - rank[right.bucket] || String(left.dueAt).localeCompare(String(right.dueAt)) || left.title.localeCompare(right.title, 'de'));
 }
 
-export function agendaCounts(items, noticeCount, controlsInstalled) {
+export function agendaCounts(items, noticeCount, temperatureInstalled) {
  return {
   inspections: items.filter(item => item.forYou && item.kind === 'inspection').length,
   temperature: items.filter(item => item.forYou && item.kind === 'temperature').length,
   maintenance: items.filter(item => item.forYou && item.kind === 'maintenance' && item.bucket !== 'upcoming').length,
   notices: noticeCount,
-  controlsInstalled: controlsInstalled === true
+  temperatureInstalled: temperatureInstalled === true
  };
 }
 
@@ -245,7 +245,7 @@ export function paintMobile() {
  const items = bundle ? workAgenda(bundle, {facilityIds: ids, actor: current, now}) : [];
  const notices = bundle ? facilityNotices(bundle, state.cachedDefects, {facilityIds: ids, actor: current, now}) : [];
  const lines = bundle
-  ? homeLines(agendaCounts(items, notices.length, state.controlsInstalled))
+  ? homeLines(agendaCounts(items, notices.length, state.temperatureInstalled))
   : ['Die Betriebsdaten werden geladen.'];
  el('home-greeting').textContent = `${greeting()}!`;
  const selected = el('dashboard-facility');

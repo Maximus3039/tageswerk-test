@@ -4,7 +4,9 @@ import {
  createMaterial,
  createTemperaturePoint,
  recordMovement,
- recordTemperature
+ recordTemperature,
+ setTemperaturePointActive,
+ updateTemperaturePoint
 } from './operations-controls.js';
 import {
  assignInspection,
@@ -35,13 +37,8 @@ const tables = [
  'procurement_requests'
 ];
 
-const controlTables = [
- 'temperature_points',
- 'temperature_readings',
- 'temperature_alerts',
- 'materials',
- 'material_movements'
-];
+const temperatureTables = ['temperature_points', 'temperature_readings', 'temperature_alerts'];
+const materialTables = ['materials', 'material_movements'];
 
 export function supabaseOperationDb(supabase) {
  return {
@@ -260,6 +257,8 @@ function assemble(loaded, actor, context) {
    location: row.location || '',
    minC: String(row.minimum_celsius),
    maxC: String(row.maximum_celsius),
+   intervalUnit: row.interval_unit || 'day',
+   intervalCount: Number(row.interval_count) || 1,
    active: row.active !== false,
    createdBy: row.created_by,
    createdAt: row.created_at
@@ -334,36 +333,46 @@ async function readTable(db, table) {
  }
 }
 
+async function readGroup(db, loaded, names) {
+ const found = {};
+ for (const table of names) {
+  const result = await readTable(db, table);
+  if (result?.error) {
+   if (!missingTable(result.error)) return {ok: false, error: storageMessage(result.error)};
+   for (const name of names) loaded[name] = [];
+   return {ok: true, installed: false};
+  }
+  found[table] = result?.data || [];
+ }
+ Object.assign(loaded, found);
+ return {ok: true, installed: true};
+}
+
 export async function loadOperations(db, actor, context) {
  const loaded = {};
  for (const table of tables) {
   const result = await readTable(db, table);
   if (result?.error) {
    const missing = missingTable(result.error);
-   return {ok: false, installed: !missing, controlsInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
+   return {ok: false, installed: !missing, temperatureInstalled: false, materialsInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
   }
   loaded[table] = result?.data || [];
  }
- let controlsInstalled = true;
- for (const table of controlTables) {
-  const result = await readTable(db, table);
-  if (result?.error) {
-   if (missingTable(result.error)) {
-    controlsInstalled = false;
-    break;
-   }
-   return {ok: false, installed: true, controlsInstalled: false, error: storageMessage(result.error), bundle: assemble(loaded, actor, context)};
-  }
-  loaded[table] = result?.data || [];
- }
- if (!controlsInstalled) {
-  for (const table of controlTables) loaded[table] = [];
- }
- return {ok: true, installed: true, controlsInstalled, bundle: assemble(loaded, actor, context)};
+ const temperature = await readGroup(db, loaded, temperatureTables);
+ if (!temperature.ok) return {ok: false, installed: true, temperatureInstalled: false, materialsInstalled: false, error: temperature.error, bundle: assemble(loaded, actor, context)};
+ const materials = await readGroup(db, loaded, materialTables);
+ if (!materials.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: false, error: materials.error, bundle: assemble(loaded, actor, context)};
+ return {ok: true, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, bundle: assemble(loaded, actor, context)};
 }
 
 function owned(row, facility, actor) {
  return row?.facility_id === facility?.id && visible({...row, organization_id: row.organization_id || facility.organization_id}, actor);
+}
+
+function sameHistory(before, after, pointId) {
+ const reading = items => (items?.temperatureReadings || []).filter(item => item.pointId === pointId).map(item => `${item.id}|${item.valueC}|${item.note}`).sort().join('\n');
+ const alert = items => (items?.temperatureAlerts || []).filter(item => item.pointId === pointId).map(item => `${item.id}|${item.valueC}|${item.minC}|${item.maxC}|${item.status}|${item.remark}`).sort().join('\n');
+ return reading(before) === reading(after) && alert(before) === alert(after);
 }
 
 export async function saveDailyReport(db, bundle, draft, actor, now, context) {
@@ -644,6 +653,8 @@ export async function saveTemperaturePoint(db, bundle, draft, actor, now, contex
    location: local.point.location,
    minimum_celsius: local.point.minC,
    maximum_celsius: local.point.maxC,
+   interval_unit: local.point.intervalUnit,
+   interval_count: local.point.intervalCount,
    active: true
   });
  } catch (error) {
@@ -656,6 +667,53 @@ export async function saveTemperaturePoint(db, bundle, draft, actor, now, contex
  const loaded = await loadOperations(db, actor, context);
  const point = loaded.ok ? loaded.bundle.temperaturePoints.find(item => item.id === saved.data.id) : null;
  if (!point || point.facilityId !== draft.facility.id) return denied(bundle, 'Die Messstelle wurde nicht bestätigt.');
+ return {ok: true, id: point.id, bundle: loaded.bundle, point};
+}
+
+export async function saveTemperaturePointChange(db, bundle, pointId, draft, actor, now, context) {
+ const local = updateTemperaturePoint(bundle, pointId, draft, actor);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('temperature_points', pointId, {
+   name: local.point.name,
+   location: local.point.location,
+   minimum_celsius: local.point.minC,
+   maximum_celsius: local.point.maxC,
+   interval_unit: local.point.intervalUnit,
+   interval_count: local.point.intervalCount
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.name !== local.point.name || Number(saved.data.minimum_celsius) !== Number(local.point.minC) || Number(saved.data.maximum_celsius) !== Number(local.point.maxC)) {
+  return denied(bundle, saved.error || 'Die Messstelle wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const point = loaded.ok ? loaded.bundle.temperaturePoints.find(item => item.id === pointId) : null;
+ if (!point || point.name !== local.point.name || Number(point.minC) !== Number(local.point.minC) || point.intervalUnit !== local.point.intervalUnit || Number(point.intervalCount) !== Number(local.point.intervalCount)) {
+  return denied(bundle, 'Die Messstelle wurde nicht bestätigt.');
+ }
+ if (!sameHistory(bundle, loaded.bundle, pointId)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
+ return {ok: true, id: point.id, bundle: loaded.bundle, point};
+}
+
+export async function saveTemperaturePointActive(db, bundle, pointId, active, actor, now, context) {
+ const local = setTemperaturePointActive(bundle, pointId, active, actor);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('temperature_points', pointId, {active: local.point.active});
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || Boolean(saved.data.active) !== local.point.active) return denied(bundle, saved.error || 'Die Messstelle wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const point = loaded.ok ? loaded.bundle.temperaturePoints.find(item => item.id === pointId) : null;
+ if (!point || point.active !== local.point.active) return denied(bundle, 'Die Messstelle wurde nicht bestätigt.');
+ if (!sameHistory(bundle, loaded.bundle, pointId)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
  return {ok: true, id: point.id, bundle: loaded.bundle, point};
 }
 

@@ -5,7 +5,8 @@ import {
  createProcurement,
  emptyOperations,
  inspectionOverdue,
- materialStock
+ materialStock,
+ temperatureCheckDue
 } from './operations.js';
 
 // Die Sitzungen von Betriebsleitung und Mitarbeiter haben die Regeln von
@@ -68,11 +69,15 @@ function inScope(facilityId, organizationId, actor, ids) {
 export function temperaturePointDraftError(draft) {
  if (!draft?.facility?.id) return 'Bitte einen Betrieb auswählen.';
  if (!text(draft.name, 200)) return 'Bitte eine Bezeichnung für die Messstelle eintragen.';
- if (!text(draft.location, 200)) return 'Bitte den Standort eintragen.';
+ if (!text(draft.location, 200)) return 'Bitte den Bereich eintragen.';
  const minimum = celsius(draft.minimum);
  const maximum = celsius(draft.maximum);
  if (minimum === null || maximum === null) return 'Bitte den zulässigen Bereich mit einem Wert zwischen −50 und 200 °C eintragen.';
  if (Number(minimum) > Number(maximum)) return 'Der Mindestwert darf nicht über dem Höchstwert liegen.';
+ const unit = draft.intervalUnit || 'day';
+ const count = draft.intervalCount == null || draft.intervalCount === '' ? 1 : Number(draft.intervalCount);
+ if (!['day', 'week', 'month'].includes(unit)) return 'Bitte ein Kontrollintervall wählen.';
+ if (!Number.isInteger(count) || count < 1 || count > 365) return 'Bitte eine Intervallanzahl von 1 bis 365 eingeben.';
  return '';
 }
 
@@ -89,11 +94,39 @@ export function createTemperaturePoint(bundle, draft, actor, now) {
   location: text(draft.location, 200),
   minC: celsius(draft.minimum),
   maxC: celsius(draft.maximum),
+  intervalUnit: draft.intervalUnit || 'day',
+  intervalCount: Number(draft.intervalCount || 1),
   active: true,
   createdBy: actor.userId,
   createdAt: now
  };
  return {ok: true, bundle: carry(bundle, {temperaturePoints: [point, ...(bundle?.temperaturePoints || [])]}), point};
+}
+
+export function updateTemperaturePoint(bundle, pointId, draft, actor) {
+ const point = (bundle?.temperaturePoints || []).find(item => item.id === pointId);
+ if (!point) return {ok: false, error: 'Die Messstelle wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(point), actor)) return {ok: false, error: 'Messstellen ändert die Betriebsleitung oder Geschäftsführung.', bundle};
+ const error = temperaturePointDraftError({...draft, facility: facilityOf(point)});
+ if (error) return {ok: false, error, bundle};
+ const updated = {
+  ...point,
+  name: text(draft.name, 200),
+  location: text(draft.location, 200),
+  minC: celsius(draft.minimum),
+  maxC: celsius(draft.maximum),
+  intervalUnit: draft.intervalUnit || 'day',
+  intervalCount: Number(draft.intervalCount || 1)
+ };
+ return {ok: true, bundle: carry(bundle, {temperaturePoints: (bundle?.temperaturePoints || []).map(item => item.id === point.id ? updated : item), temperatureReadings: bundle?.temperatureReadings || [], temperatureAlerts: bundle?.temperatureAlerts || []}), point: updated};
+}
+
+export function setTemperaturePointActive(bundle, pointId, active, actor) {
+ const point = (bundle?.temperaturePoints || []).find(item => item.id === pointId);
+ if (!point) return {ok: false, error: 'Die Messstelle wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(point), actor)) return {ok: false, error: 'Messstellen aktiviert die Betriebsleitung oder Geschäftsführung.', bundle};
+ const updated = {...point, active: active === true};
+ return {ok: true, bundle: carry(bundle, {temperaturePoints: (bundle?.temperaturePoints || []).map(item => item.id === point.id ? updated : item), temperatureReadings: bundle?.temperatureReadings || [], temperatureAlerts: bundle?.temperatureAlerts || []}), point: updated};
 }
 
 export function temperatureReadingDraftError(draft) {
@@ -151,9 +184,7 @@ export function recordTemperature(bundle, pointId, draft, actor, now) {
 }
 
 export function missingTemperaturePoints(bundle, facilityId, now) {
- const day = berlinDay(now);
- const measured = new Set((bundle?.temperatureReadings || []).filter(reading => reading.facilityId === facilityId && berlinDay(reading.measuredAt) === day).map(reading => reading.pointId));
- return (bundle?.temperaturePoints || []).filter(point => point.facilityId === facilityId && point.active !== false && !measured.has(point.id));
+ return (bundle?.temperaturePoints || []).filter(point => point.facilityId === facilityId && temperatureCheckDue(point, bundle?.temperatureReadings, now));
 }
 
 export function acknowledgeTemperatureAlert(bundle, alertId, remark, actor, now) {
@@ -329,10 +360,9 @@ export function facilityNotices(bundle, defects, options) {
   push({id: `temperature-warning:${alert.id}`, facilityId: alert.facilityId, organizationId: alert.organizationId, kind: 'temperature-warning', title: point?.name || 'Temperaturwarnung', detail: `${alert.valueC} °C außerhalb von ${alert.minC} bis ${alert.maxC} °C.`, warn: true});
  }
  for (const point of bundle?.temperaturePoints || []) {
-  if (point.active === false || berlinDay(now) === '') continue;
-  const measured = (bundle?.temperatureReadings || []).some(reading => reading.pointId === point.id && berlinDay(reading.measuredAt) === today);
-  if (measured) continue;
-  push({id: `temperature-missing:${point.id}`, facilityId: point.facilityId, organizationId: point.organizationId, kind: 'temperature-missing', title: point.name || 'Temperaturkontrolle', detail: 'Für heute liegt keine Messung vor.', warn: true});
+  if (!temperatureCheckDue(point, bundle?.temperatureReadings, now)) continue;
+  const daily = (point.intervalUnit || 'day') === 'day' && Number(point.intervalCount || 1) === 1;
+  push({id: `temperature-missing:${point.id}`, facilityId: point.facilityId, organizationId: point.organizationId, kind: 'temperature-missing', title: point.name || 'Temperaturkontrolle', detail: daily ? 'Für heute liegt keine Messung vor.' : 'Die Kontrolle ist fällig.', warn: true});
  }
  for (const material of bundle?.materials || []) {
   if (!materialBelowMinimum(bundle, material)) continue;
