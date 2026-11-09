@@ -1,0 +1,11 @@
+*.sql
+.env
+.env.*
+testdaten/
+node_modules/
+tests/
+docs/
+scripts/
+test-results/
+playwright-report/
+blob-report/
