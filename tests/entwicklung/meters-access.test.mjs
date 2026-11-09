@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {membershipAllowsMeterAdmin, membershipAllowsMeterReading, readingInsertPayload, unitsForMedium} from '../js/meters.js';
+import {membershipAllowsMeterAdmin, membershipAllowsMeterReading, readingInsertPayload, unitsForMedium} from '../../js/meters.js';
 
 const userId = 'user-1';
 const facility = {id: 'fac-a', organization_id: 'org-a'};

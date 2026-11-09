@@ -20,7 +20,7 @@ jobs:
           cache: npm
       - name: Entwicklungswerkzeuge installieren
         run: npm ci
-      - name: Syntax und lokale Tests
+      - name: Syntax und Tests des gesicherten Stands
         run: npm test
       - name: Browser für Oberflächentests installieren
         run: npx playwright install --with-deps chromium

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {state} from '../js/state.js';
-import {isManager} from '../js/permissions.js';
+import {state} from '../../js/state.js';
+import {isManager} from '../../js/permissions.js';
 
 const organization = 'org-a';
 const facility = {id: 'fac-a', organization_id: organization};

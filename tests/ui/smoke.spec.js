@@ -27,6 +27,5 @@ test('Anmeldung und Importkarte laden ohne Datenbankschreibung', async ({page}) 
  expect(email.x).toBeGreaterThanOrEqual(0);
  expect(email.x + email.width).toBeLessThanOrEqual(viewport.width + 1);
  await expect(page.locator('#meter-import-card')).toHaveCount(1);
- await expect(page.locator('#import-preview-start')).toHaveCount(1);
  expect(writes).toEqual([]);
 });

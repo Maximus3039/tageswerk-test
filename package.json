@@ -3,8 +3,10 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/check-syntax.mjs",
-    "test": "node scripts/check-syntax.mjs && node --import ./tests/register.mjs --test tests/permissions.test.mjs tests/meters-access.test.mjs tests/excel-import.test.mjs",
-    "test:ui": "playwright test"
+    "test": "node scripts/check-syntax.mjs && node --import ./tests/register.mjs --test tests/committed/permissions.test.mjs tests/committed/excel-import.test.mjs",
+    "test:entwicklung": "node --import ./tests/register.mjs --test tests/entwicklung/excel-import.test.mjs tests/entwicklung/meters-access.test.mjs",
+    "test:ui": "playwright test",
+    "test:ui:entwicklung": "playwright test --config=playwright.entwicklung.config.js"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0"
