@@ -4,6 +4,14 @@ import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {priorityNames, intervalNames} from './labels.js';
 import {
+ facilityNotices,
+ materialBelowMinimum,
+ missingTemperaturePoints,
+ procurementFromStock,
+ stockOf,
+ temperatureDefectDraft
+} from './operations-controls.js';
+import {
  assetNextDue,
  assetOverdue,
  dailyReportEmail,
@@ -23,17 +31,24 @@ import {
  saveInspectionResult,
  saveInspectionTemplate,
  saveMaintenanceLog,
+ saveMaterial,
+ saveMaterialMovement,
  saveProcurementRequest,
  saveProcurementReview,
  saveReportDefect,
+ saveTemperatureAcknowledgement,
+ saveTemperaturePoint,
+ saveTemperatureReading,
  supabaseOperationDb
 } from './operations-store.js';
 
 const markNames = {ok: 'In Ordnung', notable: 'Auffällig', unchecked: 'Nicht geprüft'};
 const statusNames = {submitted: 'Gemeldet', approved: 'Genehmigt', rejected: 'Abgelehnt', open: 'Offen', completed: 'Abgeschlossen'};
 let installed = false;
+let controlsInstalled = false;
 let section = 'reports';
 let loading = null;
+let pendingFacilityId = '';
 
 function actor() {
  const user = state.currentUser;
@@ -90,6 +105,7 @@ async function commit(task) {
 async function refreshFromDatabase(announce) {
  const loaded = await loadOperations(database(), actor(), context());
  installed = loaded.installed === true;
+ controlsInstalled = loaded.controlsInstalled === true;
  if (!loaded.ok) {
   if (!state.operationPreview) state.operationPreview = emptyOperations();
   if (announce) say('error', loaded.error);
@@ -116,6 +132,70 @@ function paintOperationMetrics() {
  el('metric-inspections').textContent = String(metrics.inspectionsOverdue);
  el('metric-maintenance').textContent = String(metrics.maintenanceOverdue);
  el('metric-procurement').textContent = String(metrics.procurementOpen);
+ if (el('metric-temperature')) el('metric-temperature').textContent = String(metrics.temperatureOpen);
+ if (el('metric-temperature-missing')) el('metric-temperature-missing').textContent = String(metrics.temperatureMissing);
+ if (el('metric-stock')) el('metric-stock').textContent = String(metrics.stockLow);
+ paintNotices(ids);
+}
+
+function paintNotices(facilityIds) {
+ const host = el('dash-notices');
+ if (!host) return;
+ const notices = facilityNotices(bundle(), state.cachedDefects, {
+  facilityIds,
+  now: new Date().toISOString(),
+  actor: actor()
+ });
+ host.replaceChildren();
+ if (!notices.length) {
+  const empty = document.createElement('p');
+  empty.className = 'muted';
+  empty.textContent = 'Keine offenen Hinweise für die ausgewählten Betriebe.';
+  host.append(empty);
+  return;
+ }
+ for (const notice of notices) {
+  const row = document.createElement('div');
+  row.className = notice.warn ? 'dash-row is-overdue' : 'dash-row';
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  const title = document.createElement('strong');
+  const facilityName = state.accessibleFacilities.find(item => item.id === notice.facilityId)?.name || 'Betrieb';
+  title.textContent = notice.title;
+  const detail = document.createElement('small');
+  detail.textContent = `${facilityName} · ${notice.detail}`;
+  row.append(title, detail);
+  const open = () => showNotice(notice);
+  row.addEventListener('click', open);
+  row.addEventListener('keydown', event => { if (event.key === 'Enter') open(); });
+  host.append(row);
+ }
+}
+
+function showNotice(notice) {
+ if (String(notice.kind).startsWith('defect')) {
+  document.querySelector('[data-view="defects"]')?.click();
+  return;
+ }
+ const sections = {
+  'temperature-warning': 'temperature',
+  'temperature-missing': 'temperature',
+  'stock-low': 'stock',
+  'procurement-open': 'procurement',
+  'inspection-overdue': 'inspections',
+  'maintenance-overdue': 'maintenance'
+ };
+ section = sections[notice.kind] || 'notices';
+ pendingFacilityId = notice.facilityId;
+ for (const tab of document.querySelectorAll('[data-operation]')) tab.classList.toggle('active', tab.dataset.operation === section);
+ const card = el('operations-card');
+ if (card?.classList.contains('hidden')) {
+  el('open-operations')?.click();
+  return;
+ }
+ const select = el('operations-facility');
+ if (select && [...select.options].some(option => option.value === notice.facilityId)) select.value = notice.facilityId;
+ renderPanel('');
 }
 
 export function refreshOperationMetrics() {
@@ -299,7 +379,15 @@ function renderMaintenance(host, current) {
   const note = input();
   note.placeholder = 'Was wurde gewartet?';
   const defect = select([{value: '', label: 'Keinen Mangel verknüpfen'}, ...defectsFor(current.id).map(row => ({value: row.id, label: row.title}))]);
+  const materials = bundle().materials.filter(item => item.facilityId === current.id);
+  const used = input();
+  used.inputMode = 'decimal';
+  const material = select(materials.map(item => ({value: item.id, label: item.name})));
   row.append(labeled('Wartung dokumentieren', note), button('Als erledigt speichern', 'secondary', () => commit(() => saveMaintenanceLog(database(), bundle(), asset.id, note.value, actor(), new Date().toISOString(), context()))));
+  if (asset.logs[0] && materials.length) {
+   row.append(labeled('Benötigtes Material', material), labeled('Menge', used));
+   row.append(button('Material zur Wartung buchen', 'secondary', () => commit(() => saveMaterialMovement(database(), bundle(), {materialId: material.value, direction: 'out', quantity: used.value, note: `Wartung ${asset.name}`, maintenanceLogId: asset.logs[0].id}, actor(), new Date().toISOString(), context()))));
+  }
   row.append(labeled('Vorhandenen Mangel verknüpfen', defect), button('Mangel mit Anlage verknüpfen', 'secondary', () => {
    const chosen = defectsFor(current.id).find(row => row.id === defect.value);
    return commit(() => saveAssetDefect(database(), bundle(), asset.id, chosen));
@@ -336,6 +424,147 @@ function renderProcurement(host, current) {
  }
 }
 
+function amountLabel(value) {
+ return new Intl.NumberFormat('de-DE', {maximumFractionDigits: 3}).format(Number(value));
+}
+
+function controlsNote(host) {
+ if (controlsInstalled) return;
+ const note = document.createElement('p');
+ note.className = 'help';
+ note.textContent = 'Temperatur und Bestand sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.';
+ host.append(note);
+}
+
+function renderTemperature(host, current) {
+ controlsNote(host);
+ const data = bundle();
+ if (isManager(current)) {
+  const name = input();
+  const location = input();
+  const minimum = input();
+  const maximum = input();
+  minimum.inputMode = 'decimal';
+  maximum.inputMode = 'decimal';
+  host.append(labeled('Messstelle', name), labeled('Standort', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum));
+  host.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value}, actor(), new Date().toISOString(), context()))));
+ }
+ const missing = new Set(missingTemperaturePoints(data, current.id, new Date().toISOString()).map(point => point.id));
+ for (const point of data.temperaturePoints.filter(item => item.facilityId === current.id)) {
+  const readings = data.temperatureReadings.filter(item => item.pointId === point.id);
+  const row = item(point.name, [`${point.location} · zulässig ${amountLabel(point.minC)} bis ${amountLabel(point.maxC)} °C`, missing.has(point.id) ? 'Heute fehlt die Kontrolle.' : 'Heute ist eine Messung vorhanden.'], missing.has(point.id));
+  const value = input();
+  value.inputMode = 'decimal';
+  const note = input();
+  note.placeholder = 'Bemerkung, falls nötig';
+  row.append(labeled('Gemessener Wert °C', value), labeled('Bemerkung', note));
+  row.append(button('Messung speichern', 'secondary', () => commit(() => saveTemperatureReading(database(), bundle(), point.id, {value: value.value, note: note.value}, actor(), new Date().toISOString(), context()))));
+  for (const reading of readings) {
+   const line = document.createElement('p');
+   line.className = 'help';
+   line.textContent = `${new Date(reading.measuredAt).toLocaleString('de-DE')} · ${reading.recordedName}: ${amountLabel(reading.valueC)} °C${reading.note ? ` · ${reading.note}` : ''}`;
+   row.append(line);
+  }
+  for (const alert of data.temperatureAlerts.filter(item => item.pointId === point.id)) {
+   const line = document.createElement('p');
+   line.className = 'help';
+   line.textContent = alert.status === 'open'
+    ? `Offene Warnung: ${amountLabel(alert.valueC)} °C`
+    : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.remark}`;
+   row.append(line);
+   if (alert.status !== 'open') continue;
+   const remark = input();
+   remark.placeholder = 'Bemerkung zur Quittierung';
+   row.append(labeled('Quittierung', remark));
+   row.append(button('Warnung quittieren', 'secondary', () => commit(() => saveTemperatureAcknowledgement(database(), bundle(), alert.id, remark.value, actor(), new Date().toISOString(), context()))));
+   row.append(button('Mangel vorbereiten', 'secondary', () => {
+    const draft = temperatureDefectDraft(bundle(), alert.id);
+    if (!draft.ok) {
+     say('error', draft.error);
+     return;
+    }
+    if (el('defect-title')) el('defect-title').value = draft.defect.title;
+    if (el('defect-desc')) el('defect-desc').value = draft.defect.description;
+    if (el('defect-facility')) el('defect-facility').value = draft.defect.facility_id;
+    if (el('defect-priority')) el('defect-priority').value = draft.defect.priority;
+    say('ok', 'Der Mangel ist vorbereitet und noch nicht gespeichert.');
+   }));
+  }
+  host.append(row);
+ }
+}
+
+function renderStock(host, current) {
+ controlsNote(host);
+ const data = bundle();
+ if (isManager(current)) {
+  const name = input();
+  const location = input();
+  const unit = input('Stück');
+  const minimum = input('0');
+  minimum.inputMode = 'decimal';
+  host.append(labeled('Material', name), labeled('Lagerort', location), labeled('Einheit', unit), labeled('Mindestbestand', minimum));
+  host.append(button('Material speichern', '', () => commit(() => saveMaterial(database(), bundle(), {facility: current, name: name.value, location: location.value, unit: unit.value, minimum: minimum.value}, actor(), new Date().toISOString(), context()))));
+ }
+ for (const material of data.materials.filter(item => item.facilityId === current.id)) {
+  const stock = stockOf(data, material.id);
+  const low = materialBelowMinimum(data, material);
+  const openRequest = data.requests.some(item => item.materialId === material.id && item.status === 'submitted');
+  const row = item(material.name, [`${material.location} · Bestand ${amountLabel(stock)} ${material.unit}`, `Mindestbestand ${amountLabel(material.minimum)} ${material.unit}`, openRequest ? 'Offene Beschaffung vorhanden.' : 'Keine offene Beschaffung.'], low);
+  const quantity = input();
+  quantity.inputMode = 'decimal';
+  const note = input();
+  note.placeholder = 'Bemerkung zur Buchung';
+  row.append(labeled('Menge', quantity), labeled('Bemerkung', note));
+  const book = direction => commit(() => saveMaterialMovement(database(), bundle(), {materialId: material.id, direction, quantity: quantity.value, note: note.value}, actor(), new Date().toISOString(), context()));
+  row.append(button('Zugang buchen', 'secondary', () => book('in')));
+  row.append(button('Entnahme buchen', 'secondary', () => book('out')));
+  if (low && !openRequest) {
+   row.append(button('Beschaffung vorbereiten', '', () => {
+    const prepared = procurementFromStock(bundle(), material.id, actor(), new Date().toISOString());
+    if (!prepared.ok) {
+     say('error', prepared.error);
+     return null;
+    }
+    return commit(() => saveProcurementRequest(database(), bundle(), {
+     facility: current,
+     title: prepared.request.title,
+     quantity: prepared.request.quantity,
+     unit: prepared.request.unit,
+     reason: prepared.request.reason,
+     urgency: prepared.request.urgency,
+     materialId: material.id
+    }, actor(), new Date().toISOString(), context()));
+   }));
+  }
+  for (const movement of data.movements.filter(item => item.materialId === material.id)) {
+   const line = document.createElement('p');
+   line.className = 'help';
+   const direction = movement.direction === 'in' ? 'Zugang' : 'Entnahme';
+   line.textContent = `${new Date(movement.recordedAt).toLocaleString('de-DE')} · ${movement.recordedName}: ${direction} ${amountLabel(movement.quantity)} ${material.unit}${movement.maintenanceLogId ? ' · für eine Wartung' : ''}${movement.note ? ` · ${movement.note}` : ''}`;
+   row.append(line);
+  }
+  host.append(row);
+ }
+}
+
+function renderNotices(host, current) {
+ controlsNote(host);
+ const notices = facilityNotices(bundle(), state.cachedDefects, {
+  facilityIds: [current.id],
+  now: new Date().toISOString(),
+  actor: actor()
+ });
+ if (!notices.length) {
+  const empty = document.createElement('p');
+  empty.className = 'muted';
+  empty.textContent = 'Keine offenen Hinweise für diesen Betrieb.';
+  host.append(empty);
+  return;
+ }
+ for (const notice of notices) host.append(item(notice.title, [notice.detail], notice.warn));
+}
+
 function renderPanel(filterDate) {
  const host = el('operations-panel');
  const current = facility();
@@ -350,6 +579,9 @@ function renderPanel(filterDate) {
  if (section === 'inspections') renderInspections(host, current);
  if (section === 'maintenance') renderMaintenance(host, current);
  if (section === 'procurement') renderProcurement(host, current);
+ if (section === 'temperature') renderTemperature(host, current);
+ if (section === 'stock') renderStock(host, current);
+ if (section === 'notices') renderNotices(host, current);
 }
 
 function fillFacilities() {
@@ -363,7 +595,9 @@ function fillFacilities() {
   option.textContent = item.name;
   select.append(option);
  }
- if (state.accessibleFacilities.some(item => item.id === previous)) select.value = previous;
+ if (state.accessibleFacilities.some(item => item.id === pendingFacilityId)) select.value = pendingFacilityId;
+ else if (state.accessibleFacilities.some(item => item.id === previous)) select.value = previous;
+ pendingFacilityId = '';
 }
 
 export async function openOperations() {

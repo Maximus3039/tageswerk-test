@@ -8,7 +8,9 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
  await expect(page.locator('#operations-card')).toHaveCount(1);
- await expect(page.locator('#operations-tabs button')).toHaveCount(4);
+ await expect(page.locator('#operations-tabs button')).toHaveCount(7);
+ await expect(page.locator('#metric-temperature')).toHaveCount(1);
+ await expect(page.locator('#dash-notices')).toHaveCount(1);
  await page.evaluate(() => {
   document.querySelector('#app').classList.remove('hidden');
   document.querySelector('#view-more').classList.remove('hidden');
@@ -18,6 +20,8 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  const viewport = page.viewportSize();
  expect(tabs.x).toBeGreaterThanOrEqual(0);
  expect(tabs.x + tabs.width).toBeLessThanOrEqual(viewport.width + 1);
+ await page.locator('[data-operation="temperature"]').click();
+ await expect(page.locator('[data-operation="temperature"]')).toHaveClass(/active/);
  await page.locator('[data-operation="procurement"]').click();
  await expect(page.locator('[data-operation="procurement"]')).toHaveClass(/active/);
 });

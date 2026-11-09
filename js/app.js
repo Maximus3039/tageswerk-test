@@ -72,7 +72,7 @@ async function loadPermissions(){
 }
 async function loadDefects(){
  const box=el('defect-list');box.replaceChildren();const info=document.createElement('p');info.className='muted';info.textContent='Mängel werden geladen …';box.append(info);
- const {data,error}=await supabase.from('defects').select('id,title,description,priority,status,facility_id,assigned_to,created_at').order('created_at',{ascending:false}).limit(1000);
+ const {data,error}=await supabase.from('defects').select('id,title,description,priority,status,facility_id,organization_id,assigned_to,created_at,resolution_due_at').order('created_at',{ascending:false}).limit(1000);
  if(error){info.className='error';info.textContent='Mängel konnten nicht geladen werden: '+error.message;return}
  const allowedFacilities=new Set(state.accessibleFacilities.map(f=>f.id));
  state.cachedDefects=(data||[]).filter(d=>allowedFacilities.has(d.facility_id)).sort((a,b)=>( {critical:0,high:1,normal:2,low:3}[a.priority]??2)-({critical:0,high:1,normal:2,low:3}[b.priority]??2)||new Date(b.created_at)-new Date(a.created_at));renderDashboard();el('mine-count').textContent=String(state.cachedDefects.filter(d=>d.assigned_to===state.currentUser?.id&&d.status!=='resolved').length);const mode=el('defect-filter').value;const visible=state.cachedDefects.filter(d=>mode==='mine'?d.assigned_to===state.currentUser?.id:mode==='open'?d.status!=='resolved':mode==='review'?d.status==='pending_review':true);box.replaceChildren();el('defect-count').textContent=String(visible.length);

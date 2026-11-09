@@ -1,5 +1,12 @@
 import {facilityVisibleToMember} from './permissions.js';
 import {
+ acknowledgeTemperatureAlert,
+ createMaterial,
+ createTemperaturePoint,
+ recordMovement,
+ recordTemperature
+} from './operations-controls.js';
+import {
  assignInspection,
  completeMaintenance,
  createAsset,
@@ -26,6 +33,14 @@ const tables = [
  'maintenance_logs',
  'asset_defects',
  'procurement_requests'
+];
+
+const controlTables = [
+ 'temperature_points',
+ 'temperature_readings',
+ 'temperature_alerts',
+ 'materials',
+ 'material_movements'
 ];
 
 export function supabaseOperationDb(supabase) {
@@ -226,6 +241,7 @@ function assemble(loaded, actor, context) {
    urgency: row.urgency,
    status: row.status,
    defectId: row.defect_id || null,
+   materialId: row.material_id || null,
    requestedBy: row.requested_by,
    requestedName: personName(context, row.requested_by, actor),
    requestedAt: row.requested_at,
@@ -234,26 +250,116 @@ function assemble(loaded, actor, context) {
    reviewedAt: row.reviewed_at || null,
    reviewNote: row.review_note || ''
   })),
-  preparedDefects: []
+  preparedDefects: [],
+  temperaturePoints: (loaded.temperature_points || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   name: row.name,
+   location: row.location || '',
+   minC: String(row.minimum_celsius),
+   maxC: String(row.maximum_celsius),
+   active: row.active !== false,
+   createdBy: row.created_by,
+   createdAt: row.created_at
+  })),
+  temperatureReadings: (loaded.temperature_readings || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   pointId: row.point_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   measuredAt: row.measured_at,
+   valueC: String(row.value_celsius),
+   recordedBy: row.recorded_by,
+   recordedName: personName(context, row.recorded_by, actor),
+   note: row.note || ''
+  })).sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt))),
+  temperatureAlerts: (loaded.temperature_alerts || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   readingId: row.reading_id,
+   pointId: row.point_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   valueC: String(row.value_celsius),
+   minC: String(row.minimum_celsius),
+   maxC: String(row.maximum_celsius),
+   status: row.status,
+   acknowledgedBy: row.acknowledged_by || null,
+   acknowledgedName: row.acknowledged_by ? personName(context, row.acknowledged_by, actor) : '',
+   acknowledgedAt: row.acknowledged_at || null,
+   remark: row.remark || ''
+  })),
+  materials: (loaded.materials || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   name: row.name,
+   location: row.location || '',
+   unit: row.unit || '',
+   minimum: String(row.minimum_quantity),
+   createdBy: row.created_by,
+   createdAt: row.created_at
+  })),
+  movements: (loaded.material_movements || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   materialId: row.material_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   direction: row.direction,
+   quantity: String(row.quantity),
+   note: row.note || '',
+   recordedBy: row.recorded_by,
+   recordedName: personName(context, row.recorded_by, actor),
+   recordedAt: row.recorded_at,
+   maintenanceLogId: row.maintenance_log_id || null,
+   procurementRequestId: row.procurement_request_id || null
+  })).sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)))
  };
+}
+
+function missingTable(error) {
+ return storageMessage(error).startsWith('Die Betriebsdatenbank ist noch nicht installiert');
+}
+
+async function readTable(db, table) {
+ try {
+  return await db.select(table);
+ } catch (error) {
+  return {data: null, error};
+ }
 }
 
 export async function loadOperations(db, actor, context) {
  const loaded = {};
  for (const table of tables) {
-  let result;
-  try {
-   result = await db.select(table);
-  } catch (error) {
-   return {ok: false, installed: false, error: storageMessage(error), bundle: emptyOperations()};
-  }
+  const result = await readTable(db, table);
   if (result?.error) {
-   const missing = storageMessage(result.error).startsWith('Die Betriebsdatenbank ist noch nicht installiert');
-   return {ok: false, installed: !missing, error: storageMessage(result.error), bundle: emptyOperations()};
+   const missing = missingTable(result.error);
+   return {ok: false, installed: !missing, controlsInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
   }
   loaded[table] = result?.data || [];
  }
- return {ok: true, installed: true, bundle: assemble(loaded, actor, context)};
+ let controlsInstalled = true;
+ for (const table of controlTables) {
+  const result = await readTable(db, table);
+  if (result?.error) {
+   if (missingTable(result.error)) {
+    controlsInstalled = false;
+    break;
+   }
+   return {ok: false, installed: true, controlsInstalled: false, error: storageMessage(result.error), bundle: assemble(loaded, actor, context)};
+  }
+  loaded[table] = result?.data || [];
+ }
+ if (!controlsInstalled) {
+  for (const table of controlTables) loaded[table] = [];
+ }
+ return {ok: true, installed: true, controlsInstalled, bundle: assemble(loaded, actor, context)};
 }
 
 function owned(row, facility, actor) {
@@ -484,7 +590,7 @@ export async function saveProcurementRequest(db, bundle, draft, actor, now, cont
  if (!local.ok) return denied(bundle, local.error);
  let result;
  try {
-  result = await db.insert('procurement_requests', {
+  const payload = {
    facility_id: draft.facility.id,
    title: local.request.title,
    quantity: local.request.quantity,
@@ -492,7 +598,9 @@ export async function saveProcurementRequest(db, bundle, draft, actor, now, cont
    reason: local.request.reason,
    urgency: local.request.urgency,
    defect_id: local.request.defectId
-  });
+  };
+  if (local.request.materialId) payload.material_id = local.request.materialId;
+  result = await db.insert('procurement_requests', payload);
  } catch (error) {
   return denied(bundle, storageMessage(error));
  }
@@ -523,4 +631,131 @@ export async function saveProcurementReview(db, bundle, requestId, decision, not
  const request = loaded.ok ? loaded.bundle.requests.find(item => item.id === requestId) : null;
  if (!request || request.status !== decision) return denied(bundle, 'Die Entscheidung wurde nicht bestätigt.');
  return {ok: true, id: request.id, bundle: loaded.bundle, request};
+}
+
+export async function saveTemperaturePoint(db, bundle, draft, actor, now, context) {
+ const local = createTemperaturePoint(bundle, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('temperature_points', {
+   facility_id: draft.facility.id,
+   name: local.point.name,
+   location: local.point.location,
+   minimum_celsius: local.point.minC,
+   maximum_celsius: local.point.maxC,
+   active: true
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.created_by !== actor.userId || !owned(saved.data, draft.facility, actor)) {
+  return denied(bundle, saved.error || 'Die Messstelle wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const point = loaded.ok ? loaded.bundle.temperaturePoints.find(item => item.id === saved.data.id) : null;
+ if (!point || point.facilityId !== draft.facility.id) return denied(bundle, 'Die Messstelle wurde nicht bestätigt.');
+ return {ok: true, id: point.id, bundle: loaded.bundle, point};
+}
+
+export async function saveTemperatureReading(db, bundle, pointId, draft, actor, now, context) {
+ const local = recordTemperature(bundle, pointId, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('temperature_readings', {
+   point_id: pointId,
+   facility_id: local.reading.facilityId,
+   value_celsius: local.reading.valueC,
+   note: local.reading.note
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.recorded_by !== actor.userId || saved.data.point_id !== pointId) {
+  return denied(bundle, saved.error || 'Die Messung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const reading = loaded.ok ? loaded.bundle.temperatureReadings.find(item => item.id === saved.data.id) : null;
+ if (!reading || reading.recordedBy !== actor.userId || !reading.measuredAt) return denied(bundle, 'Die Messung wurde nicht bestätigt.');
+ if (local.alert) {
+  const alert = loaded.bundle.temperatureAlerts.find(item => item.readingId === reading.id && item.status === 'open');
+  if (!alert) return denied(bundle, 'Die Grenzwertwarnung wurde nicht bestätigt.');
+  return {ok: true, id: reading.id, bundle: loaded.bundle, reading, alert};
+ }
+ return {ok: true, id: reading.id, bundle: loaded.bundle, reading, alert: null};
+}
+
+export async function saveTemperatureAcknowledgement(db, bundle, alertId, remark, actor, now, context) {
+ const local = acknowledgeTemperatureAlert(bundle, alertId, remark, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('temperature_alerts', alertId, {status: 'acknowledged', remark: local.alert.remark});
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.status !== 'acknowledged' || saved.data.acknowledged_by !== actor.userId || !saved.data.acknowledged_at) {
+  return denied(bundle, saved.error || 'Die Quittierung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const alert = loaded.ok ? loaded.bundle.temperatureAlerts.find(item => item.id === alertId) : null;
+ if (!alert || alert.status !== 'acknowledged' || alert.acknowledgedBy !== actor.userId || alert.remark !== local.alert.remark) {
+  return denied(bundle, 'Die Quittierung wurde nicht bestätigt.');
+ }
+ return {ok: true, id: alert.id, bundle: loaded.bundle, alert};
+}
+
+export async function saveMaterial(db, bundle, draft, actor, now, context) {
+ const local = createMaterial(bundle, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('materials', {
+   facility_id: draft.facility.id,
+   name: local.material.name,
+   location: local.material.location,
+   unit: local.material.unit,
+   minimum_quantity: local.material.minimum
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.created_by !== actor.userId || !owned(saved.data, draft.facility, actor)) {
+  return denied(bundle, saved.error || 'Das Material wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const material = loaded.ok ? loaded.bundle.materials.find(item => item.id === saved.data.id) : null;
+ if (!material) return denied(bundle, 'Das Material wurde nicht bestätigt.');
+ return {ok: true, id: material.id, bundle: loaded.bundle, material};
+}
+
+export async function saveMaterialMovement(db, bundle, draft, actor, now, context) {
+ const local = recordMovement(bundle, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('material_movements', {
+   material_id: local.movement.materialId,
+   facility_id: local.movement.facilityId,
+   direction: local.movement.direction,
+   quantity: local.movement.quantity,
+   note: local.movement.note,
+   maintenance_log_id: local.movement.maintenanceLogId
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.recorded_by !== actor.userId || saved.data.material_id !== local.movement.materialId) {
+  return denied(bundle, saved.error || 'Die Buchung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const movement = loaded.ok ? loaded.bundle.movements.find(item => item.id === saved.data.id) : null;
+ if (!movement || Number(movement.quantity) !== Number(local.movement.quantity)) return denied(bundle, 'Die Buchung wurde nicht bestätigt.');
+ return {ok: true, id: movement.id, bundle: loaded.bundle, movement};
 }

@@ -6,7 +6,19 @@ const urgencies = new Set(['low', 'normal', 'high', 'critical']);
 const decisions = new Set(['approved', 'rejected']);
 
 export function emptyOperations() {
- return {reports: [], templates: [], runs: [], assets: [], requests: [], preparedDefects: []};
+ return {
+  reports: [],
+  templates: [],
+  runs: [],
+  assets: [],
+  requests: [],
+  preparedDefects: [],
+  temperaturePoints: [],
+  temperatureReadings: [],
+  temperatureAlerts: [],
+  materials: [],
+  movements: []
+ };
 }
 
 function copy(bundle) {
@@ -17,7 +29,12 @@ function copy(bundle) {
   runs: [...source.runs],
   assets: [...source.assets],
   requests: [...source.requests],
-  preparedDefects: [...source.preparedDefects]
+  preparedDefects: [...source.preparedDefects],
+  temperaturePoints: [...(source.temperaturePoints || [])],
+  temperatureReadings: [...(source.temperatureReadings || [])],
+  temperatureAlerts: [...(source.temperatureAlerts || [])],
+  materials: [...(source.materials || [])],
+  movements: [...(source.movements || [])]
  };
 }
 
@@ -335,6 +352,12 @@ export function createProcurement(bundle, draft, actor, now) {
  if (error) return {ok: false, error, bundle};
  if (!canUse(draft.facility, actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
  if (draft.defect && !sameFacility(draft.defect, draft.facility.id)) return {ok: false, error: 'Der Mangel gehört zu einem anderen Betrieb.', bundle};
+ if (draft.materialId) {
+  const material = (bundle?.materials || []).find(item => item.id === draft.materialId);
+  if (!material || material.facilityId !== draft.facility.id) return {ok: false, error: 'Das Material gehört zu einem anderen Betrieb.', bundle};
+  const open = (bundle?.requests || []).some(item => item.materialId === draft.materialId && item.facilityId === draft.facility.id && item.status === 'submitted');
+  if (open) return {ok: false, error: 'Für dieses Material liegt bereits eine offene Beschaffung vor.', bundle};
+ }
  const request = {
   id: newId(),
   facilityId: draft.facility.id,
@@ -347,6 +370,7 @@ export function createProcurement(bundle, draft, actor, now) {
   urgency: draft.urgency,
   status: 'submitted',
   defectId: draft.defect?.id || null,
+  materialId: draft.materialId || null,
   requestedBy: actor.userId,
   requestedName: actor.name || 'Mitarbeiter',
   requestedAt: now,
@@ -375,13 +399,34 @@ export function reviewProcurement(bundle, requestId, decision, note, actor, now)
  return {ok: true, bundle: next, request: updated};
 }
 
+export function berlinDay(value) {
+ const date = new Date(value);
+ if (Number.isNaN(date.getTime())) return '';
+ return new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Berlin'}).format(date);
+}
+
+export function materialStock(movements, materialId) {
+ let total = 0;
+ for (const movement of movements || []) {
+  if (movement.materialId !== materialId) continue;
+  const amount = Number(movement.quantity);
+  if (!Number.isFinite(amount)) continue;
+  total += movement.direction === 'out' ? -amount : amount;
+ }
+ return Math.round(total * 1000) / 1000;
+}
+
 export function operationMetrics(bundle, facilityIds, today, now) {
  const allowed = new Set(facilityIds || []);
  const inScope = item => allowed.has(item.facilityId);
+ const measuredToday = new Set((bundle?.temperatureReadings || []).filter(reading => inScope(reading) && berlinDay(reading.measuredAt) === today).map(reading => reading.pointId));
  return {
   reportsToday: (bundle?.reports || []).filter(report => inScope(report) && report.reportDate === today).length,
   inspectionsOverdue: (bundle?.runs || []).filter(run => inScope(run) && inspectionOverdue(run, now)).length,
   maintenanceOverdue: (bundle?.assets || []).filter(asset => inScope(asset) && assetOverdue(asset, now)).length,
-  procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length
+  procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length,
+  temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
+  temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && point.active !== false && !measuredToday.has(point.id)).length,
+  stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length
  };
 }
