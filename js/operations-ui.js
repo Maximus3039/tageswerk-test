@@ -1,4 +1,5 @@
 import {supabase} from './supabase.js';
+import {paintMobile} from './mobile.js';
 import {el, show} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
@@ -49,6 +50,7 @@ let controlsInstalled = false;
 let section = 'reports';
 let loading = null;
 let pendingFacilityId = '';
+let saving = false;
 
 function actor() {
  const user = state.currentUser;
@@ -84,12 +86,18 @@ function context() {
 }
 
 async function commit(task) {
+ if (saving) return null;
+ saving = true;
+ document.body.dataset.saving = '1';
  let result;
  try {
   result = await task();
  } catch (error) {
   say('error', 'Die Speicherung wurde nicht bestätigt.');
   return null;
+ } finally {
+  saving = false;
+  delete document.body.dataset.saving;
  }
  if (!result?.ok || !result.id) {
   say('error', result?.error || 'Die Speicherung wurde nicht bestätigt.');
@@ -106,6 +114,7 @@ async function refreshFromDatabase(announce) {
  const loaded = await loadOperations(database(), actor(), context());
  installed = loaded.installed === true;
  controlsInstalled = loaded.controlsInstalled === true;
+ state.controlsInstalled = controlsInstalled;
  if (!loaded.ok) {
   if (!state.operationPreview) state.operationPreview = emptyOperations();
   if (announce) say('error', loaded.error);
@@ -136,6 +145,7 @@ function paintOperationMetrics() {
  if (el('metric-temperature-missing')) el('metric-temperature-missing').textContent = String(metrics.temperatureMissing);
  if (el('metric-stock')) el('metric-stock').textContent = String(metrics.stockLow);
  paintNotices(ids);
+ paintMobile();
 }
 
 function paintNotices(facilityIds) {
@@ -215,7 +225,12 @@ function button(label, className, onClick) {
  node.type = 'button';
  node.className = className || '';
  node.textContent = label;
- node.addEventListener('click', onClick);
+ node.addEventListener('click', async () => {
+  if (node.disabled || saving) return;
+  node.disabled = true;
+  try { await onClick(); }
+  finally { node.disabled = false; }
+ });
  return node;
 }
 
@@ -226,8 +241,15 @@ function labeled(text, control) {
  return node;
 }
 
+function berlinLocal(date = new Date()) {
+ const parts = new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(date);
+ const part = type => parts.find(item => item.type === type)?.value || '00';
+ return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+}
+
 function input(value) {
  const node = document.createElement('input');
+ node.autocomplete = 'off';
  if (value) node.value = value;
  return node;
 }
@@ -320,6 +342,7 @@ function renderInspections(host, current) {
   const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), 'week');
   const count = input('1');
   count.type = 'number';
+  count.inputMode = 'numeric';
   host.append(labeled('Bezeichnung des Kontrollgangs', name), labeled('Prüfpunkte', points), labeled('Wiederholung', unit), labeled('Intervallanzahl', count));
   host.append(button('Checkliste anlegen', '', () => commit(() => saveInspectionTemplate(database(), bundle(), {facility: current, name: name.value, points: points.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
   const template = select((data.templates || []).filter(item => item.facilityId === current.id).map(item => ({value: item.id, label: item.name})));
@@ -327,6 +350,7 @@ function renderInspections(host, current) {
   const person = select(people.map(member => ({value: member.user_id, label: member.name})));
   const due = input();
   due.type = 'datetime-local';
+  due.value = berlinLocal();
   host.append(labeled('Checkliste zuweisen', template), labeled('Mitarbeiter', person), labeled('Fällig am', due));
   host.append(button('Kontrollgang zuweisen', 'secondary', () => {
    const chosen = people.find(member => member.user_id === person.value);
@@ -363,8 +387,10 @@ function renderMaintenance(host, current) {
   const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), 'month');
   const count = input('1');
   count.type = 'number';
+  count.inputMode = 'numeric';
   const anchor = input();
   anchor.type = 'date';
+  anchor.value = berlinLocal().slice(0, 10);
   const people = state.staff.filter(member => member.is_active === true && (member.facility_id === current.id || member.facility_id == null));
   const person = select([{value: '', label: 'Noch niemand'}, ...people.map(member => ({value: member.user_id, label: member.name}))]);
   host.append(labeled('Anlage', name), labeled('Standort', location), labeled('Wartung alle', unit), labeled('Intervallanzahl', count), labeled('Letzte oder erste Wartung', anchor), labeled('Verantwortliche Person', person));
@@ -400,6 +426,7 @@ function renderProcurement(host, current) {
  const data = bundle();
  const title = input();
  const quantity = input('1');
+ quantity.inputMode = 'decimal';
  const unit = input('Stück');
  const reason = area();
  const urgency = select(Object.entries(priorityNames).map(([value, label]) => ({value, label})), 'normal');
@@ -598,6 +625,34 @@ function fillFacilities() {
  if (state.accessibleFacilities.some(item => item.id === pendingFacilityId)) select.value = pendingFacilityId;
  else if (state.accessibleFacilities.some(item => item.id === previous)) select.value = previous;
  pendingFacilityId = '';
+}
+
+export function focusNotice(notice) {
+ showNotice(notice);
+}
+
+export function syncOperationFacility(facilityId) {
+ const select = el('operations-facility');
+ if (!select || !facilityId || facilityId === 'all') return;
+ if (![...select.options].some(option => option.value === facilityId)) return;
+ if (select.value === facilityId) return;
+ select.value = facilityId;
+ if (!el('operations-card')?.classList.contains('hidden')) renderPanel('');
+}
+
+export async function showOperationSection(name, facilityId) {
+ const card = el('operations-card');
+ show('operations-card', true);
+ el('open-operations')?.classList.add('active');
+ if (name) section = name;
+ for (const tab of document.querySelectorAll('[data-operation]')) tab.classList.toggle('active', tab.dataset.operation === section);
+ if (facilityId && facilityId !== 'all') pendingFacilityId = facilityId;
+ if (!state.operationPreview) await openOperations();
+ else {
+  fillFacilities();
+  renderPanel('');
+ }
+ card?.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 export async function openOperations() {

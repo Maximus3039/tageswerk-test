@@ -13,5 +13,6 @@ export const state = {
   ackRows: [],
   realtimeChannel: null,
   currentView: "dashboard",
-  operationPreview: null
+  operationPreview: null,
+  controlsInstalled: false
 };
