@@ -245,6 +245,34 @@ BEGIN
     RETURN;
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.claim_staff_invitations()'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('v_user_id := auth.uid()' IN definition) > 0
+     AND position('IF v_user_id IS NULL THEN RETURN 0' IN definition) > 0
+     AND (
+       position('status=''sent''' IN definition) > 0
+       OR position('status = ''sent''' IN definition) > 0
+     )
+     AND position('INSERT INTO public.memberships' IN definition) > 0
+     AND position('''employee''' IN definition) > 0
+     AND position('UPDATE public.memberships' IN definition) = 0 THEN
+    IF position('IN (''employee'',''technician'')' IN definition) > 0
+       OR position('IN (''employee'', ''technician'')' IN definition) > 0 THEN
+      RETURN;
+    END IF;
+    IF position(' AND role=''employee''' IN definition) > 0
+       OR position(' AND role = ''employee''' IN definition) > 0 THEN
+      updated := replace(definition, ' AND role=''employee''', ' AND coalesce(role,''employee'') IN (''employee'',''technician'')');
+      updated := replace(updated, ' AND role = ''employee''', ' AND coalesce(role, ''employee'') IN (''employee'', ''technician'')');
+      updated := replace(updated, ', ''employee''', ', coalesce(r.role, ''employee'')');
+      updated := replace(updated, ',''employee''', ',coalesce(r.role,''employee'')');
+      IF position('technician' IN updated) = 0
+         OR position('v_user_id := auth.uid()' IN updated) = 0
+         OR position('UPDATE public.memberships' IN updated) > 0 THEN
+        RAISE EXCEPTION 'claim_staff_invitations erkennt Techniker nicht an einer erwarteten Stelle.';
+      END IF;
+      EXECUTE updated;
+    END IF;
+    RETURN;
+  END IF;
   IF position('private.can_access_facility(' IN definition) > 0
      OR position('private.can_manage_facility(' IN definition) > 0 THEN
     IF position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) = 0
@@ -279,7 +307,10 @@ BEGIN
     RETURN;
   END IF;
   IF position('technician' IN definition) > 0
-     OR position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) = 0
+     OR (
+       position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) = 0
+       AND position('IF v_user_id IS NULL THEN RETURN 0' IN definition) = 0
+     )
      OR (
        position('status=''sent''' IN definition) = 0
        AND position('status = ''sent''' IN definition) = 0

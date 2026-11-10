@@ -104,14 +104,20 @@ BEGIN
     RAISE EXCEPTION 'request_staff_invitation(uuid, text, text, text) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.request_staff_invitation(uuid,text,text,text)'::regprocedure), '[[:space:]]+', ' ', 'g');
-  IF position('private.can_manage_facility(' IN definition) > 0 THEN
+  IF position('private.can_manage_facility(p_facility_id)' IN definition) > 0 THEN
     IF position('SECURITY DEFINER' IN definition) = 0
        OR position('Anmeldung erforderlich' IN definition) = 0
        OR position('Betrieb nicht gefunden' IN definition) = 0
-       OR position('Keine Berechtigung fuer diesen Betrieb' IN definition) = 0
+       OR (
+         position('Keine Berechtigung fuer diesen Betrieb' IN definition) = 0
+         AND position('Keine aktive Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
+       )
        OR position('Ungueltige E-Mail-Adresse' IN definition) = 0
        OR position('Vor- und Nachname erforderlich' IN definition) = 0
-       OR position('Dieser Mitarbeiter besitzt bereits Zugang zu diesem Betrieb.' IN definition) = 0
+       OR (
+         position('Dieser Mitarbeiter besitzt bereits Zugang zu diesem Betrieb.' IN definition) = 0
+         AND position('Dieser Benutzer ist bereits zugeordnet. Bitte bei Bedarf reaktivieren.' IN definition) = 0
+       )
        OR position('Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.' IN definition) = 0
        OR position('An diese E-Mail-Adresse wurde bereits eine Einladung versendet.' IN definition) = 0
        OR position('Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.' IN definition) = 0
@@ -253,11 +259,20 @@ BEGIN
     RAISE EXCEPTION 'revoke_staff_invitation(uuid) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.revoke_staff_invitation(uuid)'::regprocedure), '[[:space:]]+', ' ', 'g');
-  IF position('private.can_manage_facility(' IN definition) > 0 THEN
+  IF position('private.can_manage_facility(r.facility_id)' IN definition) > 0 THEN
     IF position('SECURITY DEFINER' IN definition) = 0
        OR position('Keine offene Einladung gefunden' IN definition) = 0
-       OR position('Keine Berechtigung' IN definition) = 0
+       OR (
+         position('Keine Berechtigung' IN definition) = 0
+         AND position('Keine aktive Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
+       )
        OR position('FOR UPDATE' IN definition) = 0
+       OR (
+         position('r.status NOT IN (''pending'', ''sent'')' IN definition) = 0
+         AND position('r.status NOT IN (''pending'',''sent'')' IN definition) = 0
+         AND position('status NOT IN (''pending'', ''sent'')' IN definition) = 0
+         AND position('status NOT IN (''pending'',''sent'')' IN definition) = 0
+       )
        OR position('UPDATE public.memberships' IN definition) > 0
        OR position('DELETE ' IN definition) > 0 THEN
       RAISE EXCEPTION 'revoke_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
@@ -338,11 +353,19 @@ BEGIN
     IF position('SECURITY DEFINER' IN definition) = 0
        OR position('Nicht angemeldet' IN definition) = 0
        OR position('Keine Berechtigung zur Namensänderung' IN definition) = 0
-       OR position('Bitte einen gültigen Namen eingeben' IN definition) = 0
+       OR (
+         position('Bitte einen gültigen Namen eingeben' IN definition) = 0
+         AND position('Bitte einen Namen mit 2 bis 100 Zeichen eingeben' IN definition) = 0
+       )
        OR position('Mitarbeiterprofil nicht gefunden' IN definition) = 0
        OR position('UPDATE public.profiles' IN definition) = 0
        OR position('UPDATE public.memberships' IN definition) > 0
        OR position('DELETE ' IN definition) > 0 THEN
+      RAISE EXCEPTION 'update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    IF position('Bitte einen Namen mit 2 bis 100 Zeichen eingeben' IN definition) > 0
+       AND position('manager.is_active = true' IN definition) = 0
+       AND position('manager.is_active IS TRUE' IN definition) = 0 THEN
       RAISE EXCEPTION 'update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
     END IF;
     IF position('employee.role = ''employee''' IN definition) > 0
@@ -360,19 +383,43 @@ BEGIN
   IF position('SECURITY DEFINER' IN definition) = 0
      OR position('Nicht angemeldet' IN definition) = 0
      OR position('Keine Berechtigung zur Namensänderung' IN definition) = 0
-     OR position('Bitte einen gültigen Namen eingeben' IN definition) = 0
+     OR (
+       position('Bitte einen gültigen Namen eingeben' IN definition) = 0
+       AND position('Bitte einen Namen mit 2 bis 100 Zeichen eingeben' IN definition) = 0
+     )
      OR position('Mitarbeiterprofil nicht gefunden' IN definition) = 0
      OR position('manager.role = ''company_admin''' IN definition) = 0
      OR position('manager.role = ''facility_manager''' IN definition) = 0
      OR position('manager.facility_id = employee.facility_id' IN definition) = 0
      OR position('UPDATE public.profiles' IN definition) = 0
-     OR position('SET full_name = trim(p_full_name)' IN definition) = 0
+     OR (
+       position('SET full_name = trim(p_full_name)' IN definition) = 0
+       AND position('SET full_name = btrim(p_full_name)' IN definition) = 0
+     )
      OR position('UPDATE public.memberships' IN definition) > 0
      OR position('DELETE ' IN definition) > 0 THEN
     RAISE EXCEPTION 'update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   END IF;
+  IF position('Bitte einen Namen mit 2 bis 100 Zeichen eingeben' IN definition) > 0
+     AND position('manager.is_active = true' IN definition) = 0
+     AND position('manager.is_active IS TRUE' IN definition) = 0 THEN
+    RAISE EXCEPTION 'update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+  END IF;
   IF position('manager.is_active = true' IN definition) > 0
      OR position('manager.is_active IS TRUE' IN definition) > 0 THEN
+    IF position('employee.role = ''employee''' IN definition) > 0
+       OR position('employee.role=''employee''' IN definition) > 0 THEN
+      updated := replace(definition, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
+      updated := replace(updated, 'employee.role=''employee''', 'employee.role IN (''employee'',''technician'')');
+      IF position('technician' IN updated) = 0
+         OR (
+           position('manager.is_active = true' IN updated) = 0
+           AND position('manager.is_active IS TRUE' IN updated) = 0
+         ) THEN
+        RAISE EXCEPTION 'update_employee_name erkennt Techniker nicht an einer erwarteten Stelle.';
+      END IF;
+      EXECUTE updated;
+    END IF;
     RETURN;
   END IF;
   IF position('is_active' IN definition) > 0 THEN

@@ -477,7 +477,7 @@ BEGIN
     AND procedure.proname = 'employee_update_assigned_defect';
   IF signature IS NOT NULL THEN
     definition := regexp_replace(pg_get_functiondef(signature::regprocedure), '[[:space:]]+', ' ', 'g');
-    IF position('private.can_access_facility(' IN definition) > 0 THEN
+    IF position('private.can_access_facility(d.facility_id)' IN definition) > 0 THEN
       IF position('SECURITY DEFINER' IN definition) = 0
          OR position('Anmeldung erforderlich' IN definition) = 0
          OR position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN definition) = 0
@@ -485,9 +485,17 @@ BEGIN
          OR position('Mangel nicht gefunden' IN definition) = 0
          OR position('assigned_to IS DISTINCT FROM auth.uid()' IN definition) = 0
          OR position('Dieser Mangel ist dir nicht zugewiesen' IN definition) = 0
-         OR position('Keine Betriebsberechtigung' IN definition) = 0
+         OR (
+           position('Keine aktive Betriebsberechtigung' IN definition) = 0
+           AND position('Keine Betriebsberechtigung' IN definition) = 0
+         )
          OR position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN definition) = 0
          OR position('FOR UPDATE' IN definition) = 0
+         OR (
+           position('p_status NOT IN (''in_progress'',''pending_review'')' IN definition) = 0
+           AND position('p_status NOT IN (''in_progress'', ''pending_review'')' IN definition) = 0
+           AND position('p_status IS NULL' IN definition) = 0
+         )
          OR position('SET assigned_to' IN definition) > 0
          OR position('SET facility_id' IN definition) > 0
          OR position('SET organization_id' IN definition) > 0 THEN
@@ -515,7 +523,7 @@ BEGIN
     THEN
       RAISE EXCEPTION 'employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
     END IF;
-    IF position('private.can_access_facility(' IN definition) = 0 THEN
+    IF position('private.can_access_facility(d.facility_id)' IN definition) = 0 THEN
     recognized := position('technician' IN definition) > 0
       OR (
         position('= ''employee''' IN definition) = 0
