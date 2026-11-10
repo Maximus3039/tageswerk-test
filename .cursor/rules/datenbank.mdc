@@ -1,0 +1,19 @@
+---
+description: Supabase-Migrationen vorbereiten, aber nur nach Freigabe ausführen
+alwaysApply: true
+---
+
+# Datenbank
+
+Supabase mit PostgreSQL ist das Backend. RLS bleibt wirksam. Keine Umgehung über Sicherheitsdefiner-Funktionen, deaktivierte Policies oder den Service-Role-Key.
+
+- SQL für Tabellen, Trigger, Funktionen und RLS darf als Migrationsdatei vorbereitet werden.
+- Ausführen in Supabase erst nach ausdrücklicher Freigabe. Vorhandene Migrationsdateien nicht erneut ausführen.
+- Bestehende betriebliche Daten nicht ungefragt ändern oder löschen. Dazu gehören Zähler, Ablesungen, Mängel, Mitgliedschaften und Zuordnungen.
+- Tests nutzen lokale Testdaten oder simulierte Supabase-Antworten. Kein Test schreibt echte Zählerstände.
+- Die Importvorschau `tageswerk_preview_historical_import` liest nur. `tageswerk_commit_historical_import` nicht aufrufen.
+
+```sql
+-- Datei vorbereiten ist erlaubt.
+-- Dieselbe Datei im Supabase-SQL-Editor ausführen braucht eine Freigabe.
+```

@@ -1,0 +1,7 @@
+testdaten/
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+dist/
+tageswerk_2_9_*.sql

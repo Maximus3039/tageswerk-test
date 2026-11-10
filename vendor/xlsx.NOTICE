@@ -1,0 +1,9 @@
+SheetJS Community Edition
+Datei: xlsx.full.min.js
+Version: 0.20.3
+Herkunft: SheetJS LLC, https://sheetjs.com/
+Lizenz: Apache License, Version 2.0
+Lizenztext: xlsx.LICENSE
+Copyright (C) 2012-present SheetJS LLC
+
+Die Bibliothek liegt lokal im Projekt und wird nicht zur Laufzeit von einem CDN geladen.

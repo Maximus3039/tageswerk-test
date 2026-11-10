@@ -1,0 +1,14 @@
+---
+description: Rollen, Mandantentrennung und Geheimnisse schützen
+alwaysApply: true
+---
+
+# Sicherheit
+
+Rollen und Mandantentrennung bleiben erhalten. Eine Organisation sieht keine Daten einer anderen. Ein Betrieb sieht keine fremden Betriebe. Mitarbeiter, Betriebsleitung und Geschäftsführung behalten ihre bisherigen Rechte.
+
+- `isManager` in `js/permissions.js` nicht nebenbei verändern. Die Datenbank bleibt für Berechtigungen maßgeblich.
+- Keine Zugangsdaten, Dienstschlüssel oder `.env` ins Repository. Der vorhandene Publishable Key bleibt in `js/supabase.js` und wird nicht in Berichte oder neue Dateien kopiert.
+- Sicherheitsrelevante Architekturänderungen vor der Umsetzung abstimmen. Dazu gehören Rollenmodell, RLS, Auth-Fluss und neue externe Dienste.
+- Kostenpflichtige Dienste und neue Integrationen brauchen eine Freigabe.
+- Fehlermeldungen bleiben in der betroffenen Oberfläche verständlich und nennen keine Geheimnisse.

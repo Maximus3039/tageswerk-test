@@ -1,0 +1,14 @@
+-- Tageswerk 3.1, Benachrichtigungen
+-- Nicht ausführen. Diese Datei legt keine Tabelle an.
+-- Hinweise werden aus den Betriebsdaten des jeweiligen Betriebs berechnet:
+-- neue Mängel vom heutigen Tag und Mängel mit abgelaufener Frist in der vorhandenen
+-- Spalte public.defects.resolution_due_at, überfällige Kontrollgänge, überfällige Wartungen,
+-- offene Beschaffungen, Temperaturwarnungen und fehlende Temperaturkontrollen
+-- sowie unterschrittene Mindestbestände.
+-- Eine eigene Hinweis-Tabelle würde dieselben Daten ein zweites Mal speichern.
+-- Ein vorgeschlagener Termin in resolution_proposed_due_at ist keine Frist.
+-- Die Sichtbarkeit folgt den bestehenden RLS-Regeln der Quelltabellen.
+-- Mitarbeiter sehen dadurch keine Informationen anderer Betriebe.
+-- Geschäftsführung und Betriebsleitung sehen die Betriebe ihrer aktiven Mitgliedschaft.
+-- Die Sitzungsprüfung für Betriebsleitung und Mitarbeiter aus Tageswerk 3.0 ist offen
+-- und darf nicht als bestanden geführt werden.

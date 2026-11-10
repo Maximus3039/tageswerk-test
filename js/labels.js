@@ -1,0 +1,9 @@
+export const priorityNames={low:'Niedrig',normal:'Normal',high:'Hoch',critical:'Kritisch'};
+export const roleNames={employee:'Mitarbeiter',technician:'Techniker',facility_manager:'Betriebsleitung',company_admin:'Geschäftsführung'};
+export const invitationStatus={pending:'Wird versendet',sent:'Versendet · Annahme ausstehend',accepted:'Angenommen',revoked:'Widerrufen',failed:'Fehlgeschlagen'};
+export const statusNames={open:'Offen',in_progress:'In Bearbeitung',pending_review:'Erledigung gemeldet · Freigabe ausstehend',resolved:'Abgeschlossen'};
+export const mediumNames={electricity:'Strom',water:'Wasser',gas:'Gas',heat:'Wärme'};
+export const unitNames={kWh:'kWh',m3:'m³'};
+export const intervalNames={day:'täglich',week:'wöchentlich',month:'monatlich'};
+export const readingTypeNames={regular:'Reguläre Ablesung',reset:'Zählerrücksetzung',correction:'Korrektur'};
+export const meterStatusNames={active:'Aktiv',inactive:'Inaktiv',due:'Ablesung fällig',overdue:'Ablesung überfällig'};

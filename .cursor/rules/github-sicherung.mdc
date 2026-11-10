@@ -1,0 +1,27 @@
+---
+description: Entwicklung auf modularisierung, Commits nur nach ausdrücklicher Freigabe
+alwaysApply: true
+---
+
+# Git
+
+Repository: `Maximus3039/tageswerk-test`. Gearbeitet wird auf `modularisierung`. `main` nicht auschecken, nicht ändern, nicht mergen und nicht pushen.
+
+- Bestehende uncommittete Änderungen erhalten. Dateien anderer Arbeitsschritte nicht überschreiben oder zurücksetzen.
+- Keine automatischen Commits, Pushes, Force-Pushes oder Deployments.
+- Die Entwicklung nicht nach jedem Schritt für eine Commit-Freigabe unterbrechen. Erst das Paket fertigstellen, prüfen und dann berichten.
+- Commit und Push nur nach ausdrücklicher Freigabe. Vorher Dateiliste und Commit-Nachricht nennen und nur diese Dateien stagen.
+- Keine Zugangsdaten, keine `.env` und keine vertraulichen Dateien stagen.
+
+Vor einem freigegebenen Commit:
+
+1. `npm test` und bei Oberflächenänderungen `npm run test:ui` ausführen.
+2. `git diff --check` und den Diff auf fremde Änderungen prüfen.
+3. Bei einem Authentifizierungsfehler stoppen und die Anmeldung erklären, ohne Token oder Passwörter zu verlangen.
+4. Nur nach `origin/modularisierung` pushen. Danach `HEAD` und `origin/modularisierung` vergleichen und bei Abweichung stoppen.
+
+```powershell
+git add js/state.js
+git commit -m "Zustand für die Betriebsauswahl an einer Stelle halten."
+git push origin modularisierung
+```

@@ -1,6 +1,43 @@
-// Sicherheitsbewusst: keine API-Antworten, Sitzungsdaten oder geschützten Seiten zwischenspeichern.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+// Sicherheitsbewusst: keine API-Antworten, Sitzungsdaten oder fremde Seiten zwischenspeichern.
+// Eine neue Version ersetzt den alten Cache und bittet geöffnete Fenster um eine Aktualisierung.
+const SHELL_CACHE = 'tageswerk-shell-3.2';
+
+self.addEventListener('install', event => {
+ event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener('activate', event => {
+ event.waitUntil((async () => {
+  const keys = await caches.keys();
+  const stale = keys.filter(key => key !== SHELL_CACHE);
+  await Promise.all(stale.map(key => caches.delete(key)));
+  await self.clients.claim();
+  if (!stale.length) return;
+  const windows = await self.clients.matchAll({type: 'window'});
+  for (const client of windows) client.postMessage({type: 'tageswerk-updated', cache: SHELL_CACHE});
+ })());
+});
+
+self.addEventListener('fetch', event => {
+ const request = event.request;
+ if (request.method !== 'GET') return;
+ const url = new URL(request.url);
+ if (url.origin !== self.location.origin) return;
+ event.respondWith((async () => {
+  try {
+   const fresh = await fetch(request);
+   if (fresh.ok) {
+    const cache = await caches.open(SHELL_CACHE);
+    await cache.put(request, fresh.clone());
+   }
+   return fresh;
+  } catch (error) {
+   const cached = await caches.match(request) || (request.mode === 'navigate' ? await caches.match('./index.html') : null);
+   if (cached) return cached;
+   throw error;
+  }
+ })());
+});
 self.addEventListener('push', event => {
   if (!event.data) return;
   let payload; try { payload=event.data.json(); } catch { return; }
