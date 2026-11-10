@@ -12,11 +12,18 @@
 -- bleiben für Mitarbeiter unsichtbar. Techniker, Betriebsleitung und Geschäftsführung
 -- lesen sie im berechtigten Betrieb.
 -- staff_invitations wird hier nicht verändert. Die Rollenspalte, ihr Wächter und die
--- Prüfung der Annahme liegen ausschließlich in tageswerk_3_4_invitation_role.sql.
--- Ist memberships.role ein Enum ohne den Wert technician, ändert diese Datei nichts.
+-- Annahme liegen ausschließlich in tageswerk_3_4_invitation_role.sql.
+-- Die geprüfte Produktion führt memberships.role als text. memberships_role_check
+-- erlaubt technician bisher nicht und wird hier erweitert.
+-- Ist die Spalte wider Erwarten ein Enum ohne den Wert technician, ändert diese Datei nichts.
 -- Der Wert muss vorher in einer eigenen, bereits festgeschriebenen Anweisung ergänzt werden:
 -- ALTER TYPE public.<enum> ADD VALUE 'technician';
 -- Eine unbekannte Funktionsfassung setzt die Transaktion zurück.
+-- manage_facility_membership bleibt auf (text, uuid, text, boolean) und übernimmt
+-- nur die geprüfte Fassung. Betriebsleitungen verwalten Mitarbeiter und Techniker
+-- des eigenen Betriebs. Geschäftsführungszuordnungen bleiben unangetastet.
+-- tageswerk_prepare_reading behält jede bestehende Prüfung. Techniker erfassen
+-- normale Stände und stornieren oder korrigieren nicht.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
@@ -229,26 +236,36 @@ $readings$;
 
 DO $prepare$
 DECLARE
-  signature text;
   definition text;
   updated text;
 BEGIN
-  SELECT procedure.oid::regprocedure::text INTO signature
-  FROM pg_proc AS procedure
-  JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-  WHERE namespace.nspname = 'public'
-    AND procedure.proname = 'tageswerk_prepare_reading';
-  IF signature IS NULL THEN
-    RAISE EXCEPTION 'tageswerk_prepare_reading fehlt.';
+  IF to_regprocedure('public.tageswerk_prepare_reading()') IS NULL THEN
+    RAISE EXCEPTION 'tageswerk_prepare_reading() fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef(signature::regprocedure);
+  definition := pg_get_functiondef('public.tageswerk_prepare_reading()'::regprocedure);
   IF position('technician' IN definition) > 0 THEN
+    IF position('actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular''' IN definition) = 0
+       OR position('actor_role NOT IN (''company_admin'', ''facility_manager'')' IN definition) = 0
+       OR position('Stornieren darf die Betriebsleitung oder Geschäftsführung.' IN definition) = 0 THEN
+      RAISE EXCEPTION 'tageswerk_prepare_reading enthält Techniker in einer unbekannten Form und wurde nicht ersetzt.';
+    END IF;
     RETURN;
   END IF;
-  IF position('actor_role = ''employee''' IN definition) = 0 THEN
-    RAISE EXCEPTION 'tageswerk_prepare_reading begrenzt Mitarbeiter nicht an der erwarteten Stelle.';
+  IF position('actor_role = ''employee'' AND NEW.reading_type <> ''regular''' IN definition) = 0
+     OR position('actor_role NOT IN (''company_admin'', ''facility_manager'')' IN definition) = 0
+     OR position('Stornieren darf die Betriebsleitung oder Geschäftsführung.' IN definition) = 0
+     OR position('Eine Stornierung ändert nur den Stornierungsvermerk.' IN definition) = 0
+     OR position('Die Korrektur bezieht sich auf eine gültige ursprüngliche Ablesung desselben Zählers.' IN definition) = 0 THEN
+    RAISE EXCEPTION 'tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   END IF;
-  updated := replace(definition, 'actor_role = ''employee''', 'actor_role IN (''employee'', ''technician'')');
+  updated := replace(
+    definition,
+    'actor_role = ''employee'' AND NEW.reading_type <> ''regular''',
+    'actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular'''
+  );
+  IF updated = definition OR position('actor_role = ''employee''' IN updated) > 0 THEN
+    RAISE EXCEPTION 'tageswerk_prepare_reading konnte nicht eindeutig erweitert werden und wurde nicht ersetzt.';
+  END IF;
   EXECUTE updated;
 END;
 $prepare$;
@@ -258,40 +275,129 @@ DECLARE
   signature text;
   definition text;
   updated text;
-  changed boolean;
 BEGIN
-  SELECT procedure.oid::regprocedure::text INTO signature
-  FROM pg_proc AS procedure
-  JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-  WHERE namespace.nspname = 'public'
-    AND procedure.proname = 'manage_facility_membership';
-  IF signature IS NULL THEN
-    RAISE EXCEPTION 'manage_facility_membership fehlt.';
+  IF to_regprocedure('public.manage_facility_membership(text,uuid,text,boolean)') IS NULL THEN
+    RAISE EXCEPTION 'manage_facility_membership(text, uuid, text, boolean) fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef(signature::regprocedure);
-  IF position('technician' IN definition) = 0 THEN
-    updated := definition;
-    changed := false;
-    IF position('''employee'', ''facility_manager''' IN updated) > 0 THEN
-      updated := replace(updated, '''employee'', ''facility_manager''', '''employee'', ''technician'', ''facility_manager''');
-      changed := true;
-    ELSIF position('''facility_manager'', ''employee''' IN updated) > 0 THEN
-      updated := replace(updated, '''facility_manager'', ''employee''', '''employee'', ''technician'', ''facility_manager''');
-      changed := true;
-    ELSIF position('''employee'',''facility_manager''' IN updated) > 0 THEN
-      updated := replace(updated, '''employee'',''facility_manager''', '''employee'', ''technician'', ''facility_manager''');
-      changed := true;
-    ELSIF position('ARRAY[''employee'', ''facility_manager'']' IN updated) > 0 THEN
-      updated := replace(updated, 'ARRAY[''employee'', ''facility_manager'']', 'ARRAY[''employee'', ''technician'', ''facility_manager'']');
-      changed := true;
-    ELSIF position('ARRAY[''employee''::text, ''facility_manager''::text]' IN updated) > 0 THEN
-      updated := replace(updated, 'ARRAY[''employee''::text, ''facility_manager''::text]', 'ARRAY[''employee''::text, ''technician''::text, ''facility_manager''::text]');
-      changed := true;
+  definition := pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure);
+  IF position('technician' IN definition) > 0 THEN
+    IF position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN definition) = 0
+       OR position('m.role NOT IN (''employee'',''technician'')' IN definition) = 0
+       OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
+       OR position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN definition) = 0
+       OR position('Reaktivierung nur ueber gesonderte Freigabe' IN definition) = 0 THEN
+      RAISE EXCEPTION 'manage_facility_membership enthält Techniker in einer unbekannten Form und wurde nicht ersetzt.';
     END IF;
-    IF NOT changed THEN
-      RAISE EXCEPTION 'manage_facility_membership erlaubt die Rolle Techniker noch nicht an einer erkennbaren Stelle.';
-    END IF;
-    EXECUTE updated;
+  ELSIF position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
+     OR position('Ungueltige Rolle' IN definition) = 0
+     OR position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN definition) = 0
+     OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
+     OR position('Betriebsleitung darf nur Mitarbeiterzuordnungen bearbeiten' IN definition) = 0
+     OR position('Reaktivierung nur ueber gesonderte Freigabe' IN definition) = 0
+     OR position('Eigene Berechtigungen hier nicht veraenderbar' IN definition) = 0
+     OR (
+       position('p_role NOT IN (''employee'',''facility_manager'')' IN definition) = 0
+       AND position('p_role NOT IN (''employee'', ''facility_manager'')' IN definition) = 0
+     ) THEN
+    RAISE EXCEPTION 'manage_facility_membership entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+  ELSE
+    EXECUTE $replace_membership$
+      CREATE OR REPLACE FUNCTION public.manage_facility_membership(
+        p_email text,
+        p_facility_id uuid,
+        p_role text,
+        p_remove boolean DEFAULT false
+      )
+      RETURNS text
+      LANGUAGE plpgsql
+      SECURITY DEFINER
+      SET search_path = ''
+      AS $function$
+      DECLARE
+        v_org uuid; v_target uuid; v_caller uuid := auth.uid();
+        v_company_admin boolean; v_manager boolean; v_existing uuid;
+      BEGIN
+        IF v_caller IS NULL THEN RAISE EXCEPTION 'Anmeldung erforderlich'; END IF;
+        SELECT organization_id INTO v_org FROM public.facilities WHERE id = p_facility_id;
+        IF v_org IS NULL THEN RAISE EXCEPTION 'Betrieb nicht gefunden'; END IF;
+        SELECT EXISTS(
+          SELECT 1 FROM public.memberships AS membership
+          WHERE membership.user_id = v_caller
+            AND membership.organization_id = v_org
+            AND membership.role = 'company_admin'
+            AND membership.is_active = true
+        ) INTO v_company_admin;
+        SELECT EXISTS(
+          SELECT 1 FROM public.memberships AS membership
+          WHERE membership.user_id = v_caller
+            AND membership.organization_id = v_org
+            AND membership.facility_id = p_facility_id
+            AND membership.role = 'facility_manager'
+            AND membership.is_active = true
+        ) INTO v_manager;
+        IF NOT (v_company_admin OR v_manager) THEN
+          RAISE EXCEPTION 'Keine Verwaltungsberechtigung fuer diesen Betrieb';
+        END IF;
+        IF p_role NOT IN ('employee','technician','facility_manager') THEN
+          RAISE EXCEPTION 'Ungueltige Rolle';
+        END IF;
+        IF p_role = 'facility_manager' AND NOT v_company_admin THEN
+          RAISE EXCEPTION 'Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen';
+        END IF;
+        SELECT users.id INTO v_target
+        FROM auth.users AS users
+        WHERE lower(users.email) = lower(btrim(p_email))
+        LIMIT 1;
+        IF v_target IS NULL THEN
+          RAISE EXCEPTION 'Kein registriertes Tageswerk-Konto mit dieser E-Mail vorhanden';
+        END IF;
+        IF v_target = v_caller THEN
+          RAISE EXCEPTION 'Eigene Berechtigungen hier nicht veraenderbar';
+        END IF;
+        IF EXISTS(
+          SELECT 1 FROM public.memberships AS membership
+          WHERE membership.user_id = v_target
+            AND membership.organization_id = v_org
+            AND membership.role = 'company_admin'
+        ) THEN
+          RAISE EXCEPTION 'Geschaeftsfuehrungsrechte werden hier nicht veraendert';
+        END IF;
+        SELECT membership.id INTO v_existing
+        FROM public.memberships AS membership
+        WHERE membership.user_id = v_target
+          AND membership.organization_id = v_org
+          AND membership.facility_id = p_facility_id
+        ORDER BY membership.id
+        LIMIT 1
+        FOR UPDATE;
+        IF v_existing IS NOT NULL THEN
+          IF NOT v_company_admin AND EXISTS(
+            SELECT 1 FROM public.memberships AS membership
+            WHERE membership.id = v_existing
+              AND membership.role NOT IN ('employee','technician')
+          ) THEN
+            RAISE EXCEPTION 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten';
+          END IF;
+          IF p_remove THEN
+            UPDATE public.memberships SET is_active = false WHERE id = v_existing;
+            RETURN 'Zuordnung deaktiviert';
+          END IF;
+          IF EXISTS(
+            SELECT 1 FROM public.memberships
+            WHERE id = v_existing AND is_active = false
+          ) THEN
+            RAISE EXCEPTION 'Zuordnung ist deaktiviert. Reaktivierung nur ueber gesonderte Freigabe.';
+          END IF;
+          UPDATE public.memberships SET role = p_role WHERE id = v_existing;
+          RETURN 'Zuordnung aktualisiert';
+        END IF;
+        IF p_remove THEN RAISE EXCEPTION 'Keine Zuordnung vorhanden'; END IF;
+        INSERT INTO public.memberships(user_id, organization_id, facility_id, role)
+          VALUES (v_target, v_org, p_facility_id, p_role);
+        RETURN 'Mitarbeiter zugeordnet';
+      END;
+      $function$
+    $replace_membership$;
   END IF;
 
   signature := NULL;

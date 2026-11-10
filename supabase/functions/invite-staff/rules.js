@@ -1,5 +1,4 @@
 const invitationRoles = new Set(['employee', 'technician']);
-const rank = {employee: 1, technician: 2, facility_manager: 3, company_admin: 4};
 
 export function normalizeInvitationRole(role) {
  if (role == null || String(role).trim() === '') return 'employee';
@@ -59,12 +58,10 @@ export function claimInvitations({user, invitations, facilities, memberships, re
   applicable.push({invitation, facility, role});
  }
  for (const item of applicable) {
+  const inactive = nextMemberships.find(membership => membership.user_id === user.id && membership.organization_id === item.facility.organization_id && membership.is_active === false && (membership.facility_id === item.facility.id || membership.role === 'company_admin'));
+  if (inactive) return {ok: false, success: false, error: 'Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.', memberships, invitations};
   const existing = nextMemberships.find(membership => membership.user_id === user.id && membership.facility_id === item.facility.id && membership.organization_id === item.facility.organization_id);
-  if (!existing) {
-   nextMemberships.push({user_id: user.id, organization_id: item.facility.organization_id, facility_id: item.facility.id, role: item.role, is_active: true});
-  } else if ((existing.role === 'employee' || existing.role === 'technician') && (rank[existing.role] || 0) < rank[item.role]) {
-   existing.role = item.role;
-  }
+  if (!existing) nextMemberships.push({user_id: user.id, organization_id: item.facility.organization_id, facility_id: item.facility.id, role: item.role, is_active: true});
   item.invitation.status = 'accepted';
  }
  return {ok: true, success: applicable.length > 0, memberships: nextMemberships, invitations: nextInvitations, message: applicable.length ? '' : 'Keine versendete Einladung gefunden.'};

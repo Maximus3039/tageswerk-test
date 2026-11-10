@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {membershipAllowsMeterAdmin, membershipAllowsMeterReading, readingInsertPayload, unitsForMedium} from '../../js/meters.js';
 
@@ -33,6 +34,21 @@ test('Eine neue Ablesung speichert den Stand und keinen Verbrauch', () => {
  assert.equal(payload.reading_type, 'regular');
  assert.equal(payload.reading_value, '1250.5');
  assert.equal('consumption_value' in payload, false);
+});
+
+test('Techniker erfassen normale Stände und keine Korrektur oder Stornierung', () => {
+ const sql = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
+ assert.equal(membershipAllowsMeterReading(facility, [membership('technician')], userId), true);
+ assert.equal(membershipAllowsMeterAdmin(facility, [membership('technician')], userId), false);
+ assert.equal(membershipAllowsMeterReading(otherFacility, [membership('technician'), membership('employee', otherFacility)], userId), true);
+ assert.equal(membershipAllowsMeterAdmin(otherFacility, [membership('technician'), membership('employee', otherFacility)], userId), false);
+ assert.match(sql, /actor_role IN \(''employee'', ''technician''\) AND NEW\.reading_type <> ''regular''/);
+ assert.match(sql, /actor_role NOT IN \(''company_admin'', ''facility_manager''\)/);
+ assert.match(sql, /Eine Stornierung ändert nur den Stornierungsvermerk/);
+ assert.match(sql, /Die Korrektur bezieht sich auf eine gültige ursprüngliche Ablesung desselben Zählers/);
+ assert.match(sql, /tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ const payload = readingInsertPayload('meter-1', {reading_value: '10', reading_at: '2026-11-10T08:00'});
+ assert.equal(payload.reading_type, 'regular');
 });
 
 test('Einheiten bleiben an die Verbrauchsart gebunden', () => {

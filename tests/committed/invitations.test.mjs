@@ -147,14 +147,16 @@ test('Die Annahme übernimmt gespeicherte Rollen je Betrieb und ignoriert eine s
  });
  assert.equal(fresh.memberships[0].role, 'technician');
  assert.equal(fresh.memberships[0].facility_id, facility.id);
- const raised = claimInvitations({
+ const keptEmployee = claimInvitations({
   user,
   invitations: [{id: 'up', email: 'mia@example.test', facility_id: facility.id, role: 'technician', status: 'sent'}],
   facilities: [facility],
   memberships: [{user_id: user.id, organization_id: organization, facility_id: facility.id, role: 'employee', is_active: true}],
-  requestedRole: 'employee'
+  requestedRole: 'company_admin'
  });
- assert.equal(raised.memberships[0].role, 'technician');
+ assert.equal(keptEmployee.memberships[0].role, 'employee');
+ assert.equal(keptEmployee.memberships[0].is_active, true);
+ assert.equal(keptEmployee.invitations[0].status, 'accepted');
  const keptTechnician = claimInvitations({
   user,
   invitations: [{id: 'down', email: 'mia@example.test', facility_id: second.id, role: 'employee', status: 'sent'}],
@@ -174,16 +176,124 @@ test('Die Annahme übernimmt gespeicherte Rollen je Betrieb und ignoriert eine s
  assert.equal(illegal.memberships.length, 0);
 });
 
-test('Die vorbereitete Funktion bleibt lokal und ersetzt die Annahme nicht auf Verdacht', () => {
+test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annahme', () => {
  const sql = readFileSync(new URL('../../tageswerk_3_4_invitation_role.sql', import.meta.url), 'utf8');
+ const roleSql = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
  const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
  const prepared = readFileSync(new URL('../../supabase/functions/invite-staff/index.ts', import.meta.url), 'utf8');
  assert.match(sql, /tageswerk_guard_invitation_role/);
- assert.match(sql, /wurde nicht ersetzt/);
- assert.doesNotMatch(sql, /^CREATE OR REPLACE FUNCTION public\.accept_staff_invitation/m);
+ assert.match(sql, /accept_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.match(sql, /CREATE OR REPLACE FUNCTION public\.accept_staff_invitation\(\)/);
+ assert.doesNotMatch(sql, /accept_staff_invitation\(\s*p_/);
+ assert.match(sql, /v_role := coalesce\(v_invitation\.role, 'employee'\)/);
+ assert.match(sql, /coalesce\(role, 'employee'\) IN \('employee', 'technician'\)/);
+ assert.doesNotMatch(sql, /UPDATE public\.memberships SET role/);
+ assert.match(sql, /claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.match(sql, /memberships\.role erlaubt technician noch nicht/);
+ assert.match(roleSql, /manage_facility_membership entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.match(roleSql, /p_role NOT IN \(''employee'',''technician'',''facility_manager''\)/);
+ assert.match(roleSql, /m\.role NOT IN \(''employee'',''technician''\)/);
+ assert.match(roleSql, /Geschaeftsfuehrungsrechte werden hier nicht veraendert/);
+ assert.match(roleSql, /Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen/);
+ assert.match(roleSql, /Reaktivierung nur ueber gesonderte Freigabe/);
+ assert.doesNotMatch(roleSql, /UPDATE public\.memberships SET role = 'technician'/);
+ assert.match(roleSql, /actor_role IN \(''employee'', ''technician''\) AND NEW\.reading_type <> ''regular''/);
+ assert.match(roleSql, /Stornieren darf die Betriebsleitung oder Geschäftsführung/);
+ assert.match(roleSql, /tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.doesNotMatch(roleSql, /actor_role NOT IN \(''company_admin'', ''facility_manager'', ''technician''\)/);
  assert.match(prepared, /nicht bereitgestellt/);
  assert.match(prepared, /inviteUserByEmail/);
+ assert.match(prepared, /role/);
  assert.match(app, /role:inviteRole/);
  assert.match(app, /PGRST204/);
  assert.match(app, /roleNames\[r\.role\]/);
+});
+
+test('Mitarbeiter- und Technikereinladungen bleiben je Betrieb getrennt', () => {
+ const user = {id: 'user-2', email: 'mia@example.test'};
+ const employeeInvite = claimInvitations({
+  user,
+  invitations: [{id: 'emp', email: 'mia@example.test', facility_id: facility.id, role: 'employee', status: 'sent'}],
+  facilities: [facility, second],
+  memberships: [],
+  requestedRole: 'technician'
+ });
+ assert.equal(employeeInvite.memberships[0].role, 'employee');
+ assert.equal(employeeInvite.memberships[0].facility_id, facility.id);
+ const both = claimInvitations({
+  user,
+  invitations: [
+   {id: 'tech', email: 'mia@example.test', facility_id: facility.id, role: 'technician', status: 'sent'},
+   {id: 'emp', email: 'mia@example.test', facility_id: second.id, role: 'employee', status: 'sent'}
+  ],
+  facilities: [facility, second],
+  memberships: [{user_id: user.id, organization_id: organization, facility_id: 'fac-keep', role: 'facility_manager', is_active: true}],
+  requestedRole: 'company_admin'
+ });
+ assert.equal(both.memberships.find(item => item.facility_id === facility.id).role, 'technician');
+ assert.equal(both.memberships.find(item => item.facility_id === second.id).role, 'employee');
+ assert.equal(both.memberships.find(item => item.facility_id === 'fac-keep').role, 'facility_manager');
+ const inactive = claimInvitations({
+  user,
+  invitations: [{id: 'back', email: 'mia@example.test', facility_id: facility.id, role: 'technician', status: 'sent'}],
+  facilities: [facility],
+  memberships: [{user_id: user.id, organization_id: organization, facility_id: facility.id, role: 'employee', is_active: false}]
+ });
+ assert.equal(inactive.ok, false);
+ assert.equal(inactive.memberships[0].is_active, false);
+ assert.equal(inactive.memberships[0].role, 'employee');
+ assert.equal(inactive.invitations[0].status, 'sent');
+});
+
+function planMembershipChange({actor, targetMemberships, facility, role, remove = false}) {
+ const admin = (actor.memberships || []).some(item => item.is_active === true && item.role === 'company_admin' && item.organization_id === facility.organization_id);
+ const manager = (actor.memberships || []).some(item => item.is_active === true && item.role === 'facility_manager' && item.facility_id === facility.id && item.organization_id === facility.organization_id);
+ if (actor.userId && targetMemberships.some(item => item.user_id === actor.userId)) return {ok: false, error: 'Eigene Berechtigungen hier nicht veraenderbar'};
+ if (!admin && !manager) return {ok: false, error: 'Keine Verwaltungsberechtigung fuer diesen Betrieb'};
+ if (!['employee', 'technician', 'facility_manager'].includes(role)) return {ok: false, error: 'Ungueltige Rolle'};
+ if (role === 'facility_manager' && !admin) return {ok: false, error: 'Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen'};
+ if (targetMemberships.some(item => item.organization_id === facility.organization_id && item.role === 'company_admin')) return {ok: false, error: 'Geschaeftsfuehrungsrechte werden hier nicht veraendert'};
+ const existing = targetMemberships.find(item => item.organization_id === facility.organization_id && item.facility_id === facility.id);
+ if (existing && !admin && !['employee', 'technician'].includes(existing.role)) return {ok: false, error: 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten'};
+ if (existing && existing.is_active === false && !remove) return {ok: false, error: 'Zuordnung ist deaktiviert. Reaktivierung nur ueber gesonderte Freigabe.'};
+ const next = targetMemberships.map(item => ({...item}));
+ if (!existing) {
+  if (remove) return {ok: false, error: 'Keine Zuordnung vorhanden'};
+  next.push({user_id: 'target-1', organization_id: facility.organization_id, facility_id: facility.id, role, is_active: true});
+ } else if (remove) {
+  next.find(item => item.facility_id === facility.id).is_active = false;
+ } else {
+  next.find(item => item.facility_id === facility.id).role = role;
+ }
+ return {ok: true, memberships: next};
+}
+
+test('Betriebsleitungen verwalten Mitarbeiter und Techniker und erhöhen keine Rechte', () => {
+ const target = {user_id: 'target-1'};
+ const employeeRow = {...target, organization_id: organization, facility_id: facility.id, role: 'employee', is_active: true};
+ const technicianRow = {...target, organization_id: organization, facility_id: second.id, role: 'technician', is_active: true};
+ const promoted = planMembershipChange({actor: manager, targetMemberships: [employeeRow], facility, role: 'technician'});
+ assert.equal(promoted.ok, true);
+ assert.equal(promoted.memberships[0].role, 'technician');
+ const assigned = planMembershipChange({actor: manager, targetMemberships: [], facility: second, role: 'technician'});
+ assert.equal(assigned.ok, false);
+ const blocked = [
+  planMembershipChange({actor: manager, targetMemberships: [employeeRow], facility, role: 'facility_manager'}),
+  planMembershipChange({actor: manager, targetMemberships: [{...employeeRow, role: 'facility_manager'}], facility, role: 'employee'}),
+  planMembershipChange({actor: technician, targetMemberships: [employeeRow], facility, role: 'technician'}),
+  planMembershipChange({actor: manager, targetMemberships: [{...employeeRow, role: 'company_admin', facility_id: null}], facility, role: 'employee'}),
+  planMembershipChange({actor: manager, targetMemberships: [{...employeeRow, is_active: false}], facility, role: 'technician'}),
+  planMembershipChange({actor: {...manager, userId: 'target-1'}, targetMemberships: [employeeRow], facility, role: 'technician'})
+ ];
+ assert.deepEqual(blocked.map(item => item.ok), [false, false, false, false, false, false]);
+ const adminChange = planMembershipChange({
+  actor: admin,
+  targetMemberships: [employeeRow, technicianRow],
+  facility: second,
+  role: 'employee'
+ });
+ assert.equal(adminChange.memberships.find(item => item.facility_id === second.id).role, 'employee');
+ assert.equal(adminChange.memberships.find(item => item.facility_id === facility.id).role, 'employee');
+ const appointed = planMembershipChange({actor: admin, targetMemberships: [employeeRow], facility, role: 'facility_manager'});
+ assert.equal(appointed.memberships[0].role, 'facility_manager');
 });
