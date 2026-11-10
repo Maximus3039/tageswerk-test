@@ -1,5 +1,5 @@
 import {facilityVisibleToMember} from './permissions.js';
-import {assetNextDue, assetOverdue, berlinDay, inspectionOverdue, waterControlState} from './operations.js';
+import {assetNextDue, assetOverdue, berlinDay, inspectionOverdue, waterControlState, waterRowsForMember} from './operations.js';
 import {facilityNotices, missingTemperaturePoints, waterAttention} from './operations-controls.js';
 import {state} from './state.js';
 import {el} from './utils.js';
@@ -109,9 +109,11 @@ export function workAgenda(bundle, options = {}) {
    ...scope(asset.responsibleUserId, actor.userId)
   });
  }
+ const waterView = waterRowsForMember(bundle, actor.memberships, now);
+ const waterBundle = {...(bundle || {}), waterChecks: waterView.checks, waterAlerts: waterView.alerts, waterMeasures: waterView.measures};
  for (const facilityId of ids) {
-  for (const pool of waterAttention(bundle, facilityId, now)) {
-   const status = waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now);
+  for (const pool of waterAttention(waterBundle, facilityId, now)) {
+   const status = waterControlState(pool, waterBundle.waterChecks, waterBundle.waterPoolParameters, now);
    push({
     id: `water:${pool.id}`,
     facilityId: pool.facilityId,

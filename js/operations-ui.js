@@ -2,7 +2,7 @@ import {supabase} from './supabase.js';
 import {paintMobile} from './mobile.js';
 import {el, show} from './utils.js';
 import {state} from './state.js';
-import {isManager} from './permissions.js';
+import {isManager, waterHistoryRole} from './permissions.js';
 import {priorityNames, intervalNames} from './labels.js';
 import {
  facilityNotices,
@@ -23,6 +23,8 @@ import {
  operationMetrics,
  waterCatalog,
  waterControlState,
+ waterMeasurementCsv,
+ waterRowsForMember,
  waterScheduleLabel
 } from './operations.js';
 import {
@@ -158,7 +160,9 @@ function paintOperationMetrics() {
  if (!el('metric-reports')) return;
  const selected = el('dashboard-facility')?.value;
  const ids = state.accessibleFacilities.filter(item => !selected || selected === 'all' || item.id === selected).map(item => item.id);
- const metrics = operationMetrics(bundle(), ids, today(), new Date().toISOString());
+ const nowIso = new Date().toISOString();
+ const waterView = waterRowsForMember(bundle(), state.myMemberships, nowIso);
+ const metrics = operationMetrics({...bundle(), waterChecks: waterView.checks, waterAlerts: waterView.alerts, waterMeasures: waterView.measures}, ids, today(), nowIso);
  el('metric-reports').textContent = String(metrics.reportsToday);
  el('metric-inspections').textContent = String(metrics.inspectionsOverdue);
  el('metric-maintenance').textContent = String(metrics.maintenanceOverdue);
@@ -623,6 +627,16 @@ function rangeText(parameter) {
  return `Sollbereich höchstens ${parameter.maxValue}`;
 }
 
+function downloadWaterCsv(text, name) {
+ const blob = new Blob([`\uFEFF${text}`], {type: 'text/csv;charset=utf-8'});
+ const url = URL.createObjectURL(blob);
+ const link = document.createElement('a');
+ link.href = url;
+ link.download = name;
+ link.click();
+ URL.revokeObjectURL(url);
+}
+
 function renderWater(host, current) {
  missingNote(host, waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
@@ -672,7 +686,10 @@ function renderWater(host, current) {
  if (!pool) return;
  const parameterOrder = code => waterCatalog(data).findIndex(item => item.code === code);
  const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => parameterOrder(left.parameterCode) - parameterOrder(right.parameterCode));
- const status = waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString());
+ const nowIso = new Date().toISOString();
+ const history = waterHistoryRole(current, state.myMemberships);
+ const visible = waterRowsForMember(data, state.myMemberships, nowIso);
+ const status = waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso);
  const row = item(pool.name, [`${waterScheduleLabel(pool)}`, status.detail], status.due);
  if (isManager(current)) {
   const actions = document.createElement('div');
@@ -772,10 +789,62 @@ function renderWater(host, current) {
  } else {
   const paused = document.createElement('p');
   paused.className = 'help';
-  paused.textContent = 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.';
+  paused.textContent = history ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : 'Deaktiviert. Die laufende Kontrollrunde bleibt sichtbar.';
   row.append(paused);
  }
- const checks = data.waterChecks.filter(item => item.poolId === pool.id).slice(0, 15);
+ const poolChecks = visible.checks.filter(item => item.poolId === pool.id);
+ if (history) {
+  const wrap = document.createElement('div');
+  wrap.className = 'water-history';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Messwerttabelle';
+  wrap.append(heading);
+  if (!poolChecks.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Noch keine Messungen.';
+   wrap.append(empty);
+  } else {
+   const table = document.createElement('table');
+   const head = document.createElement('tr');
+   for (const label of ['Zeitpunkt', 'Benutzer', 'Messwerte', 'Kommentar', 'Wiederholung']) {
+    const cell = document.createElement('th');
+    cell.textContent = label;
+    head.append(cell);
+   }
+   table.append(head);
+   for (const check of poolChecks) {
+    const line = document.createElement('tr');
+    const values = check.readings.map(reading => `${waterParameterName(data, reading.parameterCode)} ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`).join(', ');
+    for (const value of [new Date(check.measuredAt).toLocaleString('de-DE'), check.recordedName || '', values, check.note || '', check.followUpAlertId ? 'ja' : '']) {
+     const cell = document.createElement('td');
+     cell.textContent = value;
+     line.append(cell);
+    }
+    table.append(line);
+   }
+   wrap.append(table);
+  }
+  const exportButton = document.createElement('button');
+  exportButton.type = 'button';
+  exportButton.className = 'secondary';
+  exportButton.textContent = 'Messwerte als CSV exportieren';
+  exportButton.disabled = !poolChecks.length;
+  exportButton.addEventListener('click', () => downloadWaterCsv(waterMeasurementCsv({...data, waterChecks: poolChecks, waterAlerts: visible.alerts, waterMeasures: visible.measures}, current.id), `${pool.name || 'Wasserhygiene'}.csv`));
+  wrap.append(exportButton);
+  row.append(wrap);
+ } else {
+  const roundHeading = document.createElement('h3');
+  roundHeading.textContent = 'Laufende Kontrollrunde';
+  row.append(roundHeading);
+  if (!poolChecks.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Für die laufende Kontrollrunde liegt noch keine Messung vor.';
+   row.append(empty);
+  }
+ }
+ const checks = history ? [] : poolChecks;
  for (const check of checks) {
   const values = check.readings.map(reading => {
    const name = waterParameterName(data, reading.parameterCode);
@@ -789,13 +858,7 @@ function renderWater(host, current) {
   line.textContent = `${new Date(check.measuredAt).toLocaleString('de-DE')} · ${check.recordedName}: ${values}${check.note ? ` · ${check.note}` : ''}${repeat}`;
   row.append(line);
  }
- if (data.waterChecks.filter(item => item.poolId === pool.id).length > checks.length) {
-  const more = document.createElement('p');
-  more.className = 'help';
-  more.textContent = 'Ältere Messungen bleiben in der Datenbank gespeichert.';
-  row.append(more);
- }
- for (const alert of data.waterAlerts.filter(item => item.poolId === pool.id)) {
+ for (const alert of visible.alerts.filter(item => item.poolId === pool.id)) {
   const name = waterParameterName(data, alert.parameterCode);
   const unit = alert.unit ? ` ${alert.unit}` : '';
   const line = document.createElement('p');
@@ -804,7 +867,7 @@ function renderWater(host, current) {
    ? `Offene Warnung: ${name} ${alert.value}${unit}. Quittierung ist keine Behebung.`
    : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.acknowledgementNote}. Die Abweichung gilt damit nicht als behoben.`;
   row.append(line);
-  for (const measure of data.waterMeasures.filter(item => item.alertId === alert.id)) {
+  for (const measure of visible.measures.filter(item => item.alertId === alert.id)) {
    const measureLine = document.createElement('p');
    measureLine.className = 'help';
    measureLine.textContent = `Maßnahme ${new Date(measure.recordedAt).toLocaleString('de-DE')} · ${measure.recordedName}: ${measure.measureText}`;

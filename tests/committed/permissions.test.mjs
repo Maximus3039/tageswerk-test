@@ -31,6 +31,12 @@ test('Mitarbeiter und deaktivierte Leitungen verwalten den Betrieb nicht', () =>
  assert.equal(isManager(facility), false);
 
  state.myMemberships = [
+  {organization_id: organization, facility_id: facility.id, role: 'technician', is_active: true}
+ ];
+ assert.equal(isManager(facility), false);
+ assert.equal(isManager(otherFacility), false);
+
+ state.myMemberships = [
   {organization_id: organization, facility_id: facility.id, role: 'facility_manager', is_active: false}
  ];
  assert.equal(isManager(facility), false);

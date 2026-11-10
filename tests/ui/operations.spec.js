@@ -12,6 +12,9 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await expect(page.locator('#metric-temperature')).toHaveCount(1);
  await expect(page.locator('#metric-water')).toHaveCount(1);
  await expect(page.locator('#metric-water-missing')).toHaveCount(1);
+ await expect(page.locator('#staff-role option[value="technician"]')).toHaveText('Techniker');
+ await expect(page.locator('#invite-role option[value="employee"]')).toHaveText('Mitarbeiter');
+ await expect(page.locator('#invite-role option[value="technician"]')).toHaveText('Techniker');
  await expect(page.locator('#dash-notices')).toHaveCount(1);
  await page.evaluate(() => {
   document.querySelector('#app').classList.remove('hidden');

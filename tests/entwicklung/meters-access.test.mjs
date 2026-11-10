@@ -12,6 +12,7 @@ function membership(role, target = facility, active = true) {
 
 test('Zähler anlegen bleibt der Leitung des eigenen Betriebs vorbehalten', () => {
  assert.equal(membershipAllowsMeterAdmin(facility, [membership('employee')], userId), false);
+ assert.equal(membershipAllowsMeterAdmin(facility, [membership('technician')], userId), false);
  assert.equal(membershipAllowsMeterAdmin(facility, [membership('facility_manager')], userId), true);
  assert.equal(membershipAllowsMeterAdmin(otherFacility, [membership('facility_manager')], userId), false);
  assert.equal(membershipAllowsMeterAdmin(facility, [membership('company_admin')], userId), true);
@@ -20,6 +21,8 @@ test('Zähler anlegen bleibt der Leitung des eigenen Betriebs vorbehalten', () =
 
 test('Ablesungen dürfen Mitarbeiter nur im zugeordneten Betrieb erfassen', () => {
  assert.equal(membershipAllowsMeterReading(facility, [membership('employee')], userId), true);
+ assert.equal(membershipAllowsMeterReading(facility, [membership('technician')], userId), true);
+ assert.equal(membershipAllowsMeterReading(otherFacility, [membership('technician')], userId), false);
  assert.equal(membershipAllowsMeterReading(otherFacility, [membership('employee')], userId), false);
  assert.equal(membershipAllowsMeterReading(facility, [membership('employee', facility, false)], userId), false);
 });

@@ -3,7 +3,11 @@ import {state} from './state.js';
 import {status} from './utils.js';
 
 export function membershipCoversFacility(facility,membership,includeEmployee){
- return !!facility&&!!membership&&membership.is_active===true&&membership.organization_id===facility.organization_id&&((membership.role==='company_admin'&&membership.facility_id==null)||(membership.role==='facility_manager'&&membership.facility_id===facility.id)||(includeEmployee===true&&membership.role==='employee'&&membership.facility_id===facility.id));
+ return !!facility&&!!membership&&membership.is_active===true&&membership.organization_id===facility.organization_id&&((membership.role==='company_admin'&&membership.facility_id==null)||(membership.role==='facility_manager'&&membership.facility_id===facility.id)||(includeEmployee===true&&(membership.role==='employee'||membership.role==='technician')&&membership.facility_id===facility.id));
+}
+
+export function waterHistoryRole(facility,memberships){
+ return (memberships||[]).some(membership=>membershipCoversFacility(facility,membership,true)&&(membership.role==='technician'||membership.role==='facility_manager'||membership.role==='company_admin'));
 }
 
 export function facilityVisibleToMember(facility,memberships){

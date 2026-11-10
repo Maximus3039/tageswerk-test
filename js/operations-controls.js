@@ -9,6 +9,7 @@ import {
  temperatureCheckDue,
  waterCatalog,
  waterControlState,
+ waterRowsForMember,
  waterScheduleLabel
 } from './operations.js';
 
@@ -642,6 +643,7 @@ export function facilityNotices(bundle, defects, options) {
  const ids = new Set(options?.facilityIds || []);
  const actor = options?.actor;
  const now = options?.now;
+ const waterView = waterRowsForMember(bundle, actor?.memberships, now);
  const today = berlinDay(now);
  const notices = [];
  const push = notice => {
@@ -683,7 +685,7 @@ export function facilityNotices(bundle, defects, options) {
   const daily = (point.intervalUnit || 'day') === 'day' && Number(point.intervalCount || 1) === 1;
   push({id: `temperature-missing:${point.id}`, facilityId: point.facilityId, organizationId: point.organizationId, kind: 'temperature-missing', title: point.name || 'Temperaturkontrolle', detail: daily ? 'Für heute liegt keine Messung vor.' : 'Die Kontrolle ist fällig.', warn: true});
  }
- for (const alert of bundle?.waterAlerts || []) {
+ for (const alert of waterView.alerts) {
   if (alert.status !== 'open') continue;
   const pool = poolOf(bundle, alert.poolId);
   const name = waterParameterName(bundle, alert.parameterCode);
@@ -694,7 +696,7 @@ export function facilityNotices(bundle, defects, options) {
   push({id: `water-warning:${alert.id}`, poolId: alert.poolId, facilityId: alert.facilityId, organizationId: alert.organizationId, kind: 'water-warning', title: pool?.name || 'Wasserhygiene', detail: `${name}: ${alert.value}${unit} außerhalb von ${range}. Die Warnung ist offen.`, warn: true});
  }
  for (const pool of bundle?.waterPools || []) {
-  const status = waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now);
+  const status = waterControlState(pool, waterView.checks, bundle?.waterPoolParameters, now);
   if (!status.due) continue;
   push({id: `water-missing:${pool.id}`, poolId: pool.id, facilityId: pool.facilityId, organizationId: pool.organizationId, kind: 'water-missing', title: pool.name || 'Wasserhygiene', detail: status.detail, warn: true});
  }

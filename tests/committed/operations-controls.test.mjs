@@ -25,7 +25,7 @@ import {
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {emptyOperations, materialStock, operationMetrics, waterControlState, waterParameterCatalog} from '../../js/operations.js';
+import {emptyOperations, materialStock, operationMetrics, waterControlState, waterMeasurementCsv, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
 import {
  loadOperations,
  saveMaterial,
@@ -647,4 +647,52 @@ test('Wasserhygiene trennt Betriebe, Grenzen, Historie und Quittierung', async (
  const withOzone = recordWaterCheck(ozone.bundle, created.pool.id, {values: {...hygieneValues(), ozone: '0,20'}}, employee, now);
  assert.equal(withOzone.ok, true);
  assert.equal(withOzone.check.readings.find(item => item.parameterCode === 'ozone').value, '0.20');
+});
+
+test('Techniker sehen die Wasserhistorie und verändern keine Grenzwerte', () => {
+ const technician = {userId: 'technician-1', name: 'Timo', memberships: [membership('technician')]};
+ const mixed = {userId: 'mixed-1', name: 'Mira', memberships: [membership('technician'), membership('employee', second)]};
+ const created = createWaterPool(emptyOperations(), {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const strand = createWaterPool(created.bundle, {facility: second, name: 'Strand', scheduleMode: 'daily', intervalCount: 1}, admin, now);
+ const oldOwn = recordWaterCheck(strand.bundle, created.pool.id, {values: hygieneValues({ph: '8.20'})}, manager, '2026-11-08T10:00:00.000Z');
+ const oldStrand = recordWaterCheck(oldOwn.bundle, strand.pool.id, {values: hygieneValues()}, admin, '2026-11-08T10:00:00.000Z');
+ const currentOwn = recordWaterCheck(oldStrand.bundle, created.pool.id, {values: hygieneValues()}, technician, now);
+ assert.equal(currentOwn.ok, true);
+ const withForeign = {
+  ...currentOwn.bundle,
+  waterChecks: [...currentOwn.bundle.waterChecks, {id: 'foreign-check', poolId: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, measuredAt: '2026-11-01T10:00:00.000Z', readings: [{parameterCode: 'ph', value: '7.00'}]}],
+  waterPools: [...currentOwn.bundle.waterPools, {id: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, name: 'Fremdbecken', scheduleMode: 'daily', intervalCount: 1}]
+ };
+ const employeeRows = waterRowsForMember(withForeign, employee.memberships, now);
+ const technicianRows = waterRowsForMember(withForeign, technician.memberships, now);
+ const managerRows = waterRowsForMember(withForeign, manager.memberships, now);
+ const adminRows = waterRowsForMember(withForeign, admin.memberships, now);
+ const mixedRows = waterRowsForMember(withForeign, mixed.memberships, now);
+ assert.equal(employeeRows.checks.some(item => item.measuredAt === '2026-11-08T10:00:00.000Z'), false);
+ assert.equal(employeeRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === now), true);
+ assert.equal(technicianRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
+ assert.equal(managerRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
+ assert.equal(adminRows.checks.some(item => item.facilityId === second.id), true);
+ assert.equal(technicianRows.checks.some(item => item.facilityId === foreign.id), false);
+ assert.equal(mixedRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
+ assert.equal(mixedRows.checks.some(item => item.facilityId === second.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), false);
+ assert.equal(updateWaterParameter(currentOwn.bundle, parameter(currentOwn.bundle, created.pool.id, 'ph').id, {minValue: '6.80', maxValue: '7.60', required: true, active: true}, technician).ok, false);
+ assert.equal(updateWaterPool(currentOwn.bundle, created.pool.id, {name: 'Anders', scheduleMode: 'weekly', intervalCount: 2}, technician).ok, false);
+ assert.equal(setWaterPoolActive(currentOwn.bundle, created.pool.id, false, technician).ok, false);
+ assert.equal(createWaterPool(currentOwn.bundle, {facility, name: 'Neues Becken', scheduleMode: 'daily'}, technician, now).ok, false);
+ const point = createTemperaturePoint(emptyOperations(), {facility, name: 'Becken', location: 'Halle', minimum: '20', maximum: '30'}, manager, now);
+ assert.equal(recordTemperature(point.bundle, point.point.id, {value: '24'}, technician, now).ok, true);
+ assert.equal(createTemperaturePoint(point.bundle, {facility, name: 'Weiter', location: 'Keller', minimum: '1', maximum: '2'}, technician, now).ok, false);
+ const csv = waterMeasurementCsv({...withForeign, ...technicianRows}, facility.id);
+ assert.match(csv, /Freies Chlor/);
+ assert.match(csv, /8\.20|8,20/);
+ assert.doesNotMatch(csv, /Fremdbecken/);
+ const roleMigration = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
+ const waterMigration = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+ assert.match(roleMigration, /m\.role = 'technician'/);
+ assert.match(roleMigration, /IN \('employee', 'technician'\)/);
+ assert.match(waterMigration, /tageswerk_water_check_in_round/);
+ assert.match(waterMigration, /'technician', 'facility_manager', 'company_admin'/);
+ assert.match(waterMigration, /water_pools_update[\s\S]{0,240}IN \('company_admin', 'facility_manager'\)/);
+ assert.doesNotMatch(waterMigration, /redox/);
 });

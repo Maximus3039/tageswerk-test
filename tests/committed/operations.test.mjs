@@ -108,6 +108,24 @@ test('Beschaffung wird gemeldet und nur von der Leitung entschieden', () => {
  assert.equal(metrics.maintenanceOverdue, 0);
 });
 
+test('Techniker nutzen die operativen Module und verwalten sie nicht', () => {
+ const technician = {userId: 'technician-1', name: 'Timo', memberships: [membership('technician')]};
+ const report = createDailyReport(emptyOperations(), {facility, reportDate: '2026-11-09', incidents: 'Pumpe laut', handover: 'Weiter beobachten'}, technician, now);
+ assert.equal(report.ok, true);
+ assert.equal(createDailyReport(report.bundle, {facility: other, reportDate: '2026-11-09', incidents: 'Fremd', handover: ''}, technician, now).ok, false);
+ const template = createInspectionTemplate(report.bundle, {facility, name: 'Technik', points: 'Pumpe\nFilter', intervalUnit: 'day', intervalCount: 1}, manager, now);
+ assert.equal(createInspectionTemplate(report.bundle, {facility, name: 'Eigen', points: 'Tür', intervalUnit: 'day', intervalCount: 1}, technician, now).ok, false);
+ const assigned = assignInspection(template.bundle, template.template.id, {assignedTo: technician.userId, assignedName: 'Timo', dueAt: '2026-11-09T08:00:00.000Z'}, manager, now);
+ const recorded = recordInspection(assigned.bundle, assigned.run.id, assigned.run.points.map(point => ({id: point.id, mark: 'ok', note: ''})), technician, now);
+ assert.equal(recorded.ok, true);
+ const asset = createAsset(recorded.bundle, {facility, name: 'Pumpe', location: 'Keller', intervalUnit: 'month', intervalCount: 1, anchorAt: '2026-01-31T08:00:00.000Z', responsibleUserId: technician.userId, responsibleName: 'Timo'}, manager, now);
+ assert.equal(createAsset(recorded.bundle, {facility, name: 'Eigen', location: 'Hof', intervalUnit: 'month', intervalCount: 1, anchorAt: now, responsibleUserId: technician.userId}, technician, now).ok, false);
+ assert.equal(completeMaintenance(asset.bundle, asset.asset.id, 'Lager gefettet', technician, now).ok, true);
+ const request = createProcurement(asset.bundle, {facility, title: 'Dichtung', quantity: '1', unit: 'Stück', reason: 'Pumpe tropft', urgency: 'normal'}, technician, now);
+ assert.equal(request.ok, true);
+ assert.equal(reviewProcurement(request.bundle, request.request.id, 'approved', 'Bestellt', technician, now).ok, false);
+});
+
 function stranger() {
  return {userId: 'employee-9', name: 'Fremd', memberships: [membership('employee', other)]};
 }

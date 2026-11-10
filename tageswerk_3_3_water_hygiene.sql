@@ -8,6 +8,8 @@
 -- Sie sind keine Sollwerte und keine normativen Grenzwerte.
 -- Die reguläre Kontrollrunde umfasst Freies Chlor, gebundenes Chlor, den pH-Wert
 -- und die Wassertemperatur. Weitere Parameter können später in den Katalog aufgenommen werden.
+-- Mitarbeiter sehen nur die laufende Kontrollrunde. Techniker, Betriebsleitung
+-- und Geschäftsführung sehen die Messhistorie, Maßnahmen und Wiederholungsmessungen.
 -- Sollbereiche bleiben leer, bis die Betriebsleitung sie je Becken setzt.
 -- Messungen, damalige Sollbereiche und Warnwerte werden nicht umgeschrieben.
 -- Eine Quittierung kennzeichnet die Abweichung nicht als behoben.
@@ -598,8 +600,52 @@ CREATE POLICY water_pool_parameters_update ON public.water_pool_parameters FOR U
   USING (public.tageswerk_meter_role(organization_id, facility_id) IN ('company_admin', 'facility_manager'))
   WITH CHECK (public.tageswerk_meter_role(organization_id, facility_id) IN ('company_admin', 'facility_manager'));
 
+CREATE OR REPLACE FUNCTION public.tageswerk_water_check_in_round(
+  p_pool_id uuid,
+  p_measured_at timestamptz
+)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $tageswerk$
+DECLARE
+  v_mode text;
+  v_count integer;
+  v_today date;
+  v_measured date;
+BEGIN
+  IF p_pool_id IS NULL OR p_measured_at IS NULL THEN
+    RETURN false;
+  END IF;
+  SELECT pool.schedule_mode, pool.interval_count
+    INTO v_mode, v_count
+  FROM public.water_pools AS pool
+  WHERE pool.id = p_pool_id;
+  IF v_mode IS NULL THEN
+    RETURN false;
+  END IF;
+  v_today := (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date;
+  v_measured := (p_measured_at AT TIME ZONE 'Europe/Berlin')::date;
+  IF v_mode = 'weekly' THEN
+    RETURN p_measured_at >= pg_catalog.now() - make_interval(days => greatest(v_count, 1) * 7);
+  END IF;
+  IF v_mode = 'daily' AND v_count > 1 THEN
+    RETURN v_measured >= (v_today - (v_count - 1));
+  END IF;
+  RETURN v_measured = v_today;
+END;
+$tageswerk$;
+
 CREATE POLICY water_checks_select ON public.water_checks FOR SELECT TO authenticated
-  USING (public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL);
+  USING (
+    public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
+    OR (
+      public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+      AND public.tageswerk_water_check_in_round(pool_id, measured_at)
+    )
+  );
 CREATE POLICY water_checks_insert ON public.water_checks FOR INSERT TO authenticated
   WITH CHECK (
     recorded_by = auth.uid()
@@ -611,7 +657,13 @@ CREATE POLICY water_checks_insert ON public.water_checks FOR INSERT TO authentic
   );
 
 CREATE POLICY water_alerts_select ON public.water_alerts FOR SELECT TO authenticated
-  USING (public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL);
+  USING (
+    public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
+    OR (
+      public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+      AND public.tageswerk_water_check_in_round(pool_id, measured_at)
+    )
+  );
 CREATE POLICY water_alerts_insert ON public.water_alerts FOR INSERT TO authenticated
   WITH CHECK (
     status = 'open'
@@ -655,7 +707,15 @@ CREATE POLICY water_alerts_update ON public.water_alerts FOR UPDATE TO authentic
   );
 
 CREATE POLICY water_alert_measures_select ON public.water_alert_measures FOR SELECT TO authenticated
-  USING (public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL);
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.water_alerts AS alert
+      WHERE alert.id = water_alert_measures.alert_id
+        AND alert.organization_id = water_alert_measures.organization_id
+        AND alert.facility_id = water_alert_measures.facility_id
+    )
+  );
 CREATE POLICY water_alert_measures_insert ON public.water_alert_measures FOR INSERT TO authenticated
   WITH CHECK (
     recorded_by = auth.uid()
@@ -695,6 +755,7 @@ REVOKE ALL ON FUNCTION public.tageswerk_acknowledge_water() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_alert() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_measure() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_measure() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.tageswerk_water_check_in_round(uuid, timestamptz) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.tageswerk_water_schedule_valid(text, integer, text[], smallint[]) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_normalize_water_pool() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_pool() TO authenticated;
@@ -708,5 +769,6 @@ GRANT EXECUTE ON FUNCTION public.tageswerk_acknowledge_water() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_alert() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_stamp_water_measure() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_measure() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tageswerk_water_check_in_round(uuid, timestamptz) TO authenticated;
 
 COMMIT;

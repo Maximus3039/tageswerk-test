@@ -30,6 +30,18 @@ test('Die Oberfläche zeigt einer Mitgliedschaft nur die eigenen Betriebe', () =
  assert.equal(facilityVisibleToMember(facility, employee), true);
  assert.equal(facilityVisibleToMember(otherFacility, employee), false);
  assert.equal(facilityVisibleToMember(foreignFacility, employee), false);
+
+ const technician = [membership('technician')];
+ assert.equal(facilityVisibleToMember(facility, technician), true);
+ assert.equal(facilityVisibleToMember(otherFacility, technician), false);
+ assert.equal(facilityVisibleToMember(foreignFacility, technician), false);
+
+ const mixed = [membership('technician'), membership('employee', otherFacility)];
+ assert.equal(facilityVisibleToMember(facility, mixed), true);
+ assert.equal(facilityVisibleToMember(otherFacility, mixed), true);
+ assert.equal(facilityVisibleToMember(foreignFacility, mixed), false);
+ assert.equal(mayAppointManager(organization, technician), false);
+ assert.equal(mayAppointManager(organization, mixed), false);
 });
 
 test('Deaktivierte und unklare Mitgliedschaften sehen keinen Betrieb', () => {

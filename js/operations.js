@@ -1,4 +1,4 @@
-import {facilityVisibleToMember, membershipCoversFacility} from './permissions.js';
+import {facilityVisibleToMember, membershipCoversFacility, waterHistoryRole} from './permissions.js';
 import {nextReadingAt, readingScheduleStatus} from './meters.js';
 
 const marks = new Set(['ok', 'notable', 'unchecked']);
@@ -420,6 +420,83 @@ export function berlinDay(value) {
 function addCalendarDays(day, count) {
  const [year, month, date] = day.split('-').map(Number);
  return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
+}
+
+export function waterCheckInRound(pool, measuredAt, now) {
+ const today = berlinDay(now);
+ const measured = berlinDay(measuredAt);
+ if (!pool || !today || !measured) return false;
+ const count = Number(pool.intervalCount) || 1;
+ if (pool.scheduleMode === 'weekly') {
+  const start = new Date(now).getTime() - count * 7 * 24 * 60 * 60 * 1000;
+  const instant = new Date(measuredAt).getTime();
+  return Number.isFinite(instant) && instant >= start;
+ }
+ if ((pool.scheduleMode || 'daily') === 'daily' && count > 1) return measured >= addCalendarDays(today, -(count - 1));
+ return measured === today;
+}
+
+function waterFacility(record) {
+ return {id: record?.facilityId, organization_id: record?.organizationId};
+}
+
+function waterRecordVisible(bundle, memberships, record, now) {
+ const facility = waterFacility(record);
+ if (!facilityVisibleToMember(facility, memberships)) return false;
+ if (waterHistoryRole(facility, memberships)) return true;
+ const pool = (bundle?.waterPools || []).find(item => item.id === record.poolId) || {scheduleMode: 'daily', intervalCount: 1};
+ return waterCheckInRound(pool, record.measuredAt, now);
+}
+
+export function waterRowsForMember(bundle, memberships, now) {
+ const checks = (bundle?.waterChecks || []).filter(check => waterRecordVisible(bundle, memberships, check, now));
+ const alerts = (bundle?.waterAlerts || []).filter(alert => waterRecordVisible(bundle, memberships, alert, now));
+ const alertIds = new Set(alerts.map(alert => alert.id));
+ const measures = (bundle?.waterMeasures || []).filter(measure => {
+  const facility = waterFacility(measure);
+  if (!facilityVisibleToMember(facility, memberships)) return false;
+  if (waterHistoryRole(facility, memberships)) return true;
+  return alertIds.has(measure.alertId);
+ });
+ return {checks, alerts, measures};
+}
+
+function csvCell(value) {
+ const text = String(value ?? '');
+ return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+export function waterMeasurementCsv(bundle, facilityId) {
+ const catalog = waterCatalog(bundle);
+ const nameOf = code => catalog.find(item => item.code === code)?.name || code || '';
+ const pools = new Map((bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId).map(pool => [pool.id, pool]));
+ const header = ['Betrieb', 'Becken', 'Zeitpunkt', 'Benutzer', 'Parameter', 'Wert', 'Einheit', 'Damaliger Mindestwert', 'Damaliger Höchstwert', 'Kommentar', 'Wiederholung', 'Warnstatus', 'Maßnahmen'];
+ const lines = [header.join(';')];
+ const checks = (bundle?.waterChecks || []).filter(check => check.facilityId === facilityId).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt)));
+ for (const check of checks) {
+  const pool = pools.get(check.poolId);
+  for (const reading of check.readings || []) {
+   const related = (bundle?.waterAlerts || []).filter(alert => alert.checkId === check.id && alert.parameterCode === reading.parameterCode);
+   const status = related.map(alert => alert.status === 'open' ? 'offen' : 'quittiert').join(', ');
+   const texts = (bundle?.waterMeasures || []).filter(measure => related.some(alert => alert.id === measure.alertId)).map(measure => measure.measureText).join(' | ');
+   lines.push([
+    pool?.facilityName || '',
+    pool?.name || '',
+    check.measuredAt ? new Date(check.measuredAt).toLocaleString('de-DE') : '',
+    check.recordedName || '',
+    nameOf(reading.parameterCode),
+    reading.value ?? '',
+    reading.unit || '',
+    reading.minLimit ?? '',
+    reading.maxLimit ?? '',
+    check.note || '',
+    check.followUpAlertId ? 'ja' : '',
+    status,
+    texts
+   ].map(csvCell).join(';'));
+  }
+ }
+ return lines.join('\r\n');
 }
 
 export function temperatureCheckDue(point, readings, now) {
