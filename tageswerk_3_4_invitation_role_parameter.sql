@@ -7,6 +7,9 @@
 -- Zulässig sind nur employee und technician.
 -- Bestehende Mitgliedschaften, auch deaktivierte, werden nicht verändert.
 -- Es wird kein Benutzer angelegt und keine Mitgliedschaft geschrieben.
+-- Eine offene Einladung wird nicht wiederverwendet und nicht umgeschrieben.
+-- Dieselbe E-Mail kann im selben Betrieb nur eine offene Einladung haben.
+-- Jeder Fehler setzt die gesamte Datei zurück.
 
 BEGIN;
 
@@ -32,6 +35,30 @@ BEGIN
   END IF;
 END;
 $guard$;
+
+DO $duplicates$
+DECLARE
+  duplicate_count integer;
+BEGIN
+  SELECT count(*)
+  INTO duplicate_count
+  FROM (
+    SELECT invitation.facility_id, lower(invitation.email)
+    FROM public.staff_invitations AS invitation
+    WHERE invitation.status IN ('pending', 'sent', 'failed')
+      AND invitation.email IS NOT NULL
+    GROUP BY invitation.facility_id, lower(invitation.email)
+    HAVING count(*) > 1
+  ) AS duplicate_row;
+  IF duplicate_count > 0 THEN
+    RAISE EXCEPTION 'Es gibt % E-Mail-Adressen mit mehr als einer offenen Einladung im selben Betrieb. Die Datei wurde zurückgerollt.', duplicate_count;
+  END IF;
+END;
+$duplicates$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS staff_invitations_open_email_facility_key
+  ON public.staff_invitations (facility_id, lower(email))
+  WHERE status IN ('pending', 'sent', 'failed');
 
 CREATE OR REPLACE FUNCTION public.request_staff_invitation(
   p_facility_id uuid,
@@ -68,7 +95,7 @@ BEGIN
   IF v_role NOT IN ('employee', 'technician') THEN
     RAISE EXCEPTION 'Eine Einladung kann nur Mitarbeiter oder Techniker vorsehen.';
   END IF;
-  IF v_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' THEN
+  IF v_email IS NULL OR v_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' THEN
     RAISE EXCEPTION 'Ungueltige E-Mail-Adresse';
   END IF;
   IF length(btrim(p_first_name)) NOT BETWEEN 1 AND 100
@@ -103,30 +130,37 @@ BEGIN
   ELSIF v_existing_status = 'failed' THEN
     RAISE EXCEPTION 'Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.';
   END IF;
-  INSERT INTO public.staff_invitations (
-    organization_id,
-    facility_id,
-    email,
-    first_name,
-    last_name,
-    role,
-    invited_by
-  )
-  VALUES (
-    v_org,
-    p_facility_id,
-    v_email,
-    btrim(p_first_name),
-    btrim(p_last_name),
-    v_role,
-    auth.uid()
-  )
-  RETURNING id INTO v_id;
+  BEGIN
+    INSERT INTO public.staff_invitations (
+      organization_id,
+      facility_id,
+      email,
+      first_name,
+      last_name,
+      role,
+      invited_by
+    )
+    VALUES (
+      v_org,
+      p_facility_id,
+      v_email,
+      btrim(p_first_name),
+      btrim(p_last_name),
+      v_role,
+      auth.uid()
+    )
+    RETURNING id INTO v_id;
+  EXCEPTION
+    WHEN unique_violation THEN
+      RAISE EXCEPTION 'Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.';
+  END;
   RETURN v_id;
 END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.request_staff_invitation(uuid, text, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.request_staff_invitation(uuid, text, text, text, text) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
 
 COMMIT;

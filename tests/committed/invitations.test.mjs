@@ -273,8 +273,19 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.doesNotMatch(prepared, /staff_invitations'\)\.insert/);
  assert.match(roleSqlFile, /private\.can_manage_facility\(p_facility_id\)/);
  assert.match(roleSqlFile, /v_role NOT IN \('employee', 'technician'\)/);
+ assert.match(roleSqlFile, /v_email IS NULL OR v_email !~ /);
  assert.match(roleSqlFile, /Dieser Benutzer ist bereits zugeordnet\. Bitte bei Bedarf reaktivieren\./);
+ assert.match(roleSqlFile, /staff_invitations_open_email_facility_key/);
+ assert.match(roleSqlFile, /^BEGIN;/m);
+ assert.match(roleSqlFile, /^COMMIT;$/m);
+ assert.match(roleSqlFile, /REVOKE ALL ON FUNCTION public\.request_staff_invitation\(uuid, text, text, text, text\) FROM PUBLIC, anon/);
+ assert.match(roleSqlFile, /GRANT EXECUTE ON FUNCTION public\.request_staff_invitation\(uuid, text, text, text, text\) TO authenticated/);
  assert.doesNotMatch(roleSqlFile, /UPDATE public\.memberships/);
+ for (const name of ['tageswerk_3_4_invitation_role_parameter_voraussetzungen.sql', 'tageswerk_3_4_invitation_role_parameter_kontrolle.sql']) {
+  const query = readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8');
+  assert.match(query, /SELECT pruefung, status, details/);
+  assert.doesNotMatch(query, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT|REVOKE|NOTIFY|DO)\b/im);
+ }
  assert.match(prepared, /role/);
  assert.match(app, /role:inviteRole/);
  assert.match(app, /PGRST204/);

@@ -129,7 +129,9 @@ Für den Vergleich wird die produktive Funktionsdatei benötigt, so wie sie im S
 
 Die aus dem Dashboard beschriebene produktive Fassung bleibt die Grundlage: `auth.getUser()`, `request_staff_invitation`, `inviteUserByEmail`, die Status `pending`, `sent` und `failed` sowie eine Protokollzeile bei einem Versandfehler. Die vorbereitete Datei `supabase/functions/invite-staff/index.ts` folgt diesem Ablauf. Die Rolle schreibt sie nicht mit dem Dienstschlüssel. Der Dienstschlüssel setzt nur den Versandstatus.
 
-`tageswerk_3_4_invitation_role_parameter.sql` ergänzt `request_staff_invitation(uuid, text, text, text, text)`. Die vierstellige Funktion bleibt. Die neue Funktion prüft `private.can_manage_facility`, lässt nur `employee` und `technician` zu und behandelt eine leere Rolle als Mitarbeiter. Eine bestehende oder deaktivierte Zuordnung wird nicht überschrieben. Die Datei ist nicht ausgeführt.
+`tageswerk_3_4_invitation_role_parameter.sql` ergänzt `request_staff_invitation(uuid, text, text, text, text)`. Die vierstellige Funktion bleibt. Die neue Funktion prüft `private.can_manage_facility`, lässt nur `employee` und `technician` zu und behandelt eine leere Rolle als Mitarbeiter. Eine bestehende oder deaktivierte Zuordnung wird nicht überschrieben. Eine offene Einladung wird nicht wiederverwendet. Der eindeutige Index `staff_invitations_open_email_facility_key` verhindert eine zweite offene Einladung derselben E-Mail im selben Betrieb. Die Datei ist eine Transaktion und ist nicht ausgeführt.
+
+Vor dem Ausführen liest `tageswerk_3_4_invitation_role_parameter_voraussetzungen.sql` die Voraussetzungen. Danach liest `tageswerk_3_4_invitation_role_parameter_kontrolle.sql` Signaturen, Rechte und den Index. Beide Abfragen schreiben nichts.
 
 Ein bereits registriertes Konto ohne Zuordnung erhält die Einladung mit Status `sent` und keine Mitgliedschaft. Die Rolle gilt erst bei der Annahme, wenn noch keine Zuordnung besteht. Ein Versandfehler setzt `failed` und wird protokolliert. Die Oberfläche sendet die Auswahl Mitarbeiter oder Techniker bereits an `invite-staff`.
 
