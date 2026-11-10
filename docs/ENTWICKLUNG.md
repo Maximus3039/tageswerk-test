@@ -78,3 +78,74 @@ Keine Commits ohne Freigabe. `main` nicht anfassen. Vor einem freigegebenen Comm
 3. Lokale Tests ergänzen, wenn die Funktion eine Regel oder einen Ablauf festlegt.
 4. `npm test` ausführen. Bei sichtbarer Oberfläche zusätzlich `npm run test:ui`.
 5. Einmal berichten und auf eine Freigabe warten, wenn Commit, SQL oder Datenänderung nötig sind.
+
+## Installation 3.4 am 10. November 2026
+
+Die sechs Migrationsdateien sind in der produktiven Datenbank ausgeführt. Die anschließende SQL-Kontrolle hat für alle 13 geprüften Objekte den Status OK ergeben. Dieselbe Datei nicht erneut ausführen. `main` bleibt unverändert. Die Edge Function `invite-staff` ist nicht bereitgestellt.
+
+| Modul | Datei |
+| --- | --- |
+| Temperaturkontrollen, Messwerte und Temperaturwarnungen | `tageswerk_3_1_temperature.sql` |
+| Temperaturmessstellen mit Intervall, Deaktivierung und Schutz der Historie | `tageswerk_3_2_temperature_points.sql` |
+| Wasserhygiene, Kontrollrunden und Zwischenspeicherung | `tageswerk_3_3_water_hygiene.sql` |
+| Technikerrolle in Zählern, Mitgliedschaften und Mängeln | `tageswerk_3_4_technician_role.sql` |
+| Einladungsrolle Mitarbeiter oder Techniker | `tageswerk_3_4_invitation_role.sql` |
+| Aktive Verwaltungsberechtigung für Liste, Einladung, Widerruf und Namen | `tageswerk_3_4_management_guard.sql` |
+
+Eine Rolle gilt nur bei `is_active = true` und nur in der eigenen Organisation. Die Geschäftsführung ist in `tageswerk_meter_role` an `facility_id IS NULL` gebunden. Die Betriebsleitung, der Techniker und der Mitarbeiter sind an ihren Betrieb gebunden.
+
+| Bereich | Geschäftsführung | Betriebsleitung | Techniker | Mitarbeiter |
+| --- | --- | --- | --- | --- |
+| Betriebe | alle der Organisation | eigener Betrieb | eigener Betrieb | eigener Betrieb |
+| Temperaturmessstelle anlegen, ändern, deaktivieren | ja | ja | nein | nein |
+| Temperatur erfassen, Grenzwert erkennen, Warnung quittieren | ja | ja | ja | ja |
+| Becken und Grenzwerte | ja | ja | nein | nein |
+| Wasserrunde beginnen, speichern, fortsetzen, abschließen | ja | ja | ja | ja, eigene offene Runde |
+| Wasserhistorie, Warnungen und Maßnahmen sehen | ja | ja | ja | nein |
+| Zähler anlegen, korrigieren, stornieren | ja | ja | nein | nein |
+| Normalen Zählerstand erfassen | ja | ja | ja | ja |
+| Zugewiesenen Mangel bearbeiten | ja | ja | ja | ja |
+| Mitarbeiterverwaltung, Deaktivierung, Reaktivierung | ja, einschließlich Betriebsleitung | nur Mitarbeiter und Techniker des Betriebs, Reaktivierung nur mit derselben Rolle | nein | nein |
+| Einladung versenden | Mitarbeiter oder Techniker | Mitarbeiter oder Techniker | nein | nein |
+
+Die Reaktivierung einer deaktivierten Zuordnung verlangt dieselbe Rolle. Geschäftsführungszuordnungen bleiben in der Verwaltung gesperrt. Quittieren einer Warnung markiert die Kenntnisnahme und behebt die Abweichung nicht.
+
+### Prüfung vor dem Livebetrieb
+
+Die automatisierten Tests simulieren Supabase. Sie haben in der produktiven Datenbank keine Zeile geschrieben. Vor der Veröffentlichung der Oberfläche auf `modularisierung` bleibt dieser Durchgang je Rolle offen:
+
+1. Temperatur: Messstelle anlegen, Wert innerhalb und außerhalb der Grenzen speichern, Warnung quittieren, Messstelle deaktivieren. Techniker und Mitarbeiter sehen die Stelle und speichern eine Messung. Sie legen keine Stelle an.
+2. Wasser: Becken mit Grenzen anlegen, Runde beginnen, Werte speichern, Entwurf schließen und fortsetzen, Runde abschließen, Warnung und Historie prüfen. Der Mitarbeiter sieht die eigene offene Eingabe und nicht die gespeicherte Historie. Der Techniker sieht die Historie und ändert keine Grenze.
+3. Techniker: zugewiesenen Mangel bearbeiten, normalen Zählerstand speichern, Korrektur und Storno bleiben gesperrt, Mitarbeiterkarte bleibt verborgen.
+4. Verwaltung: Mitarbeiter deaktivieren und mit derselben Rolle reaktivieren, Techniker zuordnen, Einladung versenden und annehmen. Eine Betriebsleitung ernennt keine weitere Betriebsleitung.
+
+Anmeldung, Mängel, Tagesbericht, Zählerstände und die bisherige Mitarbeiterverwaltung sind in den lokalen Tests weiterhin an die eigene Organisation und den eigenen Betrieb gebunden. Ein Lauf gegen die produktiven Konten steht noch aus.
+
+### Edge Function invite-staff
+
+Die bereitgestellte Funktion wurde nicht heruntergeladen und nicht ersetzt. Im Repository liegt ausschließlich die vorbereitete Fassung unter `supabase/functions/invite-staff`. Die veröffentlichte Oberfläche auf `main` (`98d6d9c`) sendet `facility_id`, `email`, `first_name` und `last_name`, ohne `role`.
+
+Die vorbereitete Fassung unterscheidet sich in diesem Vertrag:
+
+- `role` darf fehlen oder leer sein und gilt dann als `employee`, damit der bisherige Aufruf Mitarbeiter einlädt.
+- `technician` wird gespeichert. `facility_manager` und `company_admin` werden abgelehnt.
+- Aufrufer ist eine aktive Geschäftsführung ohne Betrieb oder die aktive Betriebsleitung dieses Betriebs.
+- Die Zeile entsteht mit Status `pending`, der Versand läuft über `inviteUserByEmail`, danach steht `sent` oder bei einem Versandfehler `failed`.
+- Die Annahme bleibt `accept_staff_invitation` und übernimmt die gespeicherte Rolle. Der Eingeladene wählt sie nicht selbst.
+
+Vor einem Austausch muss die heruntergeladene Live-Quelle mit dieser Fassung verglichen werden. Die Live-Funktion muss `role` speichern und eine fehlende Rolle als Mitarbeiter behandeln. Die neue Oberfläche sendet die Rolle bereits. Solange die Live-Funktion das Feld nicht übernimmt, entsteht aus einer Technikereinladung ein Mitarbeiter, weil `staff_invitations.role` sonst den Standard `employee` erhält. Der Dienstschlüssel bleibt in der Funktionsumgebung.
+
+### Testergebnis am 10. November 2026
+
+- `npm test`: 80 bestanden, 0 fehlgeschlagen. Syntax, Rollen, Temperatur, Wasser, Techniker, Einladung, Mängel, Tagesbericht, Zähler und Mandantentrennung.
+- `npm run test:ui`: 8 bestanden, 0 fehlgeschlagen. Desktop und Smartphone, ohne Schreibzugriff auf die Datenbank.
+- `npm run test:integration`: nicht gestartet. Es ist keine bestätigte Testdatenbank gesetzt, und die produktive Verbindung wird abgelehnt.
+
+Festgestellte Fehler in diesem Lauf: keine.
+
+Offen vor dem Livebetrieb:
+
+- Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche.
+- Der Vergleich der heruntergeladenen Edge Function mit der vorbereiteten Fassung und erst danach eine gesonderte Freigabe zur Bereitstellung.
+- Die Veröffentlichung von `modularisierung`. Sie ist von dieser Datenbankinstallation getrennt und braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
+- Die sechs installierten SQL-Dateien bleiben stehen.
