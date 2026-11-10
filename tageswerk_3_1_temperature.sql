@@ -167,7 +167,9 @@ CREATE POLICY temperature_readings_insert ON public.temperature_readings FOR INS
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM public.temperature_points point
-      WHERE point.id = point_id AND point.facility_id = facility_id AND point.active IS TRUE
+      WHERE point.id = temperature_readings.point_id
+        AND point.facility_id = temperature_readings.facility_id
+        AND point.active IS TRUE
     )
   );
 
@@ -181,10 +183,10 @@ CREATE POLICY temperature_alerts_insert ON public.temperature_alerts FOR INSERT 
       SELECT 1
       FROM public.temperature_readings reading
       JOIN public.temperature_points point ON point.id = reading.point_id
-      WHERE reading.id = reading_id
-        AND reading.facility_id = facility_id
+      WHERE reading.id = temperature_alerts.reading_id
+        AND reading.facility_id = temperature_alerts.facility_id
         AND (reading.value_celsius < point.minimum_celsius OR reading.value_celsius > point.maximum_celsius)
-        AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
+        AND public.tageswerk_meter_role(temperature_alerts.organization_id, temperature_alerts.facility_id) IS NOT NULL
     )
   );
 CREATE POLICY temperature_alerts_update ON public.temperature_alerts FOR UPDATE TO authenticated

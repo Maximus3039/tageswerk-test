@@ -810,7 +810,9 @@ CREATE POLICY water_checks_insert ON public.water_checks FOR INSERT TO authentic
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM public.water_pools AS pool
-      WHERE pool.id = pool_id AND pool.facility_id = facility_id AND pool.active IS TRUE
+      WHERE pool.id = water_checks.pool_id
+        AND pool.facility_id = water_checks.facility_id
+        AND pool.active IS TRUE
     )
   );
 
@@ -856,9 +858,9 @@ CREATE POLICY water_alert_measures_insert ON public.water_alert_measures FOR INS
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM public.water_alerts AS alert
-      WHERE alert.id = alert_id
-        AND alert.facility_id = facility_id
-        AND alert.organization_id = organization_id
+      WHERE alert.id = water_alert_measures.alert_id
+        AND alert.facility_id = water_alert_measures.facility_id
+        AND alert.organization_id = water_alert_measures.organization_id
     )
   );
 
