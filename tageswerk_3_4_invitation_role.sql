@@ -117,7 +117,7 @@ BEGIN
   IF to_regprocedure('public.accept_staff_invitation()') IS NULL THEN
     RAISE EXCEPTION 'accept_staff_invitation() fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef('public.accept_staff_invitation()'::regprocedure);
+  definition := regexp_replace(pg_get_functiondef('public.accept_staff_invitation()'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('v_role := coalesce(v_invitation.role, ''employee'')' IN definition) > 0
      AND position('coalesce(role, ''employee'') IN (''employee'', ''technician'')' IN definition) > 0
      AND position('Keine offene Einladung gefunden.' IN definition) > 0
@@ -244,7 +244,7 @@ BEGIN
     RAISE NOTICE 'claim_staff_invitations() ist nicht vorhanden und wird nicht angelegt.';
     RETURN;
   END IF;
-  definition := pg_get_functiondef('public.claim_staff_invitations()'::regprocedure);
+  definition := regexp_replace(pg_get_functiondef('public.claim_staff_invitations()'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('coalesce(r.role, ''employee'')' IN definition) > 0
      AND position('IN (''employee'', ''technician'')' IN definition) > 0 THEN
     RETURN;

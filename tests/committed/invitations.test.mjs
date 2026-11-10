@@ -196,6 +196,8 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.match(roleSql, /Geschaeftsfuehrungsrechte werden hier nicht veraendert/);
  assert.match(roleSql, /Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen/);
  assert.match(roleSql, /Reaktivierung nur ueber gesonderte Freigabe/);
+ assert.match(roleSql, /Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben/);
+ assert.match(roleSql, /SET is_active = true/);
  assert.doesNotMatch(roleSql, /UPDATE public\.memberships SET role = 'technician'/);
  assert.match(roleSql, /actor_role IN \(''employee'', ''technician''\) AND NEW\.reading_type <> ''regular''/);
  assert.match(roleSql, /Stornieren darf die Betriebsleitung oder Geschäftsführung/);
@@ -255,7 +257,12 @@ function planMembershipChange({actor, targetMemberships, facility, role, remove 
  if (targetMemberships.some(item => item.organization_id === facility.organization_id && item.role === 'company_admin')) return {ok: false, error: 'Geschaeftsfuehrungsrechte werden hier nicht veraendert'};
  const existing = targetMemberships.find(item => item.organization_id === facility.organization_id && item.facility_id === facility.id);
  if (existing && !admin && !['employee', 'technician'].includes(existing.role)) return {ok: false, error: 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten'};
- if (existing && existing.is_active === false && !remove) return {ok: false, error: 'Zuordnung ist deaktiviert. Reaktivierung nur ueber gesonderte Freigabe.'};
+ if (existing && existing.is_active === false && !remove) {
+  if (role !== existing.role) return {ok: false, error: 'Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben.'};
+  const restored = targetMemberships.map(item => ({...item}));
+  restored.find(item => item.facility_id === facility.id).is_active = true;
+  return {ok: true, memberships: restored};
+ }
  const next = targetMemberships.map(item => ({...item}));
  if (!existing) {
   if (remove) return {ok: false, error: 'Keine Zuordnung vorhanden'};
@@ -296,4 +303,13 @@ test('Betriebsleitungen verwalten Mitarbeiter und Techniker und erhöhen keine R
  assert.equal(adminChange.memberships.find(item => item.facility_id === facility.id).role, 'employee');
  const appointed = planMembershipChange({actor: admin, targetMemberships: [employeeRow], facility, role: 'facility_manager'});
  assert.equal(appointed.memberships[0].role, 'facility_manager');
+ const restored = planMembershipChange({actor: manager, targetMemberships: [{...employeeRow, is_active: false}], facility, role: 'employee'});
+ assert.equal(restored.ok, true);
+ assert.equal(restored.memberships[0].role, 'employee');
+ assert.equal(restored.memberships[0].is_active, true);
+ const restoredTechnician = planMembershipChange({actor: manager, targetMemberships: [{...technicianRow, facility_id: facility.id, is_active: false}], facility, role: 'technician'});
+ assert.equal(restoredTechnician.memberships[0].role, 'technician');
+ assert.equal(restoredTechnician.memberships[0].is_active, true);
+ const raisedWhileInactive = planMembershipChange({actor: admin, targetMemberships: [{...employeeRow, is_active: false}], facility, role: 'facility_manager'});
+ assert.equal(raisedWhileInactive.ok, false);
 });

@@ -20,8 +20,11 @@
 -- ALTER TYPE public.<enum> ADD VALUE 'technician';
 -- Eine unbekannte Funktionsfassung setzt die Transaktion zurück.
 -- manage_facility_membership bleibt auf (text, uuid, text, boolean) und übernimmt
--- nur die geprüfte Fassung. Betriebsleitungen verwalten Mitarbeiter und Techniker
--- des eigenen Betriebs. Geschäftsführungszuordnungen bleiben unangetastet.
+-- nur die geprüfte Fassung. Leerzeichen und Zeilenumbrüche gelten dabei als formal.
+-- Betriebsleitungen verwalten Mitarbeiter und Techniker des eigenen Betriebs.
+-- Eine deaktivierte Zuordnung wird mit derselben Rolle wieder freigegeben.
+-- Eine andere Rolle bei der Reaktivierung wird abgelehnt.
+-- Geschäftsführungszuordnungen und Betriebsleitungen bleiben geschützt.
 -- tageswerk_prepare_reading behält jede bestehende Prüfung. Techniker erfassen
 -- normale Stände und stornieren oder korrigieren nicht.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
@@ -63,7 +66,7 @@ BEGIN
   IF to_regprocedure('public.tageswerk_meter_role(uuid,uuid)') IS NULL THEN
     RAISE EXCEPTION 'tageswerk_meter_role fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef('public.tageswerk_meter_role(uuid,uuid)'::regprocedure);
+  definition := regexp_replace(pg_get_functiondef('public.tageswerk_meter_role(uuid,uuid)'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('technician' IN definition) > 0 THEN
     IF position('WHEN ''technician'' THEN 3' IN definition) = 0
        OR position('(m.role = ''employee'' AND m.facility_id = p_facility_id)' IN definition) = 0
@@ -74,7 +77,7 @@ BEGIN
     RETURN;
   END IF;
   IF position('SECURITY DEFINER' IN definition) = 0
-     OR position('m.is_active IS TRUE' IN definition) = 0
+     OR (position('m.is_active IS TRUE' IN definition) = 0 AND position('m.is_active = true' IN definition) = 0)
      OR position('(m.role = ''company_admin'' AND m.facility_id IS NULL)' IN definition) = 0
      OR position('(m.role = ''facility_manager'' AND m.facility_id = p_facility_id)' IN definition) = 0
      OR position('(m.role = ''employee'' AND m.facility_id = p_facility_id)' IN definition) = 0
@@ -242,7 +245,7 @@ BEGIN
   IF to_regprocedure('public.tageswerk_prepare_reading()') IS NULL THEN
     RAISE EXCEPTION 'tageswerk_prepare_reading() fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef('public.tageswerk_prepare_reading()'::regprocedure);
+  definition := regexp_replace(pg_get_functiondef('public.tageswerk_prepare_reading()'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('technician' IN definition) > 0 THEN
     IF position('actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular''' IN definition) = 0
        OR position('actor_role NOT IN (''company_admin'', ''facility_manager'')' IN definition) = 0
@@ -279,13 +282,14 @@ BEGIN
   IF to_regprocedure('public.manage_facility_membership(text,uuid,text,boolean)') IS NULL THEN
     RAISE EXCEPTION 'manage_facility_membership(text, uuid, text, boolean) fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure);
+  definition := regexp_replace(pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('technician' IN definition) > 0 THEN
     IF position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN definition) = 0
        OR position('m.role NOT IN (''employee'',''technician'')' IN definition) = 0
        OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
        OR position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN definition) = 0
-       OR position('Reaktivierung nur ueber gesonderte Freigabe' IN definition) = 0 THEN
+       OR position('Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben.' IN definition) = 0
+       OR position('SET is_active = true' IN definition) = 0 THEN
       RAISE EXCEPTION 'manage_facility_membership enthält Techniker in einer unbekannten Form und wurde nicht ersetzt.';
     END IF;
   ELSIF position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
@@ -316,6 +320,7 @@ BEGIN
       DECLARE
         v_org uuid; v_target uuid; v_caller uuid := auth.uid();
         v_company_admin boolean; v_manager boolean; v_existing uuid;
+        v_existing_role text; v_existing_active boolean;
       BEGIN
         IF v_caller IS NULL THEN RAISE EXCEPTION 'Anmeldung erforderlich'; END IF;
         SELECT organization_id INTO v_org FROM public.facilities WHERE id = p_facility_id;
@@ -372,9 +377,9 @@ BEGIN
         FOR UPDATE;
         IF v_existing IS NOT NULL THEN
           IF NOT v_company_admin AND EXISTS(
-            SELECT 1 FROM public.memberships AS membership
-            WHERE membership.id = v_existing
-              AND membership.role NOT IN ('employee','technician')
+            SELECT 1 FROM public.memberships AS m
+            WHERE m.id = v_existing
+              AND m.role NOT IN ('employee','technician')
           ) THEN
             RAISE EXCEPTION 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten';
           END IF;
@@ -382,11 +387,16 @@ BEGIN
             UPDATE public.memberships SET is_active = false WHERE id = v_existing;
             RETURN 'Zuordnung deaktiviert';
           END IF;
-          IF EXISTS(
-            SELECT 1 FROM public.memberships
-            WHERE id = v_existing AND is_active = false
-          ) THEN
-            RAISE EXCEPTION 'Zuordnung ist deaktiviert. Reaktivierung nur ueber gesonderte Freigabe.';
+          SELECT membership.role, membership.is_active
+            INTO v_existing_role, v_existing_active
+          FROM public.memberships AS membership
+          WHERE membership.id = v_existing;
+          IF v_existing_active = false THEN
+            IF p_role IS DISTINCT FROM v_existing_role THEN
+              RAISE EXCEPTION 'Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben.';
+            END IF;
+            UPDATE public.memberships SET is_active = true WHERE id = v_existing;
+            RETURN 'Zuordnung reaktiviert';
           END IF;
           UPDATE public.memberships SET role = p_role WHERE id = v_existing;
           RETURN 'Zuordnung aktualisiert';
