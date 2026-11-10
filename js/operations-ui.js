@@ -66,6 +66,7 @@ import {
  saveWaterCheck,
  saveWaterRound,
  saveWaterRoundDraft,
+ discardWaterRound,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterParameterAdd,
@@ -710,6 +711,34 @@ async function rememberDraft(userId, round, immediate = false) {
  return stored;
 }
 
+function discardButton(person, facilityId, round) {
+ return button('Kontrollrunde verwerfen', 'secondary', async () => {
+  if (!confirm('Kontrollrunde verwerfen? Die erfassten Werte werden nicht als Messung gespeichert.')) return;
+  window.clearTimeout(waterDraftTimer);
+  const current = round?.roundId ? round : loadWaterRound(person.userId, facilityId);
+  if (!current?.roundId) {
+   clearWaterRound(person.userId, facilityId);
+   renderPanel('');
+   return;
+  }
+  const result = await discardWaterRound(database(), current);
+  if (!result?.ok && !result?.absent) {
+   showDraftStatus(waterDraftStatusText.offline);
+   say('error', result?.error || 'Die Kontrollrunde wurde nicht verworfen.');
+   return;
+  }
+  clearWaterRound(person.userId, facilityId);
+  const preview = bundle();
+  state.operationPreview = {
+   ...preview,
+   waterRoundDrafts: (preview.waterRoundDrafts || []).filter(draft => !(draft.userId === person.userId && draft.facilityId === facilityId && draft.roundId === current.roundId))
+  };
+  showDraftStatus('');
+  say('ok', 'Die Kontrollrunde wurde verworfen. Es wurde keine Messung gespeichert.');
+  renderPanel('');
+ });
+}
+
 function renderWaterRound(host, current, data) {
  const pools = waterRoundPools(data, current.id);
  const person = actor();
@@ -744,6 +773,7 @@ function renderWaterRound(host, current, data) {
    showDraftStatus(waterDraftStatusText.saved);
    renderPanel('');
   }));
+  actions.append(discardButton(person, current.id, {roundId: remote.roundId, facilityId: current.id, revision: remote.revision}));
   card.append(note, actions);
   host.append(card);
   return;
@@ -794,6 +824,7 @@ function renderWaterRound(host, current, data) {
     await rememberDraft(person.userId, {...latest, phase: 'edit'}, true);
     renderPanel('');
    }));
+   actions.append(discardButton(person, current.id, loadWaterRound(person.userId, current.id) || round));
    actions.append(button('Kontrollrunde speichern', '', () => commit(async () => {
     window.clearTimeout(waterDraftTimer);
     const result = await saveWaterRound(database(), bundle(), loadWaterRound(person.userId, current.id) || round, person, new Date().toISOString(), context());
@@ -858,6 +889,7 @@ function renderWaterRound(host, current, data) {
   }));
  }
  if (round.index === 0) actions.firstChild.disabled = true;
+ actions.append(discardButton(person, current.id, loadWaterRound(person.userId, current.id) || round));
  card.append(actions);
  host.append(card);
 }

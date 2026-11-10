@@ -1132,6 +1132,29 @@ export async function saveWaterRoundDraft(db, round) {
  return {ok: true, offline: false, conflict: false, round: {...kept, revision: payload.revision}, revision: payload.revision};
 }
 
+function withoutOpenRound(bundle, round) {
+ if (!bundle) return bundle;
+ return {
+  ...bundle,
+  waterRoundDrafts: (bundle.waterRoundDrafts || []).filter(draft => !(draft.roundId === round?.roundId && draft.facilityId === round?.facilityId))
+ };
+}
+
+export async function discardWaterRound(db, round) {
+ if (!round?.roundId) return {ok: false, error: 'Der Entwurf ist unvollständig.'};
+ let result;
+ try {
+  result = await db.rpc('tageswerk_discard_water_round_draft', {p_round_id: round.roundId});
+ } catch (error) {
+  return {ok: false, error: storageMessage(error)};
+ }
+ if (result?.error) return {ok: false, error: storageMessage(result.error)};
+ const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
+ if (payload?.status === 'discarded' && payload.round_id === round.roundId) return {ok: true, id: round.roundId};
+ if (payload?.status === 'absent') return {ok: false, absent: true, error: 'Kein eigener offener Entwurf.'};
+ return {ok: false, error: 'Der Entwurf wurde nicht verworfen.'};
+}
+
 export async function saveWaterRound(db, bundle, round, actor, now, context) {
  const review = reviewWaterRound(bundle, round, actor, now);
  if (!review.ok) return denied(bundle, review.error);
@@ -1152,14 +1175,14 @@ export async function saveWaterRound(db, bundle, round, actor, now, context) {
  if (result?.error) return denied(bundle, storageMessage(result.error));
  const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
  if (payload?.status === 'already_stored' && payload.round_id === round.roundId) {
-  return {ok: true, id: round.roundId, ids: [], bundle};
+  return {ok: true, id: round.roundId, ids: [], bundle: withoutOpenRound(bundle, round)};
  }
  const ids = Array.isArray(payload?.ids) ? payload.ids : [];
  if (payload?.status !== 'stored' || payload.round_id !== round.roundId || ids.length !== review.checks.length) {
   return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
  }
  const facility = {id: review.checks[0].facilityId, organization_id: review.checks[0].organizationId};
- if (!waterHistoryRole(facility, actor.memberships)) return {ok: true, id: round.roundId, ids, bundle};
+ if (!waterHistoryRole(facility, actor.memberships)) return {ok: true, id: round.roundId, ids, bundle: withoutOpenRound(bundle, round)};
  const loaded = await loadOperations(db, actor, context);
  if (!loaded.ok) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
  for (const expected of review.checks) {
@@ -1174,7 +1197,7 @@ export async function saveWaterRound(db, bundle, round, actor, now, context) {
   const again = loaded.bundle.waterChecks.find(item => item.id === previous.id);
   if (again && JSON.stringify(again.readings) !== JSON.stringify(previous.readings)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
  }
- return {ok: true, id: round.roundId, ids, bundle: loaded.bundle};
+ return {ok: true, id: round.roundId, ids, bundle: withoutOpenRound(loaded.bundle, round)};
 }
 
 export async function saveWaterAcknowledgement(db, bundle, alertId, note, actor, now, context) {
