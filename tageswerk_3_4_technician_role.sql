@@ -30,14 +30,16 @@
 -- tageswerk_prepare_reading behält jede bestehende Prüfung. Techniker erfassen
 -- normale Stände und stornieren oder korrigieren nicht.
 -- employee_update_assigned_defect ist SECURITY DEFINER. Anmeldung, Zuweisung,
--- Organisation, Betrieb und Status prüft die Funktion selbst.
--- Die produktive Fassung verlangt dabei kein is_active.
+-- Organisation, Betrieb, Status und Arbeitsvermerk prüft die Funktion selbst.
+-- Die produktive Fassung verlangt dabei kein is_active. Diese bekannte Fassung
+-- wird ersetzt und verlangt danach eine aktive Mitgliedschaft.
+-- Eine Fassung, die is_active bereits prüft, bleibt stehen.
 -- Direkte Tabellenänderungen bleiben bei den bestehenden RLS-Regeln.
--- Die geprüfte Fassung verlangt keine Rolle employee. Eine Mitgliedschaft desselben
--- Betriebs schließt den Techniker ein. Diese Fassung bleibt
--- unverändert. Eine Fassung mit ausdrücklicher Mitarbeiterbedingung wird um den
--- Techniker ergänzt.
--- Fehlt Zuweisung oder Betriebsprüfung, wird die Datei abgebrochen.
+-- Die geprüfte Fassung verlangt keine Rolle employee. Eine aktive Mitgliedschaft
+-- desselben Betriebs schließt den Techniker ein.
+-- Eine Fassung mit ausdrücklicher Mitarbeiterbedingung wird um den Techniker ergänzt.
+-- Fehlt Zuweisung, Betrieb oder die erwartete Stelle für die aktive Mitgliedschaft,
+-- wird die Datei abgebrochen.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
@@ -477,15 +479,59 @@ BEGIN
           OR position('m.role = ''company_admin'' OR m.facility_id = d.facility_id' IN definition) > 0
         )
       );
-    IF recognized THEN
+    IF recognized
+       AND (
+         position('m.is_active = true' IN definition) > 0
+         OR position('m.is_active IS TRUE' IN definition) > 0
+       ) THEN
       NULL;
+    ELSIF recognized THEN
+      EXECUTE $replace_defect$
+        CREATE OR REPLACE FUNCTION public.employee_update_assigned_defect(p_defect_id uuid, p_status text, p_note text)
+        RETURNS void
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = ''
+        AS $function$
+        DECLARE d public.defects%ROWTYPE;
+        BEGIN
+          IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Anmeldung erforderlich'; END IF;
+          IF p_status IS NULL OR p_status NOT IN ('in_progress','pending_review') THEN
+            RAISE EXCEPTION 'Mitarbeiter koennen nur bearbeiten oder Erledigung melden';
+          END IF;
+          IF p_note IS NULL OR length(btrim(p_note)) < 3 OR length(p_note) > 2000 THEN
+            RAISE EXCEPTION 'Arbeitsvermerk mit 3 bis 2000 Zeichen erforderlich';
+          END IF;
+          SELECT * INTO d FROM public.defects WHERE id=p_defect_id FOR UPDATE;
+          IF NOT FOUND THEN RAISE EXCEPTION 'Mangel nicht gefunden'; END IF;
+          IF d.assigned_to IS DISTINCT FROM auth.uid() THEN
+            RAISE EXCEPTION 'Dieser Mangel ist dir nicht zugewiesen';
+          END IF;
+          IF NOT EXISTS (
+            SELECT 1 FROM public.memberships m
+            WHERE m.user_id=auth.uid() AND m.is_active = true AND m.organization_id=d.organization_id
+            AND (m.role='company_admin' OR m.facility_id=d.facility_id)
+          ) THEN RAISE EXCEPTION 'Keine Betriebsberechtigung'; END IF;
+          IF d.status IN ('resolved','pending_review') THEN
+            RAISE EXCEPTION 'Vorgang ist bereits abgeschlossen oder wartet auf Freigabe';
+          END IF;
+          UPDATE public.defects SET status=p_status, change_note=btrim(p_note)
+          WHERE id=p_defect_id;
+        END;
+        $function$
+      $replace_defect$;
     ELSE
       updated := replace(definition, '<> ''employee''', 'NOT IN (''employee'', ''technician'')');
       updated := replace(updated, '= ''employee''', 'IN (''employee'', ''technician'')');
+      IF position('m.is_active = true' IN updated) = 0 AND position('m.is_active IS TRUE' IN updated) = 0 THEN
+        updated := replace(updated, 'm.user_id=auth.uid() AND m.organization_id', 'm.user_id=auth.uid() AND m.is_active = true AND m.organization_id');
+        updated := replace(updated, 'm.user_id = auth.uid() AND m.organization_id', 'm.user_id = auth.uid() AND m.is_active = true AND m.organization_id');
+      END IF;
       IF updated = definition
          OR position('assigned_to IS DISTINCT FROM auth.uid()' IN updated) = 0
          OR position('Keine Betriebsberechtigung' IN updated) = 0
          OR (position('m.facility_id=d.facility_id' IN updated) = 0 AND position('m.facility_id = d.facility_id' IN updated) = 0)
+         OR (position('m.is_active = true' IN updated) = 0 AND position('m.is_active IS TRUE' IN updated) = 0)
       THEN
         RAISE EXCEPTION 'employee_update_assigned_defect erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;

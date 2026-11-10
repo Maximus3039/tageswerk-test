@@ -139,6 +139,8 @@ facts AS (
       AND position('SET assigned_to' IN bodies.update_defect) = 0
       AND position('SET facility_id' IN bodies.update_defect) = 0
       AND position('SET organization_id' IN bodies.update_defect) = 0 AS update_defect_safe,
+    position('m.is_active = true' IN bodies.update_defect) > 0
+      OR position('m.is_active IS TRUE' IN bodies.update_defect) > 0 AS update_defect_active,
     (
       position('= ''employee''' IN bodies.update_defect) = 0
       AND position('<> ''employee''' IN bodies.update_defect) = 0
@@ -277,7 +279,8 @@ checks AS (
     CASE
       WHEN NOT has_update_defect THEN 'Die Funktion fehlt und wird nicht vorausgesetzt.'
       WHEN NOT update_defect_safe THEN 'Zuweisung, Betrieb oder eine andere Sicherheitsprüfung fehlt.'
-      WHEN update_defect_known THEN 'Bekannte Sicherheitsprüfungen vorhanden.'
+      WHEN update_defect_known AND NOT update_defect_active THEN 'Bekannte produktive Fassung. Die Migration ergänzt die aktive Mitgliedschaft.'
+      WHEN update_defect_known THEN 'Aktive Mitgliedschaft, Zuweisung und Betrieb werden geprüft.'
       ELSE 'Der Funktionskörper ist unbekannt.'
     END
   FROM facts

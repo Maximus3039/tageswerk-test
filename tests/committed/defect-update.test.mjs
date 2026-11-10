@@ -90,6 +90,7 @@ function assignedDefectUpdate({userId, memberships, defect, status, note}) {
  if (!defect) return {ok: false, error: 'Mangel nicht gefunden'};
  if (defect.assigned_to !== userId) return {ok: false, error: 'Dieser Mangel ist dir nicht zugewiesen'};
  const allowed = (memberships || []).some(membership => membership.user_id === userId
+  && membership.is_active === true
   && membership.organization_id === defect.organization_id
   && (membership.role === 'company_admin' || membership.facility_id === defect.facility_id));
  if (!allowed) return {ok: false, error: 'Keine Betriebsberechtigung'};
@@ -137,11 +138,14 @@ test('Die bekannte Mängelfunktion bleibt installierbar und unsichere Fassungen 
  assert.equal(defectFunctionStatus(knownBody.replace("m.role='company_admin' OR m.facility_id=d.facility_id", "m.role = 'employee'")), 'stoppen');
  assert.equal(defectFunctionStatus(`${knownBody} AND m.role = 'employee'`), 'bereit');
  assert.equal(defectFunctionStatus(knownBody.replace('Keine Betriebsberechtigung', 'technician ohne Betrieb')), 'stoppen');
- assert.match(sql, /Diese Fassung bleibt\r?\n-- unverändert/);
+ assert.match(sql, /Die produktive Fassung verlangt dabei kein is_active/);
  assert.match(sql, /employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.match(sql, /employee_update_assigned_defect erkennt Techniker nicht an einer erwarteten Stelle/);
  assert.match(sql, /replace\(updated, '= ''employee''', 'IN \(''employee'', ''technician''\)'\)/);
- assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION public\.employee_update_assigned_defect/);
+ assert.match(sql, /CREATE OR REPLACE FUNCTION public\.employee_update_assigned_defect/);
+ assert.match(sql, /m\.is_active = true AND m\.organization_id=d\.organization_id/);
+ assert.match(sql, /m\.role='company_admin' OR m\.facility_id=d\.facility_id/);
+ assert.match(control, /Bekannte produktive Fassung\. Die Migration ergänzt die aktive Mitgliedschaft/);
  assert.match(control, /employee_update_assigned_defect ist die geprüfte Fassung/);
  assert.match(control, /m\.role=''company_admin'' OR m\.facility_id=d\.facility_id/);
  assert.match(control, /THEN 'stoppen'/);
@@ -211,8 +215,22 @@ test('Mitarbeiter und Techniker bearbeiten nur den zugewiesenen Mangel ihres Bet
   memberships: [{...technician, is_active: false}],
   defect: openDefect(technicianId),
   status: 'in_progress',
-  note: 'Deaktiviert'
- }).ok, true);
+  note: 'Deaktivierter Techniker'
+ }).error, 'Keine Betriebsberechtigung');
+ assert.equal(assignedDefectUpdate({
+  userId: employeeId,
+  memberships: [{...employee, is_active: false}],
+  defect: openDefect(employeeId),
+  status: 'in_progress',
+  note: 'Deaktivierter Mitarbeiter'
+ }).error, 'Keine Betriebsberechtigung');
+ assert.equal(assignedDefectUpdate({
+  userId: employeeId,
+  memberships: [{...employee, is_active: null}],
+  defect: openDefect(employeeId),
+  status: 'in_progress',
+  note: 'Unklare Mitgliedschaft'
+ }).error, 'Keine Betriebsberechtigung');
  assert.equal(assignedDefectUpdate({
   userId: technicianId,
   memberships: [technician],

@@ -172,6 +172,9 @@ test('Die produktiven Fassungen werden erkannt und unsichere Fassungen stoppen',
  assert.match(roleSql, /Reaktivierung nur ueber gesonderte Freigabe/);
  assert.match(roleSql, /Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben/);
  assert.match(roleSql, /Geschaeftsfuehrungsrechte werden hier nicht veraendert/);
+ assert.match(roleSql, /m\.is_active = true AND m\.organization_id=d\.organization_id/);
+ assert.match(roleSql, /assigned_to IS DISTINCT FROM auth\.uid\(\)/);
+ assert.match(controlSql, /update_defect_active/);
  assert.match(invitationSql, /r\.facility_id,''employee''/);
  assert.match(invitationSql, /claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.doesNotMatch(invitationSql, /UPDATE public\.memberships SET role/);
