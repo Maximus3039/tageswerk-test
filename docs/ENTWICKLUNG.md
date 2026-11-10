@@ -123,29 +123,17 @@ Anmeldung, Mängel, Tagesbericht, Zählerstände und die bisherige Mitarbeiterve
 
 ### Edge Function invite-staff
 
-Am 10. November 2026, 22:47 Uhr, ließ sich die Supabase CLI 3.1.0 über `npx supabase` starten. Der lesende Befehl `supabase functions download invite-staff` verlangt ein Zugangstoken mit `edge_functions_read`. `supabase projects list` stoppte mit `Access token not provided`. Die veröffentlichte Funktion wurde deshalb nicht gelesen, nicht verändert und nicht bereitgestellt.
+Die produktive Funktion im Projekt `eqtrifscedpsngsysxvc` ist Version 8 und aktiv. `verify_jwt` steht dort auf `false`. Die Funktion prüft den Bearer-Token selbst mit `auth.getUser()`. Ein Aufruf ohne gültige Anmeldung legt keine Einladung an. Die Gateway-Prüfung ist damit nicht die erste Sperre. Eine spätere Bereitstellung muss diese Einstellung ausdrücklich beibehalten, sonst schaltet die CLI sie ein:
 
-Für den Vergleich wird die produktive Funktionsdatei benötigt, so wie sie im Supabase-Dashboard unter `invite-staff` steht, einschließlich aller importierten Dateien. Ein späterer Download darf nicht in `supabase/functions/invite-staff` schreiben, weil dort die vorbereitete Fassung liegt.
+`npx supabase functions deploy invite-staff --remote eqtrifscedpsngsysxvc --no-verify-jwt --use-api`
 
-Die aus dem Dashboard beschriebene produktive Fassung bleibt die Grundlage: `auth.getUser()`, `request_staff_invitation`, `inviteUserByEmail`, die Status `pending`, `sent` und `failed` sowie eine Protokollzeile bei einem Versandfehler. Die vorbereitete Datei `supabase/functions/invite-staff/index.ts` folgt diesem Ablauf. Die Rolle schreibt sie nicht mit dem Dienstschlüssel. Der Dienstschlüssel setzt nur den Versandstatus.
+Der Funktionsname muss genannt sein. `--prune` darf nicht verwendet werden. Die Funktion ist noch nicht bereitgestellt.
 
-`tageswerk_3_4_invitation_role_parameter.sql` ergänzt `request_staff_invitation(uuid, text, text, text, text)`. Die vierstellige Funktion bleibt. Die neue Funktion prüft `private.can_manage_facility`, lässt nur `employee` und `technician` zu und behandelt eine leere Rolle als Mitarbeiter. Eine bestehende oder deaktivierte Zuordnung wird nicht überschrieben. Eine offene Einladung wird nicht wiederverwendet. Der eindeutige Index `staff_invitations_open_email_facility_key` verhindert eine zweite offene Einladung derselben E-Mail im selben Betrieb. Die Datei ist eine Transaktion und ist nicht ausgeführt.
+Die korrigierte lokale Fassung übernimmt Version 8 und ergänzt nur die Rolle. Erhalten bleiben CORS, `OPTIONS`, die Eingabeprüfung, `inviteUserByEmail`, `TAGESWERK_REDIRECT_URL`, die Status `pending`, `sent` und `failed`, die Statusänderung nur bei `pending`, `error_detail` und die Fehlerprotokolle. `employee` und `technician` gehen an die fünfstellige `request_staff_invitation`. Eine fehlende oder leere Rolle bleibt Mitarbeiter. Andere Rollen werden abgelehnt, bevor die Datenbankfunktion läuft. Der Dienstschlüssel schreibt keine Rolle und keine Mitgliedschaft.
 
-Vor dem Ausführen liest `tageswerk_3_4_invitation_role_parameter_voraussetzungen.sql` die Voraussetzungen. Danach liest `tageswerk_3_4_invitation_role_parameter_kontrolle.sql` Signaturen, Rechte und den Index. Beide Abfragen schreiben nichts.
+Offen bleibt das bereits registrierte Konto. Version 8 erkennt es nicht gesondert. Jeder Versandfehler, auch `already registered`, setzt `failed` und speichert `error_detail`. Die Anmeldung ruft `accept_staff_invitation` für eine Einladung mit Status `sent` auf. Diese Annahme vergibt die gespeicherte Rolle nur, wenn noch keine Zuordnung für den Betrieb besteht, und ändert eine bestehende oder deaktivierte Mitgliedschaft nicht. `sent` würde deshalb beim nächsten Login eine neue Zuordnung anlegen, ohne dass Version 8 dafür einen eigenen Weg enthält. Dieses Verhalten bleibt deshalb unverändert. Die Oberfläche enthält noch einen Erfolgssatz für `existing_account`. Die korrigierte Funktion liefert dieses Feld nicht.
 
-Ein bereits registriertes Konto ohne Zuordnung erhält die Einladung mit Status `sent` und keine Mitgliedschaft. Die Rolle gilt erst bei der Annahme, wenn noch keine Zuordnung besteht. Ein Versandfehler setzt `failed` und wird protokolliert. Die Oberfläche sendet die Auswahl Mitarbeiter oder Techniker bereits an `invite-staff`.
-
-Die veröffentlichte Oberfläche auf `main` (`98d6d9c`) sendet `facility_id`, `email`, `first_name` und `last_name`, ohne `role`. Im Repository liegt ausschließlich die vorbereitete Fassung unter `supabase/functions/invite-staff`.
-
-Die vorbereitete Fassung unterscheidet sich in diesem Vertrag:
-
-- `role` darf fehlen oder leer sein und gilt dann als `employee`, damit der bisherige Aufruf Mitarbeiter einlädt.
-- `technician` wird gespeichert. `facility_manager` und `company_admin` werden abgelehnt.
-- Aufrufer ist eine aktive Geschäftsführung ohne Betrieb oder die aktive Betriebsleitung dieses Betriebs.
-- Die Zeile entsteht mit Status `pending`, der Versand läuft über `inviteUserByEmail`, danach steht `sent` oder bei einem Versandfehler `failed`.
-- Die Annahme bleibt `accept_staff_invitation` und übernimmt die gespeicherte Rolle. Der Eingeladene wählt sie nicht selbst.
-
-Vor einem Austausch muss die heruntergeladene Live-Quelle mit dieser Fassung verglichen werden. Die Live-Funktion muss `role` speichern und eine fehlende Rolle als Mitarbeiter behandeln. Die neue Oberfläche sendet die Rolle bereits. Solange die Live-Funktion das Feld nicht übernimmt, entsteht aus einer Technikereinladung ein Mitarbeiter, weil `staff_invitations.role` sonst den Standard `employee` erhält. Der Dienstschlüssel bleibt in der Funktionsumgebung.
+Die veröffentlichte Oberfläche auf `main` sendet keine Rolle. Daraus wird weiterhin ein Mitarbeiter. Die Oberfläche auf `modularisierung` sendet Mitarbeiter oder Techniker.
 
 ### Testergebnis am 10. November 2026
 
@@ -158,6 +146,6 @@ Festgestellte Fehler in diesem Lauf: keine.
 Offen vor dem Livebetrieb:
 
 - Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche.
-- Die Freigabe für `tageswerk_3_4_invitation_role_parameter.sql` und danach die Bereitstellung der vorbereiteten Edge Function. Beides ist noch nicht erfolgt.
+- Die korrigierte Edge Function `invite-staff` ist noch nicht bereitgestellt. Die sieben SQL-Migrationen sind ausgeführt. Eine Bereitstellung muss `verify_jwt` mit `--no-verify-jwt` beibehalten.
 - Die Veröffentlichung von `modularisierung`. Sie ist von dieser Datenbankinstallation getrennt und braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
 - Die sechs installierten SQL-Dateien bleiben stehen.

@@ -6,9 +6,15 @@ import {canInviteFacility, claimInvitations, planInvitation} from '../../supabas
 
 const now = '2026-11-10T09:00:00.000Z';
 const organization = 'org-a';
-const facility = {id: 'fac-a', organization_id: organization, name: 'Bad'};
-const second = {id: 'fac-b', organization_id: organization, name: 'Strand'};
-const foreign = {id: 'fac-c', organization_id: 'org-b', name: 'Fremd'};
+const facility = {id: '11111111-1111-4111-8111-111111111111', organization_id: organization, name: 'Bad'};
+const second = {id: '22222222-2222-4222-8222-222222222222', organization_id: organization, name: 'Strand'};
+const foreign = {id: '33333333-3333-4333-8333-333333333333', organization_id: 'org-b', name: 'Fremd'};
+const env = {
+ SUPABASE_URL: 'https://example.test',
+ SUPABASE_ANON_KEY: 'anon-test',
+ SUPABASE_SERVICE_ROLE_KEY: 'service-test',
+ TAGESWERK_REDIRECT_URL: 'https://tageswerk.example/einladung'
+};
 
 function membership(role, target = facility, active = true) {
  return {organization_id: target.organization_id, facility_id: role === 'company_admin' ? null : target.id, role, is_active: active};
@@ -48,9 +54,41 @@ function database(rows = [], members = []) {
  };
 }
 
-function mailer() {
- const sent = [];
- return {sent, async send(invitation) {sent.push(invitation);}};
+async function runInvite({caller, body, store, method = 'POST', authorization = 'Bearer session', userError = null, inviteError = null, log = () => {}, beforeUpdate = null, readBody = null}) {
+ const trace = {mail: [], updates: []};
+ const result = await inviteStaff({
+  method,
+  authorization,
+  env,
+  body,
+  readBody,
+  log,
+  now: () => now,
+  async getUser() {
+   if (userError) return {user: null, error: userError};
+   return {user: {id: caller?.userId || 'user-1'}, error: null};
+  },
+  async requestInvitation(input) {
+   return store.requestInvitation({...input, caller});
+  },
+  async updateInvitation(input) {
+   trace.updates.push(input);
+   if (input.onlyStatus !== 'pending' || Object.hasOwn(input.changes, 'role')) return {error: {message: 'Statusgrenze verletzt'}, updated: null};
+   const row = store.state.rows.find(item => item.id === input.id);
+   if (beforeUpdate) beforeUpdate(row);
+   if (!row || row.status !== 'pending') return {updated: null};
+   row.status = input.changes.status;
+   if (input.changes.error_detail) row.error_detail = input.changes.error_detail;
+   row.updated_at = input.changes.updated_at;
+   return {updated: {id: row.id}};
+  },
+  async inviteByEmail(input) {
+   trace.mail.push(input);
+   if (inviteError) return {error: inviteError};
+   return {error: null};
+  }
+ });
+ return {result, trace};
 }
 
 const manager = {userId: 'manager-1', email: 'leitung@example.test', memberships: [membership('facility_manager')]};
@@ -60,54 +98,50 @@ const technician = {userId: 'technician-1', email: 'timo@example.test', membersh
 
 test('Eine Einladung speichert Techniker nur für den erlaubten Betrieb', async () => {
  const store = database();
- const post = mailer();
- const result = await inviteStaff({
+ const sent = await runInvite({
   caller: manager,
-  body: {facility_id: facility.id, role: 'technician', email: 'Neu@Example.Test', first_name: 'Nils', last_name: 'Techniker'},
-  database: store,
-  mailer: post,
-  now
+  store,
+  body: {facility_id: facility.id, role: 'technician', email: 'Neu@Example.Test', first_name: 'Nils', last_name: 'Techniker'}
  });
- assert.equal(result.status, 200);
- assert.equal(result.body.ok, true);
+ assert.equal(sent.result.status, 200);
+ assert.equal(sent.result.body.ok, true);
+ assert.equal(sent.result.headers['Access-Control-Allow-Origin'], '*');
  assert.equal(store.state.rows[0].role, 'technician');
  assert.equal(store.state.rows[0].facility_id, facility.id);
  assert.equal(store.state.rows[0].email, 'neu@example.test');
  assert.equal(store.state.rows[0].status, 'sent');
- assert.equal(post.sent[0].role, 'technician');
- assert.equal(post.sent.length, 1);
+ assert.equal(sent.trace.mail[0].redirectTo, env.TAGESWERK_REDIRECT_URL);
+ assert.equal(sent.trace.updates[0].onlyStatus, 'pending');
+ assert.equal(sent.trace.updates[0].changes.status, 'sent');
+ assert.equal(Object.hasOwn(sent.trace.updates[0].changes, 'role'), false);
 
  const missingRole = database();
- const legacy = await inviteStaff({
+ const legacy = await runInvite({
   caller: admin,
-  body: {facility_id: second.id, email: 'alt@example.test', first_name: 'Alt', last_name: 'Bestand'},
-  database: missingRole,
-  mailer: mailer(),
-  now
+  store: missingRole,
+  body: {facility_id: second.id, email: 'alt@example.test', first_name: 'Alt', last_name: 'Bestand'}
  });
- assert.equal(legacy.status, 200);
+ assert.equal(legacy.result.status, 200);
  assert.equal(missingRole.state.rows[0].role, 'employee');
  assert.equal(missingRole.state.rows[0].facility_id, second.id);
 });
 
 test('Einladung verweigert höhere Rollen, fremde Betriebe und Selbstaufwertung', async () => {
  const store = database([{id: 'open-1', email: 'neu@example.test', facility_id: facility.id, role: 'employee', status: 'sent'}]);
- const post = mailer();
- const blocked = [
-  inviteStaff({caller: employee, body: {facility_id: facility.id, role: 'technician', email: 'a@example.test', first_name: 'A', last_name: 'A'}, database: store, mailer: post, now}),
-  inviteStaff({caller: technician, body: {facility_id: facility.id, role: 'facility_manager', email: 'b@example.test', first_name: 'B', last_name: 'B'}, database: store, mailer: post, now}),
-  inviteStaff({caller: manager, body: {facility_id: second.id, role: 'technician', email: 'c@example.test', first_name: 'C', last_name: 'C'}, database: store, mailer: post, now}),
-  inviteStaff({caller: manager, body: {facility_id: facility.id, role: 'facility_manager', email: 'd@example.test', first_name: 'D', last_name: 'D'}, database: store, mailer: post, now}),
-  inviteStaff({caller: admin, body: {facility_id: foreign.id, role: 'technician', email: 'e@example.test', first_name: 'E', last_name: 'E'}, database: store, mailer: post, now}),
-  inviteStaff({caller: {...manager, memberships: [{...membership('facility_manager'), is_active: false}]}, body: {facility_id: facility.id, role: 'employee', email: 'g@example.test', first_name: 'G', last_name: 'G'}, database: store, mailer: post, now}),
-  inviteStaff({caller: manager, body: {facility_id: facility.id, role: 'technician', email: 'neu@example.test', first_name: 'Nils', last_name: 'Techniker'}, database: store, mailer: post, now})
- ];
- const results = await Promise.all(blocked);
- assert.deepEqual(results.map(item => item.status), [403, 400, 403, 400, 403, 403, 409]);
+ const blocked = await Promise.all([
+  runInvite({caller: employee, store, body: {facility_id: facility.id, role: 'technician', email: 'a@example.test', first_name: 'A', last_name: 'A'}}),
+  runInvite({caller: technician, store, body: {facility_id: facility.id, role: 'facility_manager', email: 'b@example.test', first_name: 'B', last_name: 'B'}}),
+  runInvite({caller: manager, store, body: {facility_id: second.id, role: 'technician', email: 'c@example.test', first_name: 'C', last_name: 'C'}}),
+  runInvite({caller: manager, store, body: {facility_id: facility.id, role: 'facility_manager', email: 'd@example.test', first_name: 'D', last_name: 'D'}}),
+  runInvite({caller: admin, store, body: {facility_id: foreign.id, role: 'technician', email: 'e@example.test', first_name: 'E', last_name: 'E'}}),
+  runInvite({caller: {...manager, memberships: [{...membership('facility_manager'), is_active: false}]}, store, body: {facility_id: facility.id, role: 'employee', email: 'g@example.test', first_name: 'G', last_name: 'G'}}),
+  runInvite({caller: manager, store, body: {facility_id: facility.id, role: 'technician', email: 'neu@example.test', first_name: 'Nils', last_name: 'Techniker'}})
+ ]);
+ assert.deepEqual(blocked.map(item => item.result.status), [403, 400, 403, 400, 403, 403, 403]);
  assert.equal(store.state.rows.length, 1);
  assert.equal(store.state.rows[0].role, 'employee');
  assert.equal(store.state.rows[0].status, 'sent');
- assert.equal(post.sent.length, 0);
+ assert.equal(blocked.reduce((sum, item) => sum + item.trace.mail.length, 0), 0);
  assert.equal(canInviteFacility(facility, employee.memberships), false);
  assert.equal(planInvitation({caller: manager, facility, body: {role: 'company_admin', email: 'a@example.test', first_name: 'A', last_name: 'A'}}).ok, false);
 });
@@ -115,62 +149,91 @@ test('Einladung verweigert höhere Rollen, fremde Betriebe und Selbstaufwertung'
 test('Ein fehlender Versand lässt die Einladung fehlgeschlagen und versendet sie nicht erneut als gesendet', async () => {
  const store = database();
  const notes = [];
- const result = await inviteStaff({
+ const failed = await runInvite({
   caller: manager,
+  store,
   body: {facility_id: facility.id, role: 'technician', email: 'fehler@example.test', first_name: 'Eva', last_name: 'Fehler'},
-  database: store,
-  mailer: {async send() {throw new Error('Versand fehlgeschlagen');}},
-  log: message => notes.push(message),
-  now
+  inviteError: {message: 'Versand fehlgeschlagen', status: 500},
+  log: (...parts) => notes.push(parts)
  });
- assert.equal(result.status, 502);
+ assert.equal(failed.result.status, 409);
  assert.equal(store.state.rows[0].status, 'failed');
  assert.equal(store.state.rows[0].role, 'technician');
- assert.deepEqual(notes, ['Versand fehlgeschlagen']);
+ assert.equal(store.state.rows[0].error_detail, 'Versand fehlgeschlagen');
+ assert.equal(failed.trace.updates[0].onlyStatus, 'pending');
+ assert.equal(notes[0][0], 'TAGESWERK_INVITATION_SEND_ERROR');
+
+ const raced = database();
+ const lost = await runInvite({
+  caller: manager,
+  store: raced,
+  body: {facility_id: facility.id, role: 'employee', email: 'rennen@example.test', first_name: 'Ron', last_name: 'Rennen'},
+  beforeUpdate(row) { row.status = 'accepted'; }
+ });
+ assert.equal(lost.result.status, 500);
+ assert.equal(raced.state.rows[0].status, 'accepted');
+ assert.equal(raced.state.rows[0].role, 'employee');
 });
 
 test('Einladung unterscheidet neue Konten, bestehende Konten und deaktivierte Zuordnungen', async () => {
  const employeeInvite = database();
- const employeeResult = await inviteStaff({
+ const employeeResult = await runInvite({
   caller: admin,
-  body: {facility_id: facility.id, role: 'employee', email: 'mia@example.test', first_name: 'Mia', last_name: 'Muster'},
-  database: employeeInvite,
-  mailer: mailer(),
-  now
+  store: employeeInvite,
+  body: {facility_id: facility.id, role: 'employee', email: 'mia@example.test', first_name: 'Mia', last_name: 'Muster'}
  });
- assert.equal(employeeResult.status, 200);
+ assert.equal(employeeResult.result.status, 200);
  assert.equal(employeeInvite.state.rows[0].role, 'employee');
  assert.equal(employeeInvite.state.members.length, 0);
 
- const notes = [];
  const existingMembers = [{email: 'bestand@example.test', organization_id: organization, facility_id: facility.id, role: 'employee', is_active: false}];
  const existing = database([], existingMembers);
- const existingResult = await inviteStaff({
+ const existingResult = await runInvite({
   caller: manager,
-  body: {facility_id: facility.id, role: 'technician', email: 'Bestand@Example.Test', first_name: 'Bea', last_name: 'Bestand'},
-  database: existing,
-  mailer: mailer(),
-  now
+  store: existing,
+  body: {facility_id: facility.id, role: 'technician', email: 'Bestand@Example.Test', first_name: 'Bea', last_name: 'Bestand'}
  });
- assert.equal(existingResult.status, 409);
+ assert.equal(existingResult.result.status, 403);
  assert.equal(existing.state.rows.length, 0);
  assert.equal(existing.state.members[0].role, 'employee');
  assert.equal(existing.state.members[0].is_active, false);
+ assert.equal(existingResult.trace.mail.length, 0);
 
  const registered = database();
- const registeredResult = await inviteStaff({
+ const registeredResult = await runInvite({
   caller: admin,
+  store: registered,
   body: {facility_id: second.id, email: 'konto@example.test', first_name: 'Kim', last_name: 'Konto'},
-  database: registered,
-  mailer: {async send() { return {existingAccount: true}; }},
-  log: (...parts) => notes.push(parts.join(' ')),
-  now
+  inviteError: {message: 'A user with this email address has already been registered', status: 422}
  });
- assert.equal(registeredResult.body.existing_account, true);
+ assert.equal(registeredResult.result.status, 409);
+ assert.equal(registeredResult.result.body.ok, undefined);
  assert.equal(registered.state.rows[0].role, 'employee');
- assert.equal(registered.state.rows[0].status, 'sent');
+ assert.equal(registered.state.rows[0].status, 'failed');
+ assert.match(registered.state.rows[0].error_detail, /already been registered/);
  assert.equal(registered.state.members.length, 0);
- assert.match(notes[0], /ändert keine Mitgliedschaft/);
+});
+
+test('CORS, fehlender Bearer-Token und eine ungültige Anmeldung bleiben geschlossen', async () => {
+ const store = database();
+ const options = await runInvite({caller: manager, store, method: 'OPTIONS', body: {}});
+ assert.equal(options.result.status, 204);
+ assert.equal(options.result.headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
+ assert.equal(store.state.rows.length, 0);
+ const missing = await runInvite({caller: manager, store, authorization: '', body: {facility_id: facility.id, email: 'a@example.test', first_name: 'A', last_name: 'A'}});
+ assert.equal(missing.result.status, 401);
+ assert.equal(missing.result.body.error, 'Anmeldung erforderlich');
+ const invalid = await runInvite({
+  caller: manager,
+  store,
+  userError: {message: 'jwt expired'},
+  body: {facility_id: facility.id, email: 'a@example.test', first_name: 'A', last_name: 'A'}
+ });
+ assert.equal(invalid.result.status, 401);
+ assert.equal(invalid.result.body.error, 'Ungueltige Anmeldung');
+ const broken = await runInvite({caller: manager, store, readBody: async () => null});
+ assert.equal(broken.result.status, 400);
+ assert.equal(store.state.rows.length, 0);
 });
 
 test('Die Annahme übernimmt gespeicherte Rollen je Betrieb und ignoriert eine selbst gewählte Rolle', () => {
@@ -263,14 +326,27 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.match(roleSql, /Stornieren darf die Betriebsleitung oder Geschäftsführung/);
  assert.match(roleSql, /tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.doesNotMatch(roleSql, /actor_role NOT IN \(''company_admin'', ''facility_manager'', ''technician''\)/);
+ const handler = readFileSync(new URL('../../supabase/functions/invite-staff/handler.js', import.meta.url), 'utf8');
  assert.match(prepared, /nicht bereitgestellt/);
+ assert.match(prepared, /verify_jwt steht produktiv auf false/);
+ assert.match(prepared, /--no-verify-jwt/);
+ assert.match(prepared, /--remote eqtrifscedpsngsysxvc/);
  assert.match(prepared, /auth\.getUser\(\)/);
- assert.match(prepared, /userClient\.rpc\('request_staff_invitation'/);
+ assert.match(prepared, /client\.rpc\('request_staff_invitation'/);
  assert.match(prepared, /p_role: input\.role/);
  assert.match(prepared, /inviteUserByEmail/);
+ assert.match(prepared, /TAGESWERK_REDIRECT_URL/);
+ assert.match(prepared, /changes\.error_detail = input\.changes\.error_detail/);
+ assert.match(prepared, /\.eq\('status', input\.onlyStatus\)/);
  assert.match(prepared, /console\.error/);
- assert.match(prepared, /update\(\{status\}\)/);
+ assert.doesNotMatch(prepared, /INVITE_REDIRECT_URL/);
  assert.doesNotMatch(prepared, /staff_invitations'\)\.insert/);
+ assert.doesNotMatch(prepared, /from\('memberships'\)/);
+ assert.match(handler, /Access-Control-Allow-Origin/);
+ assert.match(handler, /method === 'OPTIONS'/);
+ assert.match(handler, /Bearer /);
+ assert.match(handler, /onlyStatus: 'pending'/);
+ assert.doesNotMatch(handler, /existing_account/);
  assert.match(roleSqlFile, /private\.can_manage_facility\(p_facility_id\)/);
  assert.match(roleSqlFile, /v_role NOT IN \('employee', 'technician'\)/);
  assert.match(roleSqlFile, /v_email IS NULL OR v_email !~ /);

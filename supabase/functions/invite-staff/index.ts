@@ -1,84 +1,85 @@
-// Tageswerk 3.4, Einladung von Mitarbeitern und Technikern.
-// Diese Datei ist vorbereitet und nicht bereitgestellt.
-// Sie ersetzt die produktive Edge Function invite-staff nicht.
-// Die produktive Fassung bleibt die Grundlage:
-// JWT über auth.getUser(), request_staff_invitation, inviteUserByEmail,
-// Status pending, sent und failed, Protokoll bei einem Versandfehler.
-// Die Rolle setzt nur die fünfstellige Datenbankfunktion.
-// Der Dienstschlüssel ändert ausschließlich den Versandstatus.
-// Eine fehlende Rolle bleibt Mitarbeiter.
-// Die Annahme bleibt public.accept_staff_invitation.
+// Grundlage ist die produktive invite-staff Version 8.
+// Diese Fassung ist korrigiert und nicht bereitgestellt.
+// verify_jwt steht produktiv auf false. Die Funktion prüft den Bearer-Token selbst mit auth.getUser().
+// Eine spätere Bereitstellung darf die Gateway-Einstellung nicht nebenbei einschalten.
+// Erhaltend ist nur dieser Aufruf, ausschließlich für invite-staff und ohne --prune:
+// npx supabase functions deploy invite-staff --remote eqtrifscedpsngsysxvc --no-verify-jwt --use-api
+// Die Rolle schreibt nur die fünfstellige request_staff_invitation.
+// Der Dienstschlüssel ändert weder Rolle noch Mitgliedschaft.
+// Ein Versandfehler, auch bei einem bereits registrierten Konto, bleibt failed.
+// Die Anmeldung nimmt jede Einladung mit Status sent an. Diesen Weg bestätigt Version 8 nicht.
 
-import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
+import {createClient} from 'npm:@supabase/supabase-js@2';
 import {inviteStaff} from './handler.js';
 
-function rejectionStatus(message: string) {
- if (message.includes('Anmeldung erforderlich')) return 401;
- if (message.includes('nicht gefunden')) return 404;
- if (message.includes('bereits')) return 409;
- if (message.includes('Berechtigung') || message.includes('nur Mitarbeiter oder Techniker')) return 403;
- return 400;
-}
-
 Deno.serve(async request => {
- const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
- const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
- const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+ const env = {
+  SUPABASE_URL: Deno.env.get('SUPABASE_URL') || '',
+  SUPABASE_ANON_KEY: Deno.env.get('SUPABASE_ANON_KEY') || '',
+  SUPABASE_PUBLISHABLE_KEY: Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '',
+  SUPABASE_SERVICE_ROLE_KEY: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+  TAGESWERK_REDIRECT_URL: Deno.env.get('TAGESWERK_REDIRECT_URL') || ''
+ };
  const authorization = request.headers.get('Authorization') || '';
- if (!supabaseUrl || !anonKey || !serviceKey || !authorization) {
-  return Response.json({ok: false, error: 'Die Einladung ist nicht eingerichtet.'}, {status: 500});
- }
- const userClient = createClient(supabaseUrl, anonKey, {global: {headers: {Authorization: authorization}}});
- const admin = createClient(supabaseUrl, serviceKey, {auth: {persistSession: false}});
- const {data: userData} = await userClient.auth.getUser();
- const user = userData?.user;
- let body: Record<string, unknown> = {};
- try {
-  body = await request.json();
- } catch {
-  body = {};
- }
  const result = await inviteStaff({
   method: request.method,
-  caller: user ? {userId: user.id, email: user.email} : null,
-  body,
-  log: (...parts: unknown[]) => console.error(...parts),
-  database: {
-   async requestInvitation(input: {facilityId?: unknown, email?: unknown, firstName?: unknown, lastName?: unknown, role: string}) {
-    const {data, error} = await userClient.rpc('request_staff_invitation', {
-     p_facility_id: input.facilityId,
-     p_email: input.email,
-     p_first_name: input.firstName,
-     p_last_name: input.lastName,
-     p_role: input.role
-    });
-    if (error) {
-     const message = error.message || 'Die Einladung wurde abgelehnt.';
-     return {ok: false, status: rejectionStatus(message), error: message};
-    }
-    return {
-     ok: true,
-     invitation: {
-      id: data,
-      email: String(input.email ?? '').trim().toLowerCase(),
-      role: input.role
-     }
-    };
-   },
-   async mark(id: string, status: string) {
-    const {error} = await admin.from('staff_invitations').update({status}).eq('id', id);
-    if (error) throw error;
+  authorization,
+  env,
+  async readBody() {
+   try {
+    return await request.json();
+   } catch {
+    return null;
    }
   },
-  mailer: {
-   async send(invitation: {email: string}) {
-    const redirectTo = Deno.env.get('INVITE_REDIRECT_URL') || undefined;
-    const {error} = await admin.auth.admin.inviteUserByEmail(invitation.email, redirectTo ? {redirectTo} : undefined);
-    if (!error) return {existingAccount: false};
-    if (/already been registered|already registered/i.test(error.message || '')) return {existingAccount: true};
-    throw error;
+  async getUser() {
+   const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY, {
+    global: {headers: {Authorization: authorization}},
+    auth: {persistSession: false}
+   });
+   const {data: {user}, error} = await client.auth.getUser();
+   return {user, error};
+  },
+  async requestInvitation(input) {
+   const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY, {
+    global: {headers: {Authorization: authorization}},
+    auth: {persistSession: false}
+   });
+   const {data, error} = await client.rpc('request_staff_invitation', {
+    p_facility_id: input.facilityId,
+    p_email: input.email,
+    p_first_name: input.firstName,
+    p_last_name: input.lastName,
+    p_role: input.role
+   });
+   if (error) return {ok: false, error: error.message};
+   return {ok: true, id: data};
+  },
+  async updateInvitation(input) {
+   const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {auth: {persistSession: false}});
+   const changes: {status: string, updated_at: string, error_detail?: string} = {
+    status: input.changes.status,
+    updated_at: input.changes.updated_at
+   };
+   if (input.changes.error_detail != null) changes.error_detail = input.changes.error_detail;
+   const query = admin.from('staff_invitations').update(changes).eq('id', input.id).eq('status', input.onlyStatus);
+   if (input.changes.status === 'sent') {
+    const {data, error} = await query.select('id').maybeSingle();
+    return {error, updated: data};
    }
-  }
+   const {error} = await query;
+   return {error};
+  },
+  async inviteByEmail(input) {
+   const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {auth: {persistSession: false}});
+   const {error} = await admin.auth.admin.inviteUserByEmail(input.email, {
+    data: {full_name: input.firstName + ' ' + input.lastName},
+    ...(input.redirectTo ? {redirectTo: input.redirectTo} : {})
+   });
+   return {error};
+  },
+  log: (...parts: unknown[]) => console.error(...parts)
  });
- return Response.json(result.body, {status: result.status});
+ if (result.status === 204) return new Response(null, {status: 204, headers: result.headers});
+ return new Response(JSON.stringify(result.body), {status: result.status, headers: result.headers});
 });
