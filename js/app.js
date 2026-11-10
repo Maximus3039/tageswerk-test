@@ -9,6 +9,7 @@ import {clearFacilityMeters,loadFacilityMeters,resetMeterEditor} from './meters.
 import {syncMeterImportAccess} from './meter-import.js';
 import {onCapture, onOpenNotice, onOpenTask, paintMobile, toggleCapture} from './mobile.js';
 import {focusNotice, mountOperations, refreshOperationMetrics, showOperationSection, syncOperationFacility} from './operations-ui.js';
+import {clearLocalWaterDrafts} from './operations-controls.js';
 // Invitation URLs from Supabase Auth contain type=invite and tokens in the URL fragment.
 const initialHash=new URLSearchParams(location.hash.replace(/^#/,''));
 const initialQuery=new URLSearchParams(location.search);
@@ -143,11 +144,12 @@ async function update(){
   const {data:{user},error}=await getCurrentUser();
   if(error && !['Auth session missing!','Auth session missing'].includes(error.message))throw error;
   state.currentUser=user||null;
+  if(!user) clearLocalWaterDrafts();
   el('account').replaceChildren();
   if(user){
    const label=document.createElement('span');label.textContent=user.email+' ';
    const b=document.createElement('button');b.className='secondary';b.textContent='Abmelden';
-   b.onclick=async()=>{const {error}=await signOut();if(error){status(error.message,true);return}invitationFlow=false;if(state.realtimeChannel){await supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}state.cachedDefects=[];state.ackRows=[];await update()};
+   b.onclick=async()=>{const {error}=await signOut();if(error){status(error.message,true);return}clearLocalWaterDrafts();invitationFlow=false;if(state.realtimeChannel){await supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}state.cachedDefects=[];state.ackRows=[];await update()};
    el('account').append(label,b);
   }
   if(user && invitationFlow){

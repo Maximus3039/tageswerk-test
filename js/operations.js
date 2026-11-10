@@ -23,7 +23,8 @@ export function emptyOperations() {
   waterPoolParameters: [],
   waterChecks: [],
   waterAlerts: [],
-  waterMeasures: []
+  waterMeasures: [],
+  waterRoundDrafts: []
  };
 }
 
@@ -46,7 +47,8 @@ function copy(bundle) {
   waterPoolParameters: [...(source.waterPoolParameters || [])],
   waterChecks: [...(source.waterChecks || [])],
   waterAlerts: [...(source.waterAlerts || [])],
-  waterMeasures: [...(source.waterMeasures || [])]
+  waterMeasures: [...(source.waterMeasures || [])],
+  waterRoundDrafts: [...(source.waterRoundDrafts || [])]
  };
 }
 

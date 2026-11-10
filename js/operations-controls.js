@@ -633,8 +633,16 @@ export function waterRoundPools(bundle, facilityId) {
  return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && pool.active !== false).sort((left, right) => left.name.localeCompare(right.name, 'de'));
 }
 
+export const waterDraftSaveDelay = 700;
+export const waterDraftStatusText = {
+ saving: 'Wird gespeichert …',
+ saved: 'Entwurf gespeichert',
+ offline: 'Nicht gespeichert. Die Eingaben bleiben im Formular.',
+ conflict: 'Der neuere Entwurf bleibt erhalten.'
+};
+
 export function emptyWaterRound(facilityId, roundId) {
- return {facilityId, roundId, index: 0, phase: 'edit', entries: {}, saved: false};
+ return {facilityId, roundId, index: 0, phase: 'edit', entries: {}, revision: 0, saved: false};
 }
 
 const waterRoundMemory = new Map();
@@ -644,28 +652,18 @@ function waterRoundKey(userId, facilityId) {
 }
 
 export function loadWaterRound(userId, facilityId) {
- const key = waterRoundKey(userId, facilityId);
- if (waterRoundMemory.has(key)) return waterRoundMemory.get(key);
- let stored = null;
- try {
-  stored = JSON.parse(globalThis.sessionStorage?.getItem(`tageswerk-water-round:${key}`) || 'null');
- } catch {
-  stored = null;
- }
- if (!stored || stored.facilityId !== facilityId || stored.saved) stored = emptyWaterRound(facilityId, newId());
- waterRoundMemory.set(key, stored);
- return stored;
+ const round = waterRoundMemory.get(waterRoundKey(userId, facilityId));
+ if (!round || round.saved || round.facilityId !== facilityId) return null;
+ return round;
 }
 
 export function storeWaterRound(userId, round) {
- const key = waterRoundKey(userId, round?.facilityId);
- waterRoundMemory.set(key, round);
- try {
-  globalThis.sessionStorage?.setItem(`tageswerk-water-round:${key}`, JSON.stringify(round));
- } catch {
-  /* Der Entwurf bleibt im laufenden Modul, wenn der Browser den Speicher sperrt. */
- }
+ waterRoundMemory.set(waterRoundKey(userId, round?.facilityId), round);
  return round;
+}
+
+export function beginWaterRound(userId, facilityId) {
+ return storeWaterRound(userId, emptyWaterRound(facilityId, newId()));
 }
 
 export function clearWaterRound(userId, facilityId) {
@@ -676,6 +674,41 @@ export function clearWaterRound(userId, facilityId) {
  } catch {
   /* Ein gesperrter Speicher lässt den geleerten Entwurf im Modul zurück. */
  }
+}
+
+export function clearLocalWaterDrafts() {
+ waterRoundMemory.clear();
+ const storage = globalThis.sessionStorage;
+ if (!storage) return;
+ try {
+  const keys = [];
+  if (typeof storage.length === 'number' && typeof storage.key === 'function') {
+   for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (String(key || '').startsWith('tageswerk-water-round:')) keys.push(key);
+   }
+  }
+  for (const key of keys) storage.removeItem(key);
+ } catch {
+  /* Der Speicher im Modul ist bereits geleert. */
+ }
+}
+
+export function ownOpenWaterDraft(bundle, facilityId, userId) {
+ return (bundle?.waterRoundDrafts || []).find(draft => draft.facilityId === facilityId && draft.userId === userId && draft.status === 'open') || null;
+}
+
+export function roundFromWaterDraft(draft) {
+ const progress = draft?.progress && typeof draft.progress === 'object' ? draft.progress : {};
+ return {
+  facilityId: draft.facilityId,
+  roundId: draft.roundId,
+  index: Number(draft.index ?? progress.index) || 0,
+  phase: (draft.phase || progress.phase) === 'summary' ? 'summary' : 'edit',
+  entries: draft.entries && typeof draft.entries === 'object' ? draft.entries : {},
+  revision: Number(draft.revision) || 0,
+  saved: false
+ };
 }
 
 export function rememberWaterEntry(round, poolId, entry) {

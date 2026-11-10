@@ -11,12 +11,17 @@ import {
  procurementFromStock,
  stockOf,
  temperatureDefectDraft,
+ beginWaterRound,
  clearWaterRound,
  loadWaterRound,
  moveWaterRound,
+ ownOpenWaterDraft,
  rememberWaterEntry,
  reviewWaterRound,
+ roundFromWaterDraft,
  storeWaterRound,
+ waterDraftSaveDelay,
+ waterDraftStatusText,
  waterParameterName,
  waterRoundPools,
  waterRoundProgress
@@ -60,6 +65,7 @@ import {
  saveWaterAcknowledgement,
  saveWaterCheck,
  saveWaterRound,
+ saveWaterRoundDraft,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterParameterAdd,
@@ -77,6 +83,8 @@ let materialsInstalled = false;
 let waterInstalled = false;
 let selectedWaterPoolId = '';
 let followUpAlertId = '';
+let waterDraftTimer = 0;
+let waterDraftStatus = '';
 let section = 'reports';
 let loading = null;
 let pendingFacilityId = '';
@@ -653,15 +661,58 @@ function waterEntryValues(fields, note) {
  return {values, note: note.value};
 }
 
+function showDraftStatus(text) {
+ waterDraftStatus = text;
+ const node = document.querySelector('.water-draft-status');
+ if (node) node.textContent = text;
+}
+
+async function flushWaterDraftSave(userId, facilityId) {
+ const round = loadWaterRound(userId, facilityId);
+ if (!round || round.saved) return;
+ const baseRevision = Number(round.revision) || 0;
+ const sent = `${JSON.stringify(round.entries)}|${round.index}|${round.phase}`;
+ let result;
+ try {
+  result = await saveWaterRoundDraft(database(), round);
+ } catch {
+  showDraftStatus(waterDraftStatusText.offline);
+  return;
+ }
+ const current = loadWaterRound(userId, facilityId);
+ if (!current) return;
+ if (!result?.ok) {
+  showDraftStatus(result?.conflict ? waterDraftStatusText.conflict : waterDraftStatusText.offline);
+  return;
+ }
+ if ((Number(current.revision) || 0) === baseRevision) storeWaterRound(userId, {...current, revision: result.revision});
+ const latest = loadWaterRound(userId, facilityId);
+ const nowSent = `${JSON.stringify(latest.entries)}|${latest.index}|${latest.phase}`;
+ if (nowSent !== sent) scheduleWaterDraftSave(userId, facilityId);
+ else showDraftStatus(waterDraftStatusText.saved);
+}
+
+function scheduleWaterDraftSave(userId, facilityId) {
+ showDraftStatus(waterDraftStatusText.saving);
+ window.clearTimeout(waterDraftTimer);
+ waterDraftTimer = window.setTimeout(() => {
+  flushWaterDraftSave(userId, facilityId);
+ }, waterDraftSaveDelay);
+}
+
+async function rememberDraft(userId, round, immediate = false) {
+ const stored = storeWaterRound(userId, round);
+ if (immediate) {
+  window.clearTimeout(waterDraftTimer);
+  showDraftStatus(waterDraftStatusText.saving);
+  await flushWaterDraftSave(userId, stored.facilityId);
+ } else scheduleWaterDraftSave(userId, stored.facilityId);
+ return stored;
+}
+
 function renderWaterRound(host, current, data) {
  const pools = waterRoundPools(data, current.id);
  const person = actor();
- let round = loadWaterRound(person.userId, current.id);
- if (selectedWaterPoolId) {
-  const index = pools.findIndex(pool => pool.id === selectedWaterPoolId);
-  if (index >= 0) round = storeWaterRound(person.userId, {...round, index, phase: 'edit'});
-  selectedWaterPoolId = '';
- }
  const card = document.createElement('section');
  const title = document.createElement('h3');
  title.textContent = 'Kontrollrunde';
@@ -674,12 +725,45 @@ function renderWaterRound(host, current, data) {
   host.append(card);
   return;
  }
+ const remote = ownOpenWaterDraft(data, current.id, person.userId);
+ let round = loadWaterRound(person.userId, current.id);
+ if (!round && remote) {
+  const pendingPool = selectedWaterPoolId;
+  selectedWaterPoolId = '';
+  const note = document.createElement('p');
+  note.textContent = 'Eine unterbrochene Kontrollrunde ist gespeichert.';
+  const actions = document.createElement('div');
+  actions.className = 'point-actions';
+  actions.append(button('Kontrollrunde fortsetzen', '', () => {
+   const restored = roundFromWaterDraft(remote);
+   if (pendingPool) {
+    const index = pools.findIndex(pool => pool.id === pendingPool);
+    if (index >= 0) restored.index = index;
+   }
+   storeWaterRound(person.userId, restored);
+   showDraftStatus(waterDraftStatusText.saved);
+   renderPanel('');
+  }));
+  card.append(note, actions);
+  host.append(card);
+  return;
+ }
+ if (!round) round = beginWaterRound(person.userId, current.id);
+ if (selectedWaterPoolId) {
+  const index = pools.findIndex(pool => pool.id === selectedWaterPoolId);
+  if (index >= 0) round = storeWaterRound(person.userId, {...round, index, phase: 'edit'});
+  selectedWaterPoolId = '';
+ }
  if (round.index >= pools.length) round = storeWaterRound(person.userId, {...round, index: 0});
  const progress = waterRoundProgress(data, round, pools, person, new Date().toISOString());
  const progressLine = document.createElement('p');
  progressLine.className = 'water-progress';
  progressLine.textContent = `${progress.label} · ${progress.filled} von ${progress.total} vollständig`;
  card.append(progressLine);
+ const draftStatus = document.createElement('p');
+ draftStatus.className = 'water-draft-status';
+ draftStatus.textContent = waterDraftStatus;
+ card.append(draftStatus);
  if (round.phase === 'summary') {
   const review = reviewWaterRound(data, round, person, new Date().toISOString());
   if (!review.ok) {
@@ -705,13 +789,18 @@ function renderWaterRound(host, current, data) {
    }
    const actions = document.createElement('div');
    actions.className = 'point-actions';
-   actions.append(button('Zurück zur Eingabe', 'secondary', () => {
-    storeWaterRound(person.userId, {...round, phase: 'edit'});
+   actions.append(button('Zurück zur Eingabe', 'secondary', async () => {
+    const latest = loadWaterRound(person.userId, current.id) || round;
+    await rememberDraft(person.userId, {...latest, phase: 'edit'}, true);
     renderPanel('');
    }));
    actions.append(button('Kontrollrunde speichern', '', () => commit(async () => {
-    const result = await saveWaterRound(database(), bundle(), round, person, new Date().toISOString(), context());
-    if (result?.ok) clearWaterRound(person.userId, current.id);
+    window.clearTimeout(waterDraftTimer);
+    const result = await saveWaterRound(database(), bundle(), loadWaterRound(person.userId, current.id) || round, person, new Date().toISOString(), context());
+    if (result?.ok) {
+     clearWaterRound(person.userId, current.id);
+     showDraftStatus('');
+    }
     return result;
    })));
    card.append(actions);
@@ -740,25 +829,31 @@ function renderWaterRound(host, current, data) {
  card.append(readings);
  const note = input(savedEntry.note || '');
  note.placeholder = 'Kommentar, falls nötig';
- const keep = () => storeWaterRound(person.userId, rememberWaterEntry(round, pool.id, waterEntryValues(fields, note)));
+ const keep = () => {
+  const latest = loadWaterRound(person.userId, current.id) || round;
+  rememberDraft(person.userId, rememberWaterEntry(latest, pool.id, waterEntryValues(fields, note)));
+ };
  for (const field of fields.values()) field.addEventListener('input', keep);
  note.addEventListener('input', keep);
  card.append(labeled('Kommentar', note));
  const actions = document.createElement('div');
  actions.className = 'point-actions';
- actions.append(button('Zurück', 'secondary', () => {
-  storeWaterRound(person.userId, moveWaterRound(round, pools, -1, waterEntryValues(fields, note)));
+ actions.append(button('Zurück', 'secondary', async () => {
+  const latest = loadWaterRound(person.userId, current.id) || round;
+  await rememberDraft(person.userId, moveWaterRound(latest, pools, -1, waterEntryValues(fields, note)), true);
   renderPanel('');
  }));
  if (round.index < pools.length - 1) {
-  actions.append(button('Weiter', '', () => {
-   storeWaterRound(person.userId, moveWaterRound(round, pools, 1, waterEntryValues(fields, note)));
+  actions.append(button('Weiter', '', async () => {
+   const latest = loadWaterRound(person.userId, current.id) || round;
+   await rememberDraft(person.userId, moveWaterRound(latest, pools, 1, waterEntryValues(fields, note)), true);
    renderPanel('');
   }));
  } else {
-  actions.append(button('Zusammenfassung anzeigen', '', () => {
-   const remembered = storeWaterRound(person.userId, rememberWaterEntry(round, pool.id, waterEntryValues(fields, note)));
-   storeWaterRound(person.userId, {...remembered, phase: 'summary'});
+  actions.append(button('Zusammenfassung anzeigen', '', async () => {
+   const latest = loadWaterRound(person.userId, current.id) || round;
+   const remembered = rememberWaterEntry(latest, pool.id, waterEntryValues(fields, note));
+   await rememberDraft(person.userId, {...remembered, phase: 'summary'}, true);
    renderPanel('');
   }));
  }

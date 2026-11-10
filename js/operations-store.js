@@ -11,6 +11,7 @@ import {
  recordWaterCheck,
  reviewWaterRound,
  recordWaterMeasure,
+ waterDraftStatusText,
  setTemperaturePointActive,
  setWaterPoolActive,
  updateTemperaturePoint,
@@ -49,7 +50,7 @@ const tables = [
 
 const temperatureTables = ['temperature_points', 'temperature_readings', 'temperature_alerts'];
 const materialTables = ['materials', 'material_movements'];
-const waterTables = ['water_parameter_definitions', 'water_pools', 'water_pool_parameters', 'water_checks', 'water_alerts', 'water_alert_measures'];
+const waterTables = ['water_parameter_definitions', 'water_pools', 'water_pool_parameters', 'water_checks', 'water_alerts', 'water_alert_measures', 'water_round_drafts'];
 
 export function supabaseOperationDb(supabase) {
  return {
@@ -415,7 +416,20 @@ function assemble(loaded, actor, context) {
    recordedBy: row.recorded_by,
    recordedName: personName(context, row.recorded_by, actor),
    recordedAt: row.recorded_at
-  })).sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)))
+  })).sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt))),
+  waterRoundDrafts: (loaded.water_round_drafts || []).filter(row => visible(row, actor) && row.user_id === actor?.userId && row.status === 'open').map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   userId: row.user_id,
+   roundId: row.round_id,
+   entries: row.entries && typeof row.entries === 'object' && !Array.isArray(row.entries) ? row.entries : {},
+   progress: row.progress && typeof row.progress === 'object' && !Array.isArray(row.progress) ? row.progress : {},
+   status: 'open',
+   revision: Number(row.revision) || 0,
+   createdAt: row.created_at,
+   updatedAt: row.updated_at
+  }))
  };
 }
 
@@ -1086,6 +1100,36 @@ export async function saveWaterCheck(db, bundle, poolId, draft, actor, now, cont
   }
  }
  return {ok: true, id: check.id, bundle: loaded.bundle, check, alerts: open};
+}
+
+export async function saveWaterRoundDraft(db, round) {
+ const kept = round;
+ if (!round?.roundId || !round.facilityId || round.saved) {
+  return {ok: false, offline: false, conflict: false, round: kept, error: 'Der Entwurf ist unvollständig.'};
+ }
+ let result;
+ try {
+  result = await db.rpc('tageswerk_save_water_round_draft', {
+   p_facility_id: round.facilityId,
+   p_round_id: round.roundId,
+   p_entries: round.entries || {},
+   p_progress: {index: round.index || 0, phase: round.phase === 'summary' ? 'summary' : 'edit'},
+   p_revision: Number(round.revision) || 0
+  });
+ } catch (error) {
+  return {ok: false, offline: true, conflict: false, round: kept, error: storageMessage(error)};
+ }
+ if (result?.error) {
+  return {ok: false, offline: true, conflict: false, round: kept, error: storageMessage(result.error)};
+ }
+ const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
+ if (payload?.status === 'conflict') {
+  return {ok: false, offline: false, conflict: true, round: kept, revision: payload.revision, error: waterDraftStatusText.conflict};
+ }
+ if (payload?.status !== 'stored' || payload.round_id !== round.roundId || !payload.revision) {
+  return {ok: false, offline: true, conflict: false, round: kept, error: 'Der Entwurf wurde nicht bestätigt.'};
+ }
+ return {ok: true, offline: false, conflict: false, round: {...kept, revision: payload.revision}, revision: payload.revision};
 }
 
 export async function saveWaterRound(db, bundle, round, actor, now, context) {
