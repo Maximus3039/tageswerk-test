@@ -8,8 +8,10 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
  await expect(page.locator('#operations-card')).toHaveCount(1);
- await expect(page.locator('#operations-tabs button')).toHaveCount(7);
+ await expect(page.locator('#operations-tabs button')).toHaveCount(8);
  await expect(page.locator('#metric-temperature')).toHaveCount(1);
+ await expect(page.locator('#metric-water')).toHaveCount(1);
+ await expect(page.locator('#metric-water-missing')).toHaveCount(1);
  await expect(page.locator('#dash-notices')).toHaveCount(1);
  await page.evaluate(() => {
   document.querySelector('#app').classList.remove('hidden');
@@ -22,6 +24,8 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  expect(tabs.x + tabs.width).toBeLessThanOrEqual(viewport.width + 1);
  await page.locator('[data-operation="temperature"]').click();
  await expect(page.locator('[data-operation="temperature"]')).toHaveClass(/active/);
+ await page.locator('[data-operation="water"]').click();
+ await expect(page.locator('[data-operation="water"]')).toHaveClass(/active/);
  await page.locator('[data-operation="procurement"]').click();
  await expect(page.locator('[data-operation="procurement"]')).toHaveClass(/active/);
 });

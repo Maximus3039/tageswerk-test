@@ -30,7 +30,13 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  const visible = name => page.locator(`[data-view="${name}"]:visible`);
  await visible('capture').click();
  await expect(page.locator('#capture-sheet')).toBeVisible();
- await expect(page.locator('#capture-actions button')).toHaveCount(5);
+ await expect(page.locator('#capture-actions button')).toHaveCount(6);
+ await expect(page.locator('#capture-actions')).toContainText('Wasserhygiene erfassen');
+ await expect(page.locator('#capture-actions')).toContainText('Temperatur erfassen');
+ const sheet = await page.locator('#capture-sheet').boundingBox();
+ const captureViewport = page.viewportSize();
+ expect(sheet.x).toBeGreaterThanOrEqual(0);
+ expect(sheet.x + sheet.width).toBeLessThanOrEqual(captureViewport.width + 1);
  await page.locator('#capture-close').click();
  await expect(page.locator('#capture-sheet')).toBeHidden();
  await visible('agenda').click();
@@ -40,7 +46,8 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  await visible('dashboard').click();
  await expect(page.locator('#home-greeting')).toBeVisible();
  await expect(page.locator('#dashboard-facility')).toBeVisible();
- await expect(page.locator('#home-quick button')).toHaveCount(4);
+ await expect(page.locator('#home-quick button')).toHaveCount(5);
+ await expect(page.locator('#home-quick')).toContainText('Wasserhygiene');
  const box = await page.locator('#home-quick').boundingBox();
  const viewport = page.viewportSize();
  expect(box.x).toBeGreaterThanOrEqual(0);

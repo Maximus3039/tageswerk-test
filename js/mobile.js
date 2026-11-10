@@ -1,6 +1,6 @@
 import {facilityVisibleToMember} from './permissions.js';
-import {assetNextDue, assetOverdue, berlinDay, inspectionOverdue} from './operations.js';
-import {facilityNotices, missingTemperaturePoints} from './operations-controls.js';
+import {assetNextDue, assetOverdue, berlinDay, inspectionOverdue, waterControlState} from './operations.js';
+import {facilityNotices, missingTemperaturePoints, waterAttention} from './operations-controls.js';
 import {state} from './state.js';
 import {el} from './utils.js';
 
@@ -10,6 +10,7 @@ const routes = {capture: null, task: null, notice: null};
 export const captureActions = [
  {id: 'defect', label: 'Mangel melden'},
  {id: 'temperature', label: 'Temperatur erfassen'},
+ {id: 'water', label: 'Wasserhygiene erfassen'},
  {id: 'reading', label: 'Zählerstand erfassen'},
  {id: 'daily-report', label: 'Tagesbericht erstellen'},
  {id: 'procurement', label: 'Beschaffung melden'}
@@ -37,6 +38,9 @@ export function homeLines(counts) {
   counts.temperatureInstalled
    ? countLine(counts.temperature, 'Temperaturkontrolle ausstehend', 'Temperaturkontrollen ausstehend')
    : 'Temperatur ist noch nicht in der Datenbank installiert.',
+  counts.waterInstalled
+   ? countLine(counts.water, 'Hygienekontrolle ausstehend', 'Hygienekontrollen ausstehend')
+   : 'Wasserhygiene ist noch nicht in der Datenbank installiert.',
   countLine(counts.maintenance, 'Wartung fällig', 'Wartungen fällig'),
   countLine(counts.notices, 'neuer Hinweis', 'neue Hinweise')
  ];
@@ -106,6 +110,22 @@ export function workAgenda(bundle, options = {}) {
   });
  }
  for (const facilityId of ids) {
+  for (const pool of waterAttention(bundle, facilityId, now)) {
+   const status = waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now);
+   push({
+    id: `water:${pool.id}`,
+    facilityId: pool.facilityId,
+    organizationId: pool.organizationId,
+    kind: 'water',
+    title: pool.name || 'Wasserhygiene',
+    dueAt: status.dueAt || now,
+    bucket: status.bucket,
+    due: status.due === true,
+    personal: false,
+    forYou: true,
+    scope: 'Für den Betrieb'
+   });
+  }
   for (const point of missingTemperaturePoints(bundle, facilityId, now)) {
    push({
     id: `temperature:${point.id}`,
@@ -125,13 +145,15 @@ export function workAgenda(bundle, options = {}) {
  return items.sort((left, right) => rank[left.bucket] - rank[right.bucket] || String(left.dueAt).localeCompare(String(right.dueAt)) || left.title.localeCompare(right.title, 'de'));
 }
 
-export function agendaCounts(items, noticeCount, temperatureInstalled) {
+export function agendaCounts(items, noticeCount, temperatureInstalled, waterInstalled = false) {
  return {
   inspections: items.filter(item => item.forYou && item.kind === 'inspection').length,
   temperature: items.filter(item => item.forYou && item.kind === 'temperature').length,
+  water: items.filter(item => item.forYou && item.kind === 'water' && item.due !== false && item.bucket !== 'upcoming').length,
   maintenance: items.filter(item => item.forYou && item.kind === 'maintenance' && item.bucket !== 'upcoming').length,
   notices: noticeCount,
-  temperatureInstalled: temperatureInstalled === true
+  temperatureInstalled: temperatureInstalled === true,
+  waterInstalled: waterInstalled === true
  };
 }
 
@@ -245,7 +267,7 @@ export function paintMobile() {
  const items = bundle ? workAgenda(bundle, {facilityIds: ids, actor: current, now}) : [];
  const notices = bundle ? facilityNotices(bundle, state.cachedDefects, {facilityIds: ids, actor: current, now}) : [];
  const lines = bundle
-  ? homeLines(agendaCounts(items, notices.length, state.temperatureInstalled))
+  ? homeLines(agendaCounts(items, notices.length, state.temperatureInstalled, state.waterInstalled))
   : ['Die Betriebsdaten werden geladen.'];
  el('home-greeting').textContent = `${greeting()}!`;
  const selected = el('dashboard-facility');

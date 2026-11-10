@@ -10,7 +10,8 @@ import {
  missingTemperaturePoints,
  procurementFromStock,
  stockOf,
- temperatureDefectDraft
+ temperatureDefectDraft,
+ waterParameterName
 } from './operations-controls.js';
 import {
  assetNextDue,
@@ -19,7 +20,10 @@ import {
  emptyOperations,
  filterDailyReports,
  inspectionOverdue,
- operationMetrics
+ operationMetrics,
+ waterCatalog,
+ waterControlState,
+ waterScheduleLabel
 } from './operations.js';
 import {
  loadOperations,
@@ -42,6 +46,14 @@ import {
  saveTemperaturePointActive,
  saveTemperaturePointChange,
  saveTemperatureReading,
+ saveWaterAcknowledgement,
+ saveWaterCheck,
+ saveWaterMeasure,
+ saveWaterParameter,
+ saveWaterParameterAdd,
+ saveWaterPool,
+ saveWaterPoolActive,
+ saveWaterPoolChange,
  supabaseOperationDb
 } from './operations-store.js';
 
@@ -50,6 +62,9 @@ const statusNames = {submitted: 'Gemeldet', approved: 'Genehmigt', rejected: 'Ab
 let installed = false;
 let temperatureInstalled = false;
 let materialsInstalled = false;
+let waterInstalled = false;
+let selectedWaterPoolId = '';
+let followUpAlertId = '';
 let section = 'reports';
 let loading = null;
 let pendingFacilityId = '';
@@ -118,8 +133,10 @@ async function refreshFromDatabase(announce) {
  installed = loaded.installed === true;
  temperatureInstalled = loaded.temperatureInstalled === true;
  materialsInstalled = loaded.materialsInstalled === true;
+ waterInstalled = loaded.waterInstalled === true;
  state.temperatureInstalled = temperatureInstalled;
  state.materialsInstalled = materialsInstalled;
+ state.waterInstalled = waterInstalled;
  if (!loaded.ok) {
   if (!state.operationPreview) state.operationPreview = emptyOperations();
   if (announce) say('error', loaded.error);
@@ -149,6 +166,8 @@ function paintOperationMetrics() {
  if (el('metric-temperature')) el('metric-temperature').textContent = String(metrics.temperatureOpen);
  if (el('metric-temperature-missing')) el('metric-temperature-missing').textContent = String(metrics.temperatureMissing);
  if (el('metric-stock')) el('metric-stock').textContent = String(metrics.stockLow);
+ if (el('metric-water')) el('metric-water').textContent = String(metrics.waterOpen);
+ if (el('metric-water-missing')) el('metric-water-missing').textContent = String(metrics.waterMissing);
  paintNotices(ids);
  paintMobile();
 }
@@ -195,6 +214,8 @@ function showNotice(notice) {
  const sections = {
   'temperature-warning': 'temperature',
   'temperature-missing': 'temperature',
+  'water-warning': 'water',
+  'water-missing': 'water',
   'stock-low': 'stock',
   'procurement-open': 'procurement',
   'inspection-overdue': 'inspections',
@@ -202,6 +223,7 @@ function showNotice(notice) {
  };
  section = sections[notice.kind] || 'notices';
  pendingFacilityId = notice.facilityId;
+ if (notice.poolId) selectedWaterPoolId = notice.poolId;
  for (const tab of document.querySelectorAll('[data-operation]')) tab.classList.toggle('active', tab.dataset.operation === section);
  const card = el('operations-card');
  if (card?.classList.contains('hidden')) {
@@ -562,6 +584,243 @@ function renderTemperature(host, current) {
  }
 }
 
+function choice(text, checked) {
+ const node = document.createElement('label');
+ node.className = 'choice';
+ const box = document.createElement('input');
+ box.type = 'checkbox';
+ box.checked = checked === true;
+ node.append(box, document.createTextNode(text));
+ return {node, box};
+}
+
+function weekdayBoxes(selected) {
+ const names = [[1, 'Mo'], [2, 'Di'], [3, 'Mi'], [4, 'Do'], [5, 'Fr'], [6, 'Sa'], [7, 'So']];
+ const wrap = document.createElement('div');
+ wrap.className = 'point-actions';
+ const boxes = [];
+ for (const [value, label] of names) {
+  const item = choice(label, (selected || [1, 2, 3, 4, 5, 6, 7]).map(Number).includes(value));
+  item.box.value = String(value);
+  boxes.push(item.box);
+  wrap.append(item.node);
+ }
+ return {wrap, boxes};
+}
+
+function selectedWeekdays(boxes) {
+ return boxes.filter(box => box.checked).map(box => Number(box.value));
+}
+
+function limitText(value) {
+ return value == null || value === '' ? '' : String(value);
+}
+
+function rangeText(parameter) {
+ if (parameter.minValue == null && parameter.maxValue == null) return 'Kein Sollbereich hinterlegt.';
+ if (parameter.minValue != null && parameter.maxValue != null) return `Sollbereich ${parameter.minValue} bis ${parameter.maxValue}`;
+ if (parameter.minValue != null) return `Sollbereich mindestens ${parameter.minValue}`;
+ return `Sollbereich höchstens ${parameter.maxValue}`;
+}
+
+function renderWater(host, current) {
+ missingNote(host, waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
+ const data = bundle();
+ const catalog = waterCatalog(data);
+ if (isManager(current)) {
+  const name = input();
+  const mode = select([{value: 'daily', label: 'Täglich'}, {value: 'weekly', label: 'Wöchentlich'}, {value: 'times', label: 'Feste Uhrzeiten'}], 'daily');
+  const count = input('1');
+  const times = input('08:00, 14:00');
+  const days = weekdayBoxes([1, 2, 3, 4, 5, 6, 7]);
+  count.inputMode = 'numeric';
+  const schedule = document.createElement('div');
+  const paintSchedule = () => {
+   const timed = mode.value === 'times';
+   count.parentElement?.classList.toggle('hidden', timed);
+   times.parentElement?.classList.toggle('hidden', !timed);
+   days.wrap.classList.toggle('hidden', !timed);
+  };
+  mode.addEventListener('change', paintSchedule);
+  host.append(labeled('Becken', name), labeled('Kontrollplan', mode), labeled('Intervallanzahl', count), labeled('Uhrzeiten', times), days.wrap);
+  host.append(button('Becken speichern', '', () => commit(() => saveWaterPool(database(), bundle(), {facility: current, name: name.value, scheduleMode: mode.value, intervalCount: count.value, scheduledTimes: times.value, weekdays: selectedWeekdays(days.boxes)}, actor(), new Date().toISOString(), context()))));
+  const hint = document.createElement('p');
+  hint.className = 'help';
+  hint.textContent = 'Sollbereiche werden nicht automatisch gesetzt. Ohne hinterlegten Bereich entsteht keine Grenzwertwarnung.';
+  host.append(hint);
+  paintSchedule();
+ }
+ const pools = data.waterPools.filter(item => item.facilityId === current.id).sort((left, right) => Number(left.active === false) - Number(right.active === false) || left.name.localeCompare(right.name, 'de'));
+ if (!pools.length) {
+  const empty = document.createElement('p');
+  empty.className = 'muted';
+  empty.textContent = 'Für diesen Betrieb ist noch kein Becken angelegt.';
+  host.append(empty);
+  return;
+ }
+ const duePool = pools.find(pool => waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString()).due);
+ const initialPool = pools.some(pool => pool.id === selectedWaterPoolId) ? selectedWaterPoolId : (duePool || pools[0]).id;
+ const picker = select(pools.map(pool => ({value: pool.id, label: pool.active === false ? `${pool.name} · deaktiviert` : pool.name})), initialPool);
+ selectedWaterPoolId = picker.value;
+ picker.addEventListener('change', () => {
+  selectedWaterPoolId = picker.value;
+  followUpAlertId = '';
+  renderPanel('');
+ });
+ host.append(labeled('Becken auswählen', picker));
+ const pool = pools.find(item => item.id === picker.value);
+ if (!pool) return;
+ const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => waterParameterName(data, left.parameterCode).localeCompare(waterParameterName(data, right.parameterCode), 'de'));
+ const status = waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString());
+ const row = item(pool.name, [`${waterScheduleLabel(pool)}`, status.detail], status.due);
+ if (isManager(current)) {
+  const actions = document.createElement('div');
+  actions.className = 'point-actions';
+  const editor = document.createElement('div');
+  editor.className = 'point-editor hidden';
+  const name = input(pool.name);
+  const mode = select([{value: 'daily', label: 'Täglich'}, {value: 'weekly', label: 'Wöchentlich'}, {value: 'times', label: 'Feste Uhrzeiten'}], pool.scheduleMode || 'daily');
+  const count = input(String(pool.intervalCount || 1));
+  const times = input((pool.scheduledTimes || []).join(', '));
+  const days = weekdayBoxes(pool.weekdays);
+  count.inputMode = 'numeric';
+  const paintSchedule = () => {
+   const timed = mode.value === 'times';
+   count.parentElement?.classList.toggle('hidden', timed);
+   times.parentElement?.classList.toggle('hidden', !timed);
+   days.wrap.classList.toggle('hidden', !timed);
+  };
+  mode.addEventListener('change', paintSchedule);
+  editor.append(labeled('Bezeichnung', name), labeled('Kontrollplan', mode), labeled('Intervallanzahl', count), labeled('Uhrzeiten', times), days.wrap);
+  editor.append(button('Änderungen speichern', '', () => commit(() => saveWaterPoolChange(database(), bundle(), pool.id, {name: name.value, scheduleMode: mode.value, intervalCount: count.value, scheduledTimes: times.value, weekdays: selectedWeekdays(days.boxes)}, actor(), new Date().toISOString(), context()))));
+  actions.append(button('Bearbeiten', 'secondary', () => editor.classList.toggle('hidden')));
+  actions.append(button(pool.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveWaterPoolActive(database(), bundle(), pool.id, pool.active === false, actor(), new Date().toISOString(), context()))));
+  row.append(actions, editor);
+  paintSchedule();
+  for (const parameter of parameters) {
+   const definition = catalog.find(item => item.code === parameter.parameterCode);
+   const block = document.createElement('div');
+   block.className = 'water-parameter';
+   const title = document.createElement('strong');
+   title.textContent = waterParameterName(data, parameter.parameterCode);
+   const minimum = input(limitText(parameter.minValue));
+   const maximum = input(limitText(parameter.maxValue));
+   minimum.inputMode = 'decimal';
+   maximum.inputMode = 'decimal';
+   const required = choice('Erforderlich', parameter.required !== false);
+   const active = choice('Aktiv', parameter.active !== false);
+   block.append(title, labeled(`Mindestens ${definition?.unit || ''}`.trim(), minimum), labeled(`Höchstens ${definition?.unit || ''}`.trim(), maximum), required.node, active.node);
+   block.append(button('Parameter speichern', 'secondary', () => commit(() => saveWaterParameter(database(), bundle(), parameter.id, {minValue: minimum.value, maxValue: maximum.value, required: required.box.checked, active: active.box.checked}, actor(), new Date().toISOString(), context()))));
+   row.append(block);
+  }
+  const missingCodes = catalog.filter(item => !parameters.some(parameter => parameter.parameterCode === item.code));
+  if (missingCodes.length) {
+   const code = select(missingCodes.map(item => ({value: item.code, label: item.name})));
+   row.append(labeled('Weiteren Parameter ergänzen', code));
+   row.append(button('Parameter ergänzen', 'secondary', () => commit(() => saveWaterParameterAdd(database(), bundle(), pool.id, code.value, actor(), new Date().toISOString(), context()))));
+  }
+ }
+ else {
+  for (const parameter of parameters) {
+   const line = document.createElement('p');
+   line.className = 'help';
+   const stateText = parameter.active === false ? 'deaktiviert' : parameter.required === false ? 'optional' : 'erforderlich';
+   line.textContent = `${waterParameterName(data, parameter.parameterCode)} · ${rangeText(parameter)} · ${stateText}`;
+   row.append(line);
+  }
+ }
+ if (pool.active !== false) {
+  const activeParameters = parameters.filter(item => item.active !== false);
+  const fields = new Map();
+  if (followUpAlertId && !data.waterAlerts.some(item => item.id === followUpAlertId && item.poolId === pool.id)) followUpAlertId = '';
+  if (followUpAlertId) {
+   const banner = document.createElement('p');
+   banner.className = 'help';
+   banner.textContent = 'Diese Messung wird als Wiederholung dokumentiert. Die bestehende Warnung bleibt davon unberührt.';
+   row.append(banner);
+  }
+  for (const parameter of activeParameters) {
+   const definition = catalog.find(item => item.code === parameter.parameterCode);
+   const field = input();
+   field.inputMode = 'decimal';
+   fields.set(parameter.parameterCode, field);
+   const caption = `${waterParameterName(data, parameter.parameterCode)}${definition?.unit ? ` ${definition.unit}` : ''}${parameter.required === false ? '' : ' · erforderlich'}`;
+   row.append(labeled(caption, field));
+   const limit = document.createElement('p');
+   limit.className = 'help';
+   limit.textContent = rangeText(parameter);
+   row.append(limit);
+  }
+  const note = input();
+  note.placeholder = 'Kommentar, falls nötig';
+  row.append(labeled('Kommentar', note));
+  row.append(button('Messung speichern', 'secondary', async () => {
+   const values = {};
+   for (const [code, field] of fields) values[code] = field.value;
+   const alertId = followUpAlertId;
+   followUpAlertId = '';
+   const result = await commit(() => saveWaterCheck(database(), bundle(), pool.id, {values, note: note.value, followUpAlertId: alertId || null}, actor(), new Date().toISOString(), context()));
+   if (!result?.ok) followUpAlertId = alertId;
+  }));
+ } else {
+  const paused = document.createElement('p');
+  paused.className = 'help';
+  paused.textContent = 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.';
+  row.append(paused);
+ }
+ const checks = data.waterChecks.filter(item => item.poolId === pool.id).slice(0, 15);
+ for (const check of checks) {
+  const values = check.readings.map(reading => {
+   const name = waterParameterName(data, reading.parameterCode);
+   const unit = reading.unit ? ` ${reading.unit}` : '';
+   const limits = reading.minLimit == null && reading.maxLimit == null ? '' : ` (damals ${reading.minLimit ?? '—'} bis ${reading.maxLimit ?? '—'})`;
+   return `${name} ${reading.value}${unit}${limits}`;
+  }).join(' · ');
+  const line = document.createElement('p');
+  line.className = 'help';
+  const repeat = check.followUpAlertId ? ' · Wiederholungsmessung' : '';
+  line.textContent = `${new Date(check.measuredAt).toLocaleString('de-DE')} · ${check.recordedName}: ${values}${check.note ? ` · ${check.note}` : ''}${repeat}`;
+  row.append(line);
+ }
+ if (data.waterChecks.filter(item => item.poolId === pool.id).length > checks.length) {
+  const more = document.createElement('p');
+  more.className = 'help';
+  more.textContent = 'Ältere Messungen bleiben in der Datenbank gespeichert.';
+  row.append(more);
+ }
+ for (const alert of data.waterAlerts.filter(item => item.poolId === pool.id)) {
+  const name = waterParameterName(data, alert.parameterCode);
+  const unit = alert.unit ? ` ${alert.unit}` : '';
+  const line = document.createElement('p');
+  line.className = 'help';
+  line.textContent = alert.status === 'open'
+   ? `Offene Warnung: ${name} ${alert.value}${unit}. Quittierung ist keine Behebung.`
+   : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.acknowledgementNote}. Die Abweichung gilt damit nicht als behoben.`;
+  row.append(line);
+  for (const measure of data.waterMeasures.filter(item => item.alertId === alert.id)) {
+   const measureLine = document.createElement('p');
+   measureLine.className = 'help';
+   measureLine.textContent = `Maßnahme ${new Date(measure.recordedAt).toLocaleString('de-DE')} · ${measure.recordedName}: ${measure.measureText}`;
+   row.append(measureLine);
+  }
+  const measure = input();
+  measure.placeholder = 'Durchgeführte Maßnahme';
+  row.append(labeled('Maßnahme', measure));
+  row.append(button('Maßnahme speichern', 'secondary', () => commit(() => saveWaterMeasure(database(), bundle(), alert.id, measure.value, actor(), new Date().toISOString(), context()))));
+  row.append(button('Wiederholungsmessung', 'secondary', () => {
+   followUpAlertId = alert.id;
+   selectedWaterPoolId = pool.id;
+   renderPanel('');
+  }));
+  if (alert.status !== 'open') continue;
+  const acknowledgement = input();
+  acknowledgement.placeholder = 'Kenntnisnahme, keine Behebung';
+  row.append(labeled('Quittierung', acknowledgement));
+  row.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
+ }
+ host.append(row);
+}
+
 function renderStock(host, current) {
  missingNote(host, materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
@@ -619,6 +878,7 @@ function renderStock(host, current) {
 function renderNotices(host, current) {
  missingNote(host, temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  missingNote(host, materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
+ missingNote(host, waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const notices = facilityNotices(bundle(), state.cachedDefects, {
   facilityIds: [current.id],
   now: new Date().toISOString(),
@@ -649,6 +909,7 @@ function renderPanel(filterDate) {
  if (section === 'maintenance') renderMaintenance(host, current);
  if (section === 'procurement') renderProcurement(host, current);
  if (section === 'temperature') renderTemperature(host, current);
+ if (section === 'water') renderWater(host, current);
  if (section === 'stock') renderStock(host, current);
  if (section === 'notices') renderNotices(host, current);
 }

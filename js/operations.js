@@ -17,7 +17,13 @@ export function emptyOperations() {
   temperatureReadings: [],
   temperatureAlerts: [],
   materials: [],
-  movements: []
+  movements: [],
+  waterParameters: [],
+  waterPools: [],
+  waterPoolParameters: [],
+  waterChecks: [],
+  waterAlerts: [],
+  waterMeasures: []
  };
 }
 
@@ -34,7 +40,13 @@ function copy(bundle) {
   temperatureReadings: [...(source.temperatureReadings || [])],
   temperatureAlerts: [...(source.temperatureAlerts || [])],
   materials: [...(source.materials || [])],
-  movements: [...(source.movements || [])]
+  movements: [...(source.movements || [])],
+  waterParameters: [...(source.waterParameters || [])],
+  waterPools: [...(source.waterPools || [])],
+  waterPoolParameters: [...(source.waterPoolParameters || [])],
+  waterChecks: [...(source.waterChecks || [])],
+  waterAlerts: [...(source.waterAlerts || [])],
+  waterMeasures: [...(source.waterMeasures || [])]
  };
 }
 
@@ -427,6 +439,179 @@ export function temperatureCheckDue(point, readings, now) {
  return due.getTime() <= new Date(now).getTime();
 }
 
+const upcomingMs = 7 * 24 * 60 * 60 * 1000;
+const berlinWeekdays = {Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7};
+
+export const waterParameterCatalog = [
+ {code: 'free_chlorine', name: 'Freies Chlor', unit: 'mg/l', decimals: 2, minPlausible: 0, maxPlausible: 20, sortOrder: 1, active: true},
+ {code: 'combined_chlorine', name: 'Gebundenes Chlor', unit: 'mg/l', decimals: 2, minPlausible: 0, maxPlausible: 20, sortOrder: 2, active: true},
+ {code: 'ph', name: 'pH-Wert', unit: '', decimals: 2, minPlausible: 0, maxPlausible: 14, sortOrder: 3, active: true},
+ {code: 'redox', name: 'Redoxspannung', unit: 'mV', decimals: 0, minPlausible: -2000, maxPlausible: 2000, sortOrder: 4, active: true},
+ {code: 'temperature', name: 'Wassertemperatur', unit: '°C', decimals: 1, minPlausible: 0, maxPlausible: 50, sortOrder: 5, active: true}
+];
+
+export function waterCatalog(bundle) {
+ const loaded = (bundle?.waterParameters || []).filter(item => item?.code && item.active !== false);
+ return loaded.length ? [...loaded].sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0)) : waterParameterCatalog;
+}
+
+export function berlinParts(value) {
+ const date = new Date(value);
+ if (Number.isNaN(date.getTime())) return null;
+ const parts = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Berlin',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  weekday: 'short'
+ }).formatToParts(date);
+ const part = type => parts.find(item => item.type === type)?.value || '';
+ const weekday = berlinWeekdays[part('weekday')] || 0;
+ if (!part('year') || !weekday) return null;
+ return {day: `${part('year')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}`, weekday};
+}
+
+export function berlinInstant(day, time) {
+ if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '') || !/^\d{2}:\d{2}$/.test(time || '')) return '';
+ const [year, month, date] = day.split('-').map(Number);
+ const [hour, minute] = time.split(':').map(Number);
+ let utc = Date.UTC(year, month - 1, date, hour, minute);
+ for (let attempt = 0; attempt < 4; attempt += 1) {
+  const parts = berlinParts(new Date(utc));
+  if (!parts) return '';
+  const [gotYear, gotMonth, gotDate] = parts.day.split('-').map(Number);
+  const [gotHour, gotMinute] = parts.time.split(':').map(Number);
+  const delta = Date.UTC(year, month - 1, date, hour, minute) - Date.UTC(gotYear, gotMonth - 1, gotDate, gotHour, gotMinute);
+  if (delta === 0) return new Date(utc).toISOString();
+  utc += delta;
+ }
+ return '';
+}
+
+function calendarWeekday(day) {
+ return berlinParts(berlinInstant(day, '12:00'))?.weekday || 0;
+}
+
+function waterIdle(detail) {
+ return {due: false, bucket: null, dueAt: '', detail};
+}
+
+function latestWaterCheck(pool, checks) {
+ return (checks || []).filter(item => item.poolId === pool.id && item.measuredAt).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt)))[0] || null;
+}
+
+function scheduledWeekdays(pool) {
+ const days = [...new Set((pool.weekdays || []).map(Number).filter(day => day >= 1 && day <= 7))].sort((left, right) => left - right);
+ return days.length ? days : [1, 2, 3, 4, 5, 6, 7];
+}
+
+function waterSlots(pool, fromDay, toDay) {
+ const times = [...new Set((pool.scheduledTimes || []).map(item => String(item)))].filter(item => /^\d{2}:\d{2}$/.test(item)).sort();
+ const days = new Set(scheduledWeekdays(pool));
+ const slots = [];
+ let day = fromDay;
+ while (day && toDay && day <= toDay) {
+  if (days.has(calendarWeekday(day))) {
+   for (const time of times) {
+    const at = berlinInstant(day, time);
+    if (at) slots.push({day, time, at});
+   }
+  }
+  day = addCalendarDays(day, 1);
+ }
+ return slots;
+}
+
+function periodState(pool, checks, now) {
+ const weekly = pool.scheduleMode === 'weekly';
+ const count = Number(pool.intervalCount) || 1;
+ const latest = latestWaterCheck(pool, checks);
+ const today = berlinDay(now);
+ if (!latest) {
+  const createdDay = berlinDay(pool.createdAt || now);
+  if (!createdDay || !today || createdDay >= today) return {due: true, bucket: 'today', dueAt: pool.createdAt || now, detail: 'Für heute liegt keine Messung vor.'};
+  return {due: true, bucket: 'overdue', dueAt: pool.createdAt || now, detail: 'Die Kontrolle ist überfällig.'};
+ }
+ if (!weekly) {
+  const dueDay = addCalendarDays(berlinDay(latest.measuredAt), count);
+  if (!dueDay || !today) return {due: true, bucket: 'today', dueAt: now, detail: 'Die Kontrolle ist fällig.'};
+  if (dueDay > today) {
+   const dueAt = berlinInstant(dueDay, '12:00') || now;
+   if (count > 1 && dueDay <= addCalendarDays(today, 7)) return {due: false, bucket: 'upcoming', dueAt, detail: 'Die nächste Kontrolle ist noch nicht fällig.'};
+   return waterIdle('Die nächste Kontrolle ist noch nicht fällig.');
+  }
+  if (dueDay < today) return {due: true, bucket: 'overdue', dueAt: berlinInstant(dueDay, '12:00') || now, detail: 'Die Kontrolle ist überfällig.'};
+  return {due: true, bucket: 'today', dueAt: berlinInstant(dueDay, '12:00') || now, detail: 'Für heute liegt keine Messung vor.'};
+ }
+ const due = nextReadingAt(latest.measuredAt, 'week', count);
+ if (!due) return {due: true, bucket: 'today', dueAt: now, detail: 'Die Kontrolle ist fällig.'};
+ const dueAt = due.toISOString();
+ const nowTime = new Date(now).getTime();
+ if (due.getTime() <= nowTime) {
+  const bucket = berlinDay(dueAt) < today ? 'overdue' : 'today';
+  return {due: true, bucket, dueAt, detail: bucket === 'overdue' ? 'Die Kontrolle ist überfällig.' : 'Für heute liegt keine Messung vor.'};
+ }
+ if (due.getTime() - nowTime <= upcomingMs) return {due: false, bucket: 'upcoming', dueAt, detail: 'Die nächste Kontrolle ist noch nicht fällig.'};
+ return waterIdle('Die nächste Kontrolle ist noch nicht fällig.');
+}
+
+function timesState(pool, checks, now) {
+ const today = berlinDay(now);
+ if (!today) return {due: true, bucket: 'today', dueAt: now, detail: 'Die Kontrolle ist fällig.'};
+ const createdDay = berlinDay(pool.createdAt || now) || today;
+ const from = createdDay > addCalendarDays(today, -7) ? createdDay : addCalendarDays(today, -7);
+ const slots = waterSlots(pool, from, addCalendarDays(today, 8));
+ const nowTime = new Date(now).getTime();
+ const poolChecks = (checks || []).filter(item => item.poolId === pool.id && item.measuredAt);
+ const missed = [];
+ for (let index = 0; index < slots.length; index += 1) {
+  const slot = slots[index];
+  const at = new Date(slot.at).getTime();
+  if (Number.isNaN(at) || at > nowTime) continue;
+  const nextAt = slots[index + 1] ? new Date(slots[index + 1].at).getTime() : at + 24 * 60 * 60 * 1000;
+  const covered = poolChecks.some(check => {
+   const measured = new Date(check.measuredAt).getTime();
+   return measured >= at && measured < nextAt;
+  });
+  if (!covered) missed.push(slot);
+ }
+ if (missed.length) {
+  const oldest = missed[0];
+  const earlier = createdDay < from && !poolChecks.some(check => berlinDay(check.measuredAt) < from);
+  return {
+   due: true,
+   bucket: oldest.day < today ? 'overdue' : 'today',
+   dueAt: oldest.at,
+   detail: `${earlier ? 'Ältere Kontrollen fehlen ebenfalls. ' : ''}Die Kontrolle um ${oldest.time} fehlt.`
+  };
+ }
+ const next = slots.find(slot => new Date(slot.at).getTime() > nowTime);
+ if (next?.day === today) return {due: false, bucket: 'today', dueAt: next.at, detail: `Nächste Kontrolle um ${next.time}.`};
+ if (next && scheduledWeekdays(pool).length < 7 && next.day <= addCalendarDays(today, 7)) {
+  return {due: false, bucket: 'upcoming', dueAt: next.at, detail: `Nächste Kontrolle am ${next.day} um ${next.time}.`};
+ }
+ return waterIdle('Die nächste Kontrolle ist noch nicht fällig.');
+}
+
+export function waterControlState(pool, checks, parameters, now) {
+ if (!pool || pool.active === false) return waterIdle('Deaktiviert. Die bisherigen Messungen bleiben sichtbar.');
+ const active = (parameters || []).some(item => item.poolId === pool.id && item.active !== false);
+ if (!active) return waterIdle('Für dieses Becken ist kein Parameter aktiv.');
+ const current = now || new Date().toISOString();
+ if (pool.scheduleMode === 'times') return timesState(pool, checks, current);
+ return periodState(pool, checks, current);
+}
+
+export function waterScheduleLabel(pool) {
+ if (pool?.scheduleMode === 'times') return `zu den Uhrzeiten ${(pool.scheduledTimes || []).join(', ') || '—'}`;
+ const count = Number(pool?.intervalCount) || 1;
+ if (pool?.scheduleMode === 'weekly') return count === 1 ? 'wöchentlich' : `alle ${count} Wochen`;
+ return count === 1 ? 'täglich' : `alle ${count} Tage`;
+}
+
 export function materialStock(movements, materialId) {
  let total = 0;
  for (const movement of movements || []) {
@@ -448,6 +633,8 @@ export function operationMetrics(bundle, facilityIds, today, now) {
   procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length,
   temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
   temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && temperatureCheckDue(point, bundle?.temperatureReadings, now)).length,
-  stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length
+  stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length,
+  waterOpen: (bundle?.waterAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
+  waterMissing: (bundle?.waterPools || []).filter(pool => inScope(pool) && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).due).length
  };
 }

@@ -15,5 +15,6 @@ export const state = {
   currentView: "dashboard",
   operationPreview: null,
   temperatureInstalled: false,
-  materialsInstalled: false
+  materialsInstalled: false,
+  waterInstalled: false
 };

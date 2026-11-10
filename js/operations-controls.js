@@ -6,7 +6,10 @@ import {
  emptyOperations,
  inspectionOverdue,
  materialStock,
- temperatureCheckDue
+ temperatureCheckDue,
+ waterCatalog,
+ waterControlState,
+ waterScheduleLabel
 } from './operations.js';
 
 // Die Sitzungen von Betriebsleitung und Mitarbeiter haben die Regeln von
@@ -319,6 +322,322 @@ export function procurementFromStock(bundle, materialId, actor, now) {
  }, actor, now);
 }
 
+function definitionOf(bundle, code) {
+ return waterCatalog(bundle).find(item => item.code === code) || null;
+}
+
+function poolOf(bundle, poolId) {
+ return (bundle?.waterPools || []).find(item => item.id === poolId) || null;
+}
+
+function parameterOf(bundle, parameterId) {
+ return (bundle?.waterPoolParameters || []).find(item => item.id === parameterId) || null;
+}
+
+function poolParameters(bundle, poolId) {
+ return (bundle?.waterPoolParameters || []).filter(item => item.poolId === poolId);
+}
+
+export function waterAmount(definition, value) {
+ if (!definition) return null;
+ const raw = String(value ?? '').trim().replace(',', '.');
+ const decimals = Number(definition.decimals);
+ const pattern = decimals === 0 ? /^-?\d+$/ : new RegExp(`^-?\\d+(\\.\\d{1,${decimals}})?$`);
+ if (!pattern.test(raw)) return null;
+ const amount = Number(raw);
+ if (!Number.isFinite(amount) || amount < Number(definition.minPlausible) || amount > Number(definition.maxPlausible)) return null;
+ return raw;
+}
+
+function optionalLimit(definition, value) {
+ if (String(value ?? '').trim() === '') return {ok: true, value: null};
+ const amount = waterAmount(definition, value);
+ if (amount === null) return {ok: false, value: null};
+ return {ok: true, value: amount};
+}
+
+export function parseWaterTimes(value) {
+ const tokens = String(value ?? '').split(/[,;\s]+/).map(item => item.trim()).filter(Boolean);
+ const times = [];
+ for (const token of tokens) {
+  const match = token.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  times.push(`${String(hour).padStart(2, '0')}:${match[2]}`);
+ }
+ const unique = [...new Set(times)].sort();
+ if (!unique.length || unique.length > 12) return null;
+ return unique;
+}
+
+export function waterPoolDraftError(draft) {
+ if (!draft?.facility?.id && !draft?.pool) return 'Bitte einen Betrieb auswählen.';
+ const name = text(draft.name, 200);
+ if (!name) return 'Bitte eine Beckenbezeichnung eintragen.';
+ const mode = draft.scheduleMode || 'daily';
+ if (!['daily', 'weekly', 'times'].includes(mode)) return 'Bitte einen Kontrollplan wählen.';
+ if (mode === 'times') {
+  if (!parseWaterTimes(draft.scheduledTimes)) return 'Bitte gültige Uhrzeiten eintragen, zum Beispiel 08:00, 14:00.';
+  const days = [...new Set((draft.weekdays || []).map(Number))].filter(day => day >= 1 && day <= 7);
+  if (!days.length) return 'Bitte mindestens einen Wochentag wählen.';
+  return '';
+ }
+ const count = draft.intervalCount == null || draft.intervalCount === '' ? 1 : Number(draft.intervalCount);
+ if (!Number.isInteger(count) || count < 1 || count > 365) return 'Bitte eine Intervallanzahl von 1 bis 365 eintragen.';
+ return '';
+}
+
+function scheduleFrom(draft) {
+ const mode = draft.scheduleMode || 'daily';
+ if (mode === 'times') {
+  return {
+   scheduleMode: 'times',
+   intervalCount: 1,
+   scheduledTimes: parseWaterTimes(draft.scheduledTimes) || [],
+   weekdays: [...new Set((draft.weekdays || []).map(Number))].filter(day => day >= 1 && day <= 7).sort((left, right) => left - right)
+  };
+ }
+ return {
+  scheduleMode: mode,
+  intervalCount: Number(draft.intervalCount || 1),
+  scheduledTimes: [],
+  weekdays: [1, 2, 3, 4, 5, 6, 7]
+ };
+}
+
+export function createWaterPool(bundle, draft, actor, now) {
+ const error = waterPoolDraftError(draft);
+ if (error) return {ok: false, error, bundle};
+ if (!canManage(draft.facility, actor)) return {ok: false, error: 'Becken legt die Betriebsleitung oder Geschäftsführung an.', bundle};
+ const pool = {
+  id: newId(),
+  facilityId: draft.facility.id,
+  facilityName: draft.facility.name || 'Betrieb',
+  organizationId: draft.facility.organization_id,
+  name: text(draft.name, 200),
+  active: true,
+  ...scheduleFrom(draft),
+  createdBy: actor.userId,
+  createdAt: now
+ };
+ const parameters = waterCatalog(bundle).map(definition => ({
+  id: newId(),
+  poolId: pool.id,
+  facilityId: pool.facilityId,
+  organizationId: pool.organizationId,
+  parameterCode: definition.code,
+  required: true,
+  active: true,
+  minValue: null,
+  maxValue: null
+ }));
+ return {ok: true, bundle: carry(bundle, {waterPools: [pool, ...(bundle?.waterPools || [])], waterPoolParameters: [...parameters, ...(bundle?.waterPoolParameters || [])]}), pool, parameters};
+}
+
+export function updateWaterPool(bundle, poolId, draft, actor) {
+ const pool = poolOf(bundle, poolId);
+ if (!pool) return {ok: false, error: 'Das Becken wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(pool), actor)) return {ok: false, error: 'Becken ändert die Betriebsleitung oder Geschäftsführung.', bundle};
+ const error = waterPoolDraftError({...draft, pool});
+ if (error) return {ok: false, error, bundle};
+ const updated = {...pool, name: text(draft.name, 200), ...scheduleFrom(draft)};
+ return {ok: true, bundle: carry(bundle, {waterPools: (bundle?.waterPools || []).map(item => item.id === pool.id ? updated : item)}), pool: updated};
+}
+
+export function setWaterPoolActive(bundle, poolId, active, actor) {
+ const pool = poolOf(bundle, poolId);
+ if (!pool) return {ok: false, error: 'Das Becken wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(pool), actor)) return {ok: false, error: 'Becken aktiviert die Betriebsleitung oder Geschäftsführung.', bundle};
+ const updated = {...pool, active: active === true};
+ return {ok: true, bundle: carry(bundle, {waterPools: (bundle?.waterPools || []).map(item => item.id === pool.id ? updated : item)}), pool: updated};
+}
+
+export function waterParameterDraftError(bundle, parameter, draft) {
+ const definition = definitionOf(bundle, parameter?.parameterCode);
+ if (!definition) return 'Dieser Parameter ist nicht vorgesehen.';
+ const minimum = optionalLimit(definition, draft?.minValue);
+ const maximum = optionalLimit(definition, draft?.maxValue);
+ if (!minimum.ok || !maximum.ok) return `Bitte den Sollbereich für ${definition.name} im vorgesehenen Format eintragen oder leer lassen.`;
+ if (minimum.value !== null && maximum.value !== null && Number(minimum.value) > Number(maximum.value)) return 'Der untere Sollwert darf nicht über dem oberen liegen.';
+ return '';
+}
+
+export function updateWaterParameter(bundle, parameterId, draft, actor) {
+ const parameter = parameterOf(bundle, parameterId);
+ if (!parameter) return {ok: false, error: 'Der Parameter wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(parameter), actor)) return {ok: false, error: 'Parameter ändert die Betriebsleitung oder Geschäftsführung.', bundle};
+ const error = waterParameterDraftError(bundle, parameter, draft);
+ if (error) return {ok: false, error, bundle};
+ const definition = definitionOf(bundle, parameter.parameterCode);
+ const updated = {
+  ...parameter,
+  minValue: optionalLimit(definition, draft.minValue).value,
+  maxValue: optionalLimit(definition, draft.maxValue).value,
+  required: draft.required !== false,
+  active: draft.active !== false
+ };
+ return {ok: true, bundle: carry(bundle, {waterPoolParameters: (bundle?.waterPoolParameters || []).map(item => item.id === parameter.id ? updated : item)}), parameter: updated};
+}
+
+export function addWaterParameter(bundle, poolId, parameterCode, actor, now) {
+ const pool = poolOf(bundle, poolId);
+ if (!pool) return {ok: false, error: 'Das Becken wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(pool), actor)) return {ok: false, error: 'Parameter ergänzt die Betriebsleitung oder Geschäftsführung.', bundle};
+ const definition = definitionOf(bundle, parameterCode);
+ if (!definition) return {ok: false, error: 'Dieser Parameter ist nicht vorgesehen.', bundle};
+ if (poolParameters(bundle, pool.id).some(item => item.parameterCode === definition.code)) return {ok: false, error: 'Dieser Parameter ist dem Becken bereits zugeordnet.', bundle};
+ const parameter = {
+  id: newId(),
+  poolId: pool.id,
+  facilityId: pool.facilityId,
+  organizationId: pool.organizationId,
+  parameterCode: definition.code,
+  required: true,
+  active: true,
+  minValue: null,
+  maxValue: null,
+  createdAt: now
+ };
+ return {ok: true, bundle: carry(bundle, {waterPoolParameters: [parameter, ...(bundle?.waterPoolParameters || [])]}), parameter};
+}
+
+function waterBreached(reading) {
+ const value = Number(reading?.value);
+ if (!Number.isFinite(value)) return false;
+ const below = reading.minLimit != null && reading.minLimit !== '' && value < Number(reading.minLimit);
+ const above = reading.maxLimit != null && reading.maxLimit !== '' && value > Number(reading.maxLimit);
+ return below || above;
+}
+
+export function recordWaterCheck(bundle, poolId, draft, actor, now) {
+ const pool = poolOf(bundle, poolId);
+ if (!pool || pool.active === false) return {ok: false, error: 'Das Becken ist nicht aktiv.', bundle};
+ if (!canUse(facilityOf(pool), actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
+ const note = text(draft?.note, 2000);
+ if (note === null) return {ok: false, error: 'Der Kommentar darf höchstens 2000 Zeichen haben.', bundle};
+ const followUpAlertId = draft?.followUpAlertId || null;
+ if (followUpAlertId && !(bundle?.waterAlerts || []).some(item => item.id === followUpAlertId && item.poolId === pool.id)) {
+  return {ok: false, error: 'Die Wiederholung gehört zu einer anderen Warnung.', bundle};
+ }
+ const configured = poolParameters(bundle, pool.id).filter(item => item.active !== false);
+ if (!configured.length) return {ok: false, error: 'Für dieses Becken ist kein Parameter aktiv.', bundle};
+ const sent = draft?.values || {};
+ for (const code of Object.keys(sent)) {
+  if (String(sent[code] ?? '').trim() === '') continue;
+  if (!configured.some(item => item.parameterCode === code)) return {ok: false, error: 'Dieser Parameter ist für das Becken nicht vorgesehen.', bundle};
+ }
+ const readings = [];
+ for (const parameter of configured) {
+  const raw = sent[parameter.parameterCode];
+  if (String(raw ?? '').trim() === '') {
+   if (parameter.required !== false) return {ok: false, error: 'Bitte alle erforderlichen Messwerte eintragen.', bundle};
+   continue;
+  }
+  const definition = definitionOf(bundle, parameter.parameterCode);
+  const amount = waterAmount(definition, raw);
+  if (amount === null) return {ok: false, error: `Bitte ${definition?.name || 'den Messwert'} im vorgesehenen Format eintragen.`, bundle};
+  readings.push({
+   parameterCode: parameter.parameterCode,
+   value: amount,
+   unit: definition?.unit || '',
+   minLimit: parameter.minValue,
+   maxLimit: parameter.maxValue
+  });
+ }
+ if (!readings.length) return {ok: false, error: 'Bitte mindestens einen Messwert eintragen.', bundle};
+ const check = {
+  id: newId(),
+  poolId: pool.id,
+  facilityId: pool.facilityId,
+  facilityName: pool.facilityName,
+  organizationId: pool.organizationId,
+  measuredAt: now,
+  recordedBy: actor.userId,
+  recordedName: actor.name || 'Mitarbeiter',
+  note,
+  followUpAlertId,
+  readings
+ };
+ const created = [];
+ let alerts = bundle?.waterAlerts || [];
+ for (const reading of readings) {
+  if (!waterBreached(reading)) continue;
+  const alert = {
+   id: newId(),
+   checkId: check.id,
+   poolId: pool.id,
+   facilityId: pool.facilityId,
+   facilityName: pool.facilityName,
+   organizationId: pool.organizationId,
+   parameterCode: reading.parameterCode,
+   value: reading.value,
+   minLimit: reading.minLimit,
+   maxLimit: reading.maxLimit,
+   unit: reading.unit,
+   measuredAt: now,
+   recordedBy: actor.userId,
+   status: 'open',
+   acknowledgedBy: null,
+   acknowledgedName: '',
+   acknowledgedAt: null,
+   acknowledgementNote: ''
+  };
+  created.push(alert);
+  alerts = [alert, ...alerts];
+ }
+ return {ok: true, bundle: carry(bundle, {waterChecks: [check, ...(bundle?.waterChecks || [])], waterAlerts: alerts}), check, alerts: created};
+}
+
+export function acknowledgeWaterAlert(bundle, alertId, note, actor, now) {
+ const alert = (bundle?.waterAlerts || []).find(item => item.id === alertId);
+ if (!alert) return {ok: false, error: 'Die Warnung wurde nicht gefunden.', bundle};
+ if (!canUse(facilityOf(alert), actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
+ if (alert.status !== 'open') return {ok: false, error: 'Diese Warnung wurde bereits quittiert.', bundle};
+ const acknowledgementNote = text(note, 2000);
+ if (!acknowledgementNote || acknowledgementNote.length < 3) return {ok: false, error: 'Bitte die Quittierung mit mindestens 3 Zeichen begründen.', bundle};
+ const updated = {
+  ...alert,
+  status: 'acknowledged',
+  acknowledgedBy: actor.userId,
+  acknowledgedName: actor.name || 'Mitarbeiter',
+  acknowledgedAt: now,
+  acknowledgementNote
+ };
+ return {ok: true, bundle: carry(bundle, {waterAlerts: (bundle?.waterAlerts || []).map(item => item.id === alert.id ? updated : item)}), alert: updated};
+}
+
+export function recordWaterMeasure(bundle, alertId, measure, actor, now) {
+ const alert = (bundle?.waterAlerts || []).find(item => item.id === alertId);
+ if (!alert) return {ok: false, error: 'Die Warnung wurde nicht gefunden.', bundle};
+ if (!canUse(facilityOf(alert), actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
+ const measureText = text(measure, 2000);
+ if (!measureText || measureText.length < 3) return {ok: false, error: 'Bitte die Maßnahme mit mindestens 3 Zeichen dokumentieren.', bundle};
+ const entry = {
+  id: newId(),
+  alertId: alert.id,
+  facilityId: alert.facilityId,
+  facilityName: alert.facilityName,
+  organizationId: alert.organizationId,
+  measureText,
+  recordedBy: actor.userId,
+  recordedName: actor.name || 'Mitarbeiter',
+  recordedAt: now
+ };
+ return {ok: true, bundle: carry(bundle, {waterMeasures: [entry, ...(bundle?.waterMeasures || [])], waterAlerts: bundle?.waterAlerts || []}), measure: entry, alert};
+}
+
+export function waterAttention(bundle, facilityId, now) {
+ return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).bucket);
+}
+
+export function waterParameterName(bundle, code) {
+ return definitionOf(bundle, code)?.name || code || 'Parameter';
+}
+
+export {waterScheduleLabel};
+
 export function facilityNotices(bundle, defects, options) {
  const ids = new Set(options?.facilityIds || []);
  const actor = options?.actor;
@@ -363,6 +682,21 @@ export function facilityNotices(bundle, defects, options) {
   if (!temperatureCheckDue(point, bundle?.temperatureReadings, now)) continue;
   const daily = (point.intervalUnit || 'day') === 'day' && Number(point.intervalCount || 1) === 1;
   push({id: `temperature-missing:${point.id}`, facilityId: point.facilityId, organizationId: point.organizationId, kind: 'temperature-missing', title: point.name || 'Temperaturkontrolle', detail: daily ? 'Für heute liegt keine Messung vor.' : 'Die Kontrolle ist fällig.', warn: true});
+ }
+ for (const alert of bundle?.waterAlerts || []) {
+  if (alert.status !== 'open') continue;
+  const pool = poolOf(bundle, alert.poolId);
+  const name = waterParameterName(bundle, alert.parameterCode);
+  const range = alert.minLimit != null && alert.maxLimit != null
+   ? `${alert.minLimit} bis ${alert.maxLimit}`
+   : alert.minLimit != null ? `mindestens ${alert.minLimit}` : `höchstens ${alert.maxLimit}`;
+  const unit = alert.unit ? ` ${alert.unit}` : '';
+  push({id: `water-warning:${alert.id}`, poolId: alert.poolId, facilityId: alert.facilityId, organizationId: alert.organizationId, kind: 'water-warning', title: pool?.name || 'Wasserhygiene', detail: `${name}: ${alert.value}${unit} außerhalb von ${range}. Die Warnung ist offen.`, warn: true});
+ }
+ for (const pool of bundle?.waterPools || []) {
+  const status = waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now);
+  if (!status.due) continue;
+  push({id: `water-missing:${pool.id}`, poolId: pool.id, facilityId: pool.facilityId, organizationId: pool.organizationId, kind: 'water-missing', title: pool.name || 'Wasserhygiene', detail: status.detail, warn: true});
  }
  for (const material of bundle?.materials || []) {
   if (!materialBelowMinimum(bundle, material)) continue;

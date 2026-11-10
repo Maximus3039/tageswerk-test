@@ -76,11 +76,36 @@ test('Die Startseite zählt nur eigene und betriebliche Aufgaben', () => {
  assert.deepEqual(installed, [
   '2 offene Kontrollgänge',
   '1 Temperaturkontrolle ausstehend',
+  'Wasserhygiene ist noch nicht in der Datenbank installiert.',
   '1 Wartung fällig',
   '3 neue Hinweise'
  ]);
  assert.match(homeLines(agendaCounts(items, 0, false))[1], /noch nicht in der Datenbank installiert/);
- assert.deepEqual(captureActions.map(action => action.id), ['defect', 'temperature', 'reading', 'daily-report', 'procurement']);
+ const withWater = homeLines(agendaCounts(items, 3, true, true));
+ assert.equal(withWater[2], '0 Hygienekontrollen ausstehend');
+ assert.deepEqual(captureActions.map(action => action.id), ['defect', 'temperature', 'water', 'reading', 'daily-report', 'procurement']);
+});
+
+test('Hygienekontrollen bleiben beim Betrieb und werden nicht persönlich zugewiesen', () => {
+ const source = bundle();
+ source.waterPools = [
+  {id: 'swim', facilityId: 'fac-a', organizationId: 'org-a', name: 'Schwimmer', active: true, scheduleMode: 'daily', intervalCount: 1, createdAt: '2026-11-08T08:00:00.000Z', scheduledTimes: [], weekdays: [1, 2, 3, 4, 5, 6, 7]},
+  {id: 'other-pool', facilityId: 'fac-b', organizationId: 'org-a', name: 'Strandbecken', active: true, scheduleMode: 'daily', intervalCount: 1, createdAt: '2026-11-08T08:00:00.000Z', scheduledTimes: [], weekdays: [1, 2, 3, 4, 5, 6, 7]}
+ ];
+ source.waterPoolParameters = [
+  {poolId: 'swim', parameterCode: 'ph', active: true},
+  {poolId: 'other-pool', parameterCode: 'ph', active: true}
+ ];
+ source.waterChecks = [];
+ const items = workAgenda(source, {facilityIds: ['fac-a'], actor: employee, now});
+ const water = items.find(item => item.kind === 'water');
+ assert.equal(water.title, 'Schwimmer');
+ assert.equal(water.bucket, 'overdue');
+ assert.equal(water.personal, false);
+ assert.equal(water.scope, 'Für den Betrieb');
+ assert.equal(items.some(item => item.title === 'Strandbecken'), false);
+ const counts = agendaCounts(items, 0, true, true);
+ assert.equal(counts.water, 1);
 });
 
 test('Die PWA ersetzt einen alten Cache und speichert keine fremden Antworten', () => {

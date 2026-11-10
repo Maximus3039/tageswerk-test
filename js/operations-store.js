@@ -1,12 +1,20 @@
 import {facilityVisibleToMember} from './permissions.js';
 import {
  acknowledgeTemperatureAlert,
+ acknowledgeWaterAlert,
+ addWaterParameter,
  createMaterial,
  createTemperaturePoint,
+ createWaterPool,
  recordMovement,
  recordTemperature,
+ recordWaterCheck,
+ recordWaterMeasure,
  setTemperaturePointActive,
- updateTemperaturePoint
+ setWaterPoolActive,
+ updateTemperaturePoint,
+ updateWaterParameter,
+ updateWaterPool
 } from './operations-controls.js';
 import {
  assignInspection,
@@ -20,7 +28,8 @@ import {
  linkReportDefect,
  recordInspection,
  reviewProcurement,
- reviseDailyReport
+ reviseDailyReport,
+ waterCatalog
 } from './operations.js';
 
 const tables = [
@@ -39,6 +48,7 @@ const tables = [
 
 const temperatureTables = ['temperature_points', 'temperature_readings', 'temperature_alerts'];
 const materialTables = ['materials', 'material_movements'];
+const waterTables = ['water_parameter_definitions', 'water_pools', 'water_pool_parameters', 'water_checks', 'water_alerts', 'water_alert_measures'];
 
 export function supabaseOperationDb(supabase) {
  return {
@@ -317,6 +327,92 @@ function assemble(loaded, actor, context) {
    recordedAt: row.recorded_at,
    maintenanceLogId: row.maintenance_log_id || null,
    procurementRequestId: row.procurement_request_id || null
+  })).sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt))),
+  waterParameters: (loaded.water_parameter_definitions || []).map(row => ({
+   code: row.code,
+   name: row.name,
+   unit: row.unit || '',
+   decimals: Number(row.decimals),
+   minPlausible: Number(row.min_plausible),
+   maxPlausible: Number(row.max_plausible),
+   sortOrder: Number(row.sort_order) || 0,
+   active: row.active !== false
+  })).sort((a, b) => a.sortOrder - b.sortOrder),
+  waterPools: (loaded.water_pools || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   name: row.name,
+   active: row.active !== false,
+   scheduleMode: row.schedule_mode || 'daily',
+   intervalCount: Number(row.interval_count) || 1,
+   scheduledTimes: Array.isArray(row.scheduled_times) ? row.scheduled_times.map(String) : [],
+   weekdays: Array.isArray(row.weekdays) && row.weekdays.length ? row.weekdays.map(Number) : [1, 2, 3, 4, 5, 6, 7],
+   createdBy: row.created_by,
+   createdAt: row.created_at
+  })),
+  waterPoolParameters: (loaded.water_pool_parameters || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   poolId: row.pool_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   parameterCode: row.parameter_code,
+   required: row.required !== false,
+   active: row.active !== false,
+   minValue: row.min_value == null ? null : String(row.min_value),
+   maxValue: row.max_value == null ? null : String(row.max_value)
+  })),
+  waterChecks: (loaded.water_checks || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   poolId: row.pool_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   measuredAt: row.measured_at,
+   recordedBy: row.recorded_by,
+   recordedName: personName(context, row.recorded_by, actor),
+   note: row.note || '',
+   followUpAlertId: row.follow_up_alert_id || null,
+   readings: (Array.isArray(row.readings) ? row.readings : []).map(entry => ({
+    parameterCode: entry.parameter_code || entry.parameterCode,
+    value: entry.value == null ? '' : String(entry.value),
+    unit: entry.unit || '',
+    minLimit: entry.min_limit == null ? null : String(entry.min_limit),
+    maxLimit: entry.max_limit == null ? null : String(entry.max_limit)
+   }))
+  })).sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt))),
+  waterAlerts: (loaded.water_alerts || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   checkId: row.check_id,
+   poolId: row.pool_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   parameterCode: row.parameter_code,
+   value: row.value_amount == null ? '' : String(row.value_amount),
+   minLimit: row.min_value == null ? null : String(row.min_value),
+   maxLimit: row.max_value == null ? null : String(row.max_value),
+   unit: row.unit || '',
+   measuredAt: row.measured_at,
+   recordedBy: row.recorded_by,
+   status: row.status,
+   acknowledgedBy: row.acknowledged_by || null,
+   acknowledgedName: row.acknowledged_by ? personName(context, row.acknowledged_by, actor) : '',
+   acknowledgedAt: row.acknowledged_at || null,
+   acknowledgementNote: row.acknowledgement_note || ''
+  })),
+  waterMeasures: (loaded.water_alert_measures || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   alertId: row.alert_id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   measureText: row.measure_text || '',
+   recordedBy: row.recorded_by,
+   recordedName: personName(context, row.recorded_by, actor),
+   recordedAt: row.recorded_at
   })).sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)))
  };
 }
@@ -354,15 +450,17 @@ export async function loadOperations(db, actor, context) {
   const result = await readTable(db, table);
   if (result?.error) {
    const missing = missingTable(result.error);
-   return {ok: false, installed: !missing, temperatureInstalled: false, materialsInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
+   return {ok: false, installed: !missing, temperatureInstalled: false, materialsInstalled: false, waterInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
   }
   loaded[table] = result?.data || [];
  }
  const temperature = await readGroup(db, loaded, temperatureTables);
- if (!temperature.ok) return {ok: false, installed: true, temperatureInstalled: false, materialsInstalled: false, error: temperature.error, bundle: assemble(loaded, actor, context)};
+ if (!temperature.ok) return {ok: false, installed: true, temperatureInstalled: false, materialsInstalled: false, waterInstalled: false, error: temperature.error, bundle: assemble(loaded, actor, context)};
  const materials = await readGroup(db, loaded, materialTables);
- if (!materials.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: false, error: materials.error, bundle: assemble(loaded, actor, context)};
- return {ok: true, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, bundle: assemble(loaded, actor, context)};
+ if (!materials.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: false, waterInstalled: false, error: materials.error, bundle: assemble(loaded, actor, context)};
+ const water = await readGroup(db, loaded, waterTables);
+ if (!water.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: false, error: water.error, bundle: assemble(loaded, actor, context)};
+ return {ok: true, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: water.installed, bundle: assemble(loaded, actor, context)};
 }
 
 function owned(row, facility, actor) {
@@ -816,4 +914,229 @@ export async function saveMaterialMovement(db, bundle, draft, actor, now, contex
  const movement = loaded.ok ? loaded.bundle.movements.find(item => item.id === saved.data.id) : null;
  if (!movement || Number(movement.quantity) !== Number(local.movement.quantity)) return denied(bundle, 'Die Buchung wurde nicht bestätigt.');
  return {ok: true, id: movement.id, bundle: loaded.bundle, movement};
+}
+
+function waterHistory(items, poolId) {
+ const reading = (items?.waterChecks || []).filter(item => item.poolId === poolId).map(item => `${item.id}|${item.note}|${item.followUpAlertId || ''}|${JSON.stringify(item.readings)}`).sort().join('\n');
+ const alert = (items?.waterAlerts || []).filter(item => item.poolId === poolId).map(item => `${item.id}|${item.parameterCode}|${item.value}|${item.minLimit}|${item.maxLimit}|${item.status}|${item.acknowledgementNote}`).sort().join('\n');
+ return `${reading}\n${alert}`;
+}
+
+function sameWaterHistory(before, after, poolId) {
+ return waterHistory(before, poolId) === waterHistory(after, poolId);
+}
+
+export async function saveWaterPool(db, bundle, draft, actor, now, context) {
+ const local = createWaterPool(bundle, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('water_pools', {
+   facility_id: draft.facility.id,
+   name: local.pool.name,
+   schedule_mode: local.pool.scheduleMode,
+   interval_count: local.pool.intervalCount,
+   scheduled_times: local.pool.scheduledTimes,
+   weekdays: local.pool.weekdays,
+   active: true
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.created_by !== actor.userId || !owned(saved.data, draft.facility, actor)) {
+  return denied(bundle, saved.error || 'Das Becken wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const pool = loaded.ok ? loaded.bundle.waterPools.find(item => item.id === saved.data.id) : null;
+ const seeded = pool ? loaded.bundle.waterPoolParameters.filter(item => item.poolId === pool.id) : [];
+ if (!pool || pool.name !== local.pool.name || pool.scheduleMode !== local.pool.scheduleMode || seeded.length < waterCatalog(loaded.bundle).length) {
+  return denied(bundle, 'Das Becken wurde nicht bestätigt.');
+ }
+ return {ok: true, id: pool.id, bundle: loaded.bundle, pool};
+}
+
+export async function saveWaterPoolChange(db, bundle, poolId, draft, actor, now, context) {
+ const local = updateWaterPool(bundle, poolId, draft, actor);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('water_pools', poolId, {
+   name: local.pool.name,
+   schedule_mode: local.pool.scheduleMode,
+   interval_count: local.pool.intervalCount,
+   scheduled_times: local.pool.scheduledTimes,
+   weekdays: local.pool.weekdays
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.name !== local.pool.name) return denied(bundle, saved.error || 'Das Becken wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const pool = loaded.ok ? loaded.bundle.waterPools.find(item => item.id === poolId) : null;
+ if (!pool || pool.name !== local.pool.name || pool.scheduleMode !== local.pool.scheduleMode || Number(pool.intervalCount) !== Number(local.pool.intervalCount)) {
+  return denied(bundle, 'Das Becken wurde nicht bestätigt.');
+ }
+ if (!sameWaterHistory(bundle, loaded.bundle, poolId)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
+ return {ok: true, id: pool.id, bundle: loaded.bundle, pool};
+}
+
+export async function saveWaterPoolActive(db, bundle, poolId, active, actor, now, context) {
+ const local = setWaterPoolActive(bundle, poolId, active, actor);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('water_pools', poolId, {active: local.pool.active});
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || Boolean(saved.data.active) !== local.pool.active) return denied(bundle, saved.error || 'Das Becken wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const pool = loaded.ok ? loaded.bundle.waterPools.find(item => item.id === poolId) : null;
+ if (!pool || pool.active !== local.pool.active) return denied(bundle, 'Das Becken wurde nicht bestätigt.');
+ if (!sameWaterHistory(bundle, loaded.bundle, poolId)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
+ return {ok: true, id: pool.id, bundle: loaded.bundle, pool};
+}
+
+export async function saveWaterParameter(db, bundle, parameterId, draft, actor, now, context) {
+ const local = updateWaterParameter(bundle, parameterId, draft, actor);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('water_pool_parameters', parameterId, {
+   min_value: local.parameter.minValue,
+   max_value: local.parameter.maxValue,
+   required: local.parameter.required,
+   active: local.parameter.active
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error || 'Der Parameter wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const parameter = loaded.ok ? loaded.bundle.waterPoolParameters.find(item => item.id === parameterId) : null;
+ const sameLimit = (left, right) => (left == null && right == null) || Number(left) === Number(right);
+ if (!parameter || !sameLimit(parameter.minValue, local.parameter.minValue) || !sameLimit(parameter.maxValue, local.parameter.maxValue) || parameter.required !== local.parameter.required || parameter.active !== local.parameter.active) {
+  return denied(bundle, 'Der Parameter wurde nicht bestätigt.');
+ }
+ if (!sameWaterHistory(bundle, loaded.bundle, parameter.poolId)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
+ return {ok: true, id: parameter.id, bundle: loaded.bundle, parameter};
+}
+
+export async function saveWaterParameterAdd(db, bundle, poolId, parameterCode, actor, now, context) {
+ const local = addWaterParameter(bundle, poolId, parameterCode, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('water_pool_parameters', {
+   pool_id: poolId,
+   facility_id: local.parameter.facilityId,
+   parameter_code: local.parameter.parameterCode,
+   required: true,
+   active: true,
+   min_value: null,
+   max_value: null
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.pool_id !== poolId || saved.data.parameter_code !== parameterCode) {
+  return denied(bundle, saved.error || 'Der Parameter wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const parameter = loaded.ok ? loaded.bundle.waterPoolParameters.find(item => item.id === saved.data.id) : null;
+ if (!parameter || parameter.poolId !== poolId) return denied(bundle, 'Der Parameter wurde nicht bestätigt.');
+ return {ok: true, id: parameter.id, bundle: loaded.bundle, parameter};
+}
+
+export async function saveWaterCheck(db, bundle, poolId, draft, actor, now, context) {
+ const local = recordWaterCheck(bundle, poolId, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('water_checks', {
+   pool_id: poolId,
+   facility_id: local.check.facilityId,
+   note: local.check.note,
+   follow_up_alert_id: local.check.followUpAlertId,
+   readings: local.check.readings.map(reading => ({parameter_code: reading.parameterCode, value: reading.value}))
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.recorded_by !== actor.userId || saved.data.pool_id !== poolId || !saved.data.measured_at) {
+  return denied(bundle, saved.error || 'Die Messung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const check = loaded.ok ? loaded.bundle.waterChecks.find(item => item.id === saved.data.id) : null;
+ if (!check || check.recordedBy !== actor.userId || !check.measuredAt) return denied(bundle, 'Die Messung wurde nicht bestätigt.');
+ const open = loaded.bundle.waterAlerts.filter(item => item.checkId === check.id && item.status === 'open');
+ if (open.length !== local.alerts.length) return denied(bundle, 'Die Grenzwertwarnung wurde nicht bestätigt.');
+ for (const expected of local.alerts) {
+  const alert = open.find(item => item.parameterCode === expected.parameterCode);
+  if (!alert || Number(alert.value) !== Number(expected.value) || String(alert.minLimit) !== String(expected.minLimit) || String(alert.maxLimit) !== String(expected.maxLimit)) {
+   return denied(bundle, 'Die Grenzwertwarnung wurde nicht bestätigt.');
+  }
+ }
+ return {ok: true, id: check.id, bundle: loaded.bundle, check, alerts: open};
+}
+
+export async function saveWaterAcknowledgement(db, bundle, alertId, note, actor, now, context) {
+ const before = (bundle?.waterAlerts || []).find(item => item.id === alertId);
+ const local = acknowledgeWaterAlert(bundle, alertId, note, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.update('water_alerts', alertId, {status: 'acknowledged', acknowledgement_note: local.alert.acknowledgementNote});
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.status !== 'acknowledged' || saved.data.acknowledged_by !== actor.userId || !saved.data.acknowledged_at) {
+  return denied(bundle, saved.error || 'Die Quittierung wurde nicht bestätigt.');
+ }
+ if (before && (String(saved.data.value_amount) !== String(before.value) || String(saved.data.min_value) !== String(before.minLimit) || String(saved.data.max_value) !== String(before.maxLimit))) {
+  return denied(bundle, 'Die Quittierung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const alert = loaded.ok ? loaded.bundle.waterAlerts.find(item => item.id === alertId) : null;
+ if (!alert || alert.status !== 'acknowledged' || alert.acknowledgementNote !== local.alert.acknowledgementNote || alert.value !== before.value) {
+  return denied(bundle, 'Die Quittierung wurde nicht bestätigt.');
+ }
+ const check = loaded.bundle.waterChecks.find(item => item.id === alert.checkId);
+ const previous = (bundle?.waterChecks || []).find(item => item.id === alert.checkId);
+ if (!check || JSON.stringify(check.readings) !== JSON.stringify(previous?.readings)) return denied(bundle, 'Die Quittierung wurde nicht bestätigt.');
+ return {ok: true, id: alert.id, bundle: loaded.bundle, alert};
+}
+
+export async function saveWaterMeasure(db, bundle, alertId, measure, actor, now, context) {
+ const before = (bundle?.waterAlerts || []).find(item => item.id === alertId);
+ const local = recordWaterMeasure(bundle, alertId, measure, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ let result;
+ try {
+  result = await db.insert('water_alert_measures', {
+   alert_id: alertId,
+   facility_id: local.measure.facilityId,
+   measure_text: local.measure.measureText
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.recorded_by !== actor.userId || saved.data.alert_id !== alertId) {
+  return denied(bundle, saved.error || 'Die Maßnahme wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const entry = loaded.ok ? loaded.bundle.waterMeasures.find(item => item.id === saved.data.id) : null;
+ const alert = loaded.ok ? loaded.bundle.waterAlerts.find(item => item.id === alertId) : null;
+ if (!entry || entry.measureText !== local.measure.measureText || !alert || alert.status !== before.status) {
+  return denied(bundle, 'Die Maßnahme wurde nicht bestätigt.');
+ }
+ return {ok: true, id: entry.id, bundle: loaded.bundle, measure: entry, alert};
 }
