@@ -123,7 +123,13 @@ Anmeldung, Mängel, Tagesbericht, Zählerstände und die bisherige Mitarbeiterve
 
 ### Edge Function invite-staff
 
-Die bereitgestellte Funktion wurde nicht heruntergeladen und nicht ersetzt. Im Repository liegt ausschließlich die vorbereitete Fassung unter `supabase/functions/invite-staff`. Die veröffentlichte Oberfläche auf `main` (`98d6d9c`) sendet `facility_id`, `email`, `first_name` und `last_name`, ohne `role`.
+Am 10. November 2026, 22:47 Uhr, ließ sich die Supabase CLI 3.1.0 über `npx supabase` starten. Der lesende Befehl `supabase functions download invite-staff` verlangt ein Zugangstoken mit `edge_functions_read`. `supabase projects list` stoppte mit `Access token not provided`. Die veröffentlichte Funktion wurde deshalb nicht gelesen, nicht verändert und nicht bereitgestellt.
+
+Für den Vergleich wird die produktive Funktionsdatei benötigt, so wie sie im Supabase-Dashboard unter `invite-staff` steht, einschließlich aller importierten Dateien. Ein späterer Download darf nicht in `supabase/functions/invite-staff` schreiben, weil dort die vorbereitete Fassung liegt.
+
+Solange diese Datei fehlt, bleibt die vorbereitete Fassung unverändert. Eine Anpassung ohne die veröffentlichte Quelle würde bestehende Prüfungen nur vermuten. Die vorbereitete Fassung behandelt eine fehlende Rolle als `employee`, speichert `technician` nur für eine aktive Geschäftsführung ohne Betrieb oder die aktive Betriebsleitung dieses Betriebs und lehnt `facility_manager` und `company_admin` ab. Ob die veröffentlichte Funktion dieselben Prüfungen für Anmeldung, Betrieb, bestehende Mitarbeiter, deaktivierte Mitgliedschaften und Versandfehler enthält, ist ohne ihre Quelle offen.
+
+Die veröffentlichte Oberfläche auf `main` (`98d6d9c`) sendet `facility_id`, `email`, `first_name` und `last_name`, ohne `role`. Im Repository liegt ausschließlich die vorbereitete Fassung unter `supabase/functions/invite-staff`.
 
 Die vorbereitete Fassung unterscheidet sich in diesem Vertrag:
 
@@ -146,6 +152,6 @@ Festgestellte Fehler in diesem Lauf: keine.
 Offen vor dem Livebetrieb:
 
 - Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche.
-- Der Vergleich der heruntergeladenen Edge Function mit der vorbereiteten Fassung und erst danach eine gesonderte Freigabe zur Bereitstellung.
+- Die produktive Datei von `invite-staff` zur manuellen Prüfung. Danach erst der Vergleich und eine gesonderte Freigabe zur Bereitstellung.
 - Die Veröffentlichung von `modularisierung`. Sie ist von dieser Datenbankinstallation getrennt und braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
 - Die sechs installierten SQL-Dateien bleiben stehen.
