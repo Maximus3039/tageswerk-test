@@ -95,7 +95,10 @@ test('Produktive und abgesicherte Verwaltungsfunktionen bleiben unterscheidbar',
  assert.match(guardSql, /request_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.match(guardSql, /revoke_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.match(guardSql, /update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.match(guardSql, /private\.can_manage_facility\(/);
  assert.match(guardSql, /manager\.is_active = true/);
+ assert.match(readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8'), /private\.can_manage_facility\(/);
+ assert.match(readFileSync(new URL('../../tageswerk_3_4_invitation_role.sql', import.meta.url), 'utf8'), /private\.can_access_facility\(/);
  assert.match(guardSql, /m\.is_active = true/);
  assert.match(controlSql, /list_facility_employees bleibt die geprüfte Mitarbeiterliste/);
  assert.match(controlSql, /Bekannte produktive Fassung\. Die Migration ergänzt die aktive Verwaltungsberechtigung/);
@@ -144,4 +147,33 @@ test('Nur aktive Leitungen lesen Mitarbeiterdaten und verwalten Einladungen und 
  assert.equal(updateName({callerId: 'manager', memberships: activeRows, userId: 'technician', fullName: 'Timo Techniker'}).error, 'Keine Berechtigung zur Namensänderung');
  assert.equal(updateName({callerId: null, memberships: activeRows, userId: 'employee', fullName: 'Mia Muster'}).error, 'Nicht angemeldet');
  assert.equal(updateName({callerId: 'manager', memberships: activeRows, userId: 'employee', fullName: 'M'}).error, 'Bitte einen gültigen Namen eingeben');
+});
+
+function canManage(memberships, userId, target) {
+ return memberships.some(item => item.user_id === userId && item.is_active === true && item.organization_id === target.organization_id && (item.role === 'company_admin' || (item.role === 'facility_manager' && item.facility_id === target.id)));
+}
+
+function canAccess(memberships, userId, target) {
+ return memberships.some(item => item.user_id === userId && item.is_active === true && item.organization_id === target.organization_id && (item.role === 'company_admin' || item.facility_id === target.id));
+}
+
+test('Geschäftsführung gilt für alle Betriebe, deaktivierte Leitungen verwalten nicht', () => {
+ const admin = membership('admin', 'company_admin');
+ const manager = membership('manager', 'facility_manager');
+ const technician = membership('technician', 'technician');
+ const employee = membership('employee', 'employee', otherFacility);
+ const rows = [admin, manager, technician, employee];
+ assert.equal(canManage(rows, 'admin', facility), true);
+ assert.equal(canManage(rows, 'admin', otherFacility), true);
+ assert.equal(canManage([{...admin, is_active: false}], 'admin', facility), false);
+ assert.equal(canManage(rows, 'manager', facility), true);
+ assert.equal(canManage(rows, 'manager', otherFacility), false);
+ assert.equal(canManage([{...manager, is_active: false}, technician], 'manager', facility), false);
+ assert.equal(canManage(rows, 'technician', facility), false);
+ assert.equal(canAccess(rows, 'technician', facility), true);
+ assert.equal(canAccess([{...technician, is_active: false}], 'technician', facility), false);
+ assert.equal(canAccess(rows, 'technician', otherFacility), false);
+ assert.equal(canAccess(rows, 'admin', otherFacility), true);
+ assert.equal(updateName({callerId: 'manager', memberships: [manager, technician], userId: 'technician', fullName: 'Timo Techniker'}).ok, true);
+ assert.equal(updateName({callerId: 'manager', memberships: [{...manager, is_active: false}, technician], userId: 'technician', fullName: 'Timo Techniker'}).error, 'Keine Berechtigung zur Namensänderung');
 });

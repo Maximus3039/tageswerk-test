@@ -238,12 +238,40 @@ $accept$;
 DO $claim$
 DECLARE
   definition text;
+  updated text;
 BEGIN
   IF to_regprocedure('public.claim_staff_invitations()') IS NULL THEN
     RAISE NOTICE 'claim_staff_invitations() ist nicht vorhanden und wird nicht angelegt.';
     RETURN;
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.claim_staff_invitations()'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('private.can_access_facility(' IN definition) > 0
+     OR position('private.can_manage_facility(' IN definition) > 0 THEN
+    IF position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) = 0
+       OR position('UPDATE public.memberships' IN definition) > 0 THEN
+      RAISE EXCEPTION 'claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    IF position('IN (''employee'',''technician'')' IN definition) > 0
+       OR position('IN (''employee'', ''technician'')' IN definition) > 0 THEN
+      RETURN;
+    END IF;
+    IF position('role=''employee''' IN definition) = 0
+       AND position('role = ''employee''' IN definition) = 0 THEN
+      RAISE EXCEPTION 'claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    updated := replace(definition, 'role=''employee''', 'coalesce(role,''employee'') IN (''employee'',''technician'')');
+    updated := replace(updated, 'role = ''employee''', 'coalesce(role, ''employee'') IN (''employee'', ''technician'')');
+    updated := replace(updated, 'r.facility_id,''employee''', 'r.facility_id,coalesce(r.role,''employee'')');
+    updated := replace(updated, 'r.facility_id, ''employee''', 'r.facility_id, coalesce(r.role, ''employee'')');
+    IF updated = definition
+       OR position('technician' IN updated) = 0
+       OR position('private.can_' IN updated) = 0
+       OR position('UPDATE public.memberships' IN updated) > 0 THEN
+      RAISE EXCEPTION 'claim_staff_invitations erkennt Techniker nicht an einer erwarteten Stelle.';
+    END IF;
+    EXECUTE updated;
+    RETURN;
+  END IF;
   IF position('coalesce(r.role, ''employee'')' IN definition) > 0
      AND position('IN (''employee'', ''technician'')' IN definition) > 0
      AND position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN definition) > 0

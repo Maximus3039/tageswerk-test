@@ -2,8 +2,12 @@
 -- Nicht ohne ausdrückliche Freigabe ausführen.
 -- Die fünf vorherigen Dateien sind noch nicht produktiv ausgeführt.
 -- Diese Datei folgt auf tageswerk_3_4_invitation_role.sql.
--- Sie ersetzt nur die vier geprüften produktiven Funktionen.
--- Ergänzt wird ausschließlich die aktive Mitgliedschaft des Aufrufers.
+-- Sie ersetzt nur Fassungen ohne die vorhandenen Hilfsfunktionen
+-- private.can_access_facility und private.can_manage_facility.
+-- Eine Funktion mit dieser Hilfsprüfung bleibt stehen.
+-- update_employee_name ergänzt dort nur die Technikerrolle, wenn die Fassung
+-- bisher ausschließlich Mitarbeiter nennt.
+-- Ergänzt wird sonst ausschließlich die aktive Mitgliedschaft des Aufrufers.
 -- Eine aktive Geschäftsführung der Organisation bleibt berechtigt.
 -- Eine bereits abgesicherte Fassung bleibt stehen.
 -- Eine unbekannte Fassung setzt die Transaktion zurück.
@@ -19,6 +23,17 @@ BEGIN
     RAISE EXCEPTION 'list_facility_employees() fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.list_facility_employees()'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('private.can_manage_facility(' IN definition) > 0
+     OR position('private.can_access_facility(' IN definition) > 0 THEN
+    IF position('SECURITY DEFINER' IN definition) = 0
+       OR position('auth.uid() IS NOT NULL' IN definition) = 0
+       OR position('UPDATE ' IN definition) > 0
+       OR position('INSERT ' IN definition) > 0
+       OR position('DELETE ' IN definition) > 0 THEN
+      RAISE EXCEPTION 'list_facility_employees entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    RETURN;
+  END IF;
   IF position('SECURITY DEFINER' IN definition) = 0
      OR position('auth.uid() IS NOT NULL' IN definition) = 0
      OR position('manager.user_id = auth.uid()' IN definition) = 0
@@ -89,6 +104,24 @@ BEGIN
     RAISE EXCEPTION 'request_staff_invitation(uuid, text, text, text) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.request_staff_invitation(uuid,text,text,text)'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('private.can_manage_facility(' IN definition) > 0 THEN
+    IF position('SECURITY DEFINER' IN definition) = 0
+       OR position('Anmeldung erforderlich' IN definition) = 0
+       OR position('Betrieb nicht gefunden' IN definition) = 0
+       OR position('Keine Berechtigung fuer diesen Betrieb' IN definition) = 0
+       OR position('Ungueltige E-Mail-Adresse' IN definition) = 0
+       OR position('Vor- und Nachname erforderlich' IN definition) = 0
+       OR position('Dieser Mitarbeiter besitzt bereits Zugang zu diesem Betrieb.' IN definition) = 0
+       OR position('Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.' IN definition) = 0
+       OR position('An diese E-Mail-Adresse wurde bereits eine Einladung versendet.' IN definition) = 0
+       OR position('Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.' IN definition) = 0
+       OR position('INSERT INTO public.staff_invitations' IN definition) = 0
+       OR position('UPDATE public.memberships' IN definition) > 0
+       OR position('DELETE ' IN definition) > 0 THEN
+      RAISE EXCEPTION 'request_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    RETURN;
+  END IF;
   IF position('SECURITY DEFINER' IN definition) = 0
      OR position('Anmeldung erforderlich' IN definition) = 0
      OR position('Betrieb nicht gefunden' IN definition) = 0
@@ -220,6 +253,17 @@ BEGIN
     RAISE EXCEPTION 'revoke_staff_invitation(uuid) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.revoke_staff_invitation(uuid)'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('private.can_manage_facility(' IN definition) > 0 THEN
+    IF position('SECURITY DEFINER' IN definition) = 0
+       OR position('Keine offene Einladung gefunden' IN definition) = 0
+       OR position('Keine Berechtigung' IN definition) = 0
+       OR position('FOR UPDATE' IN definition) = 0
+       OR position('UPDATE public.memberships' IN definition) > 0
+       OR position('DELETE ' IN definition) > 0 THEN
+      RAISE EXCEPTION 'revoke_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    RETURN;
+  END IF;
   IF position('SECURITY DEFINER' IN definition) = 0
      OR position('Keine offene Einladung gefunden' IN definition) = 0
      OR position('Keine Berechtigung' IN definition) = 0
@@ -283,11 +327,36 @@ $revoke$;
 DO $rename$
 DECLARE
   definition text;
+  updated text;
 BEGIN
   IF to_regprocedure('public.update_employee_name(uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'update_employee_name(uuid, text) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.update_employee_name(uuid,text)'::regprocedure), '[[:space:]]+', ' ', 'g');
+  IF position('private.can_manage_facility(' IN definition) > 0
+     OR position('private.can_access_facility(' IN definition) > 0 THEN
+    IF position('SECURITY DEFINER' IN definition) = 0
+       OR position('Nicht angemeldet' IN definition) = 0
+       OR position('Keine Berechtigung zur Namensänderung' IN definition) = 0
+       OR position('Bitte einen gültigen Namen eingeben' IN definition) = 0
+       OR position('Mitarbeiterprofil nicht gefunden' IN definition) = 0
+       OR position('UPDATE public.profiles' IN definition) = 0
+       OR position('UPDATE public.memberships' IN definition) > 0
+       OR position('DELETE ' IN definition) > 0 THEN
+      RAISE EXCEPTION 'update_employee_name entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    IF position('employee.role = ''employee''' IN definition) > 0
+       OR position('employee.role=''employee''' IN definition) > 0 THEN
+      updated := replace(definition, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
+      updated := replace(updated, 'employee.role=''employee''', 'employee.role IN (''employee'',''technician'')');
+      IF position('technician' IN updated) = 0
+         OR position('private.can_' IN updated) = 0 THEN
+        RAISE EXCEPTION 'update_employee_name erkennt Techniker nicht an einer erwarteten Stelle.';
+      END IF;
+      EXECUTE updated;
+    END IF;
+    RETURN;
+  END IF;
   IF position('SECURITY DEFINER' IN definition) = 0
      OR position('Nicht angemeldet' IN definition) = 0
      OR position('Keine Berechtigung zur Namensänderung' IN definition) = 0

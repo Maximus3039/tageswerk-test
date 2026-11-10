@@ -72,22 +72,30 @@ facts AS (
     signatures.list_employees IS NOT NULL AS has_list_employees,
     position('SECURITY DEFINER' IN bodies.list_employees) > 0
       AND position('auth.uid() IS NOT NULL' IN bodies.list_employees) > 0
-      AND position('manager.user_id = auth.uid()' IN bodies.list_employees) > 0
-      AND position('manager.organization_id = m.organization_id' IN bodies.list_employees) > 0
-      AND position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
-      AND position('manager.role = ''facility_manager''' IN bodies.list_employees) > 0
-      AND position('manager.facility_id = m.facility_id' IN bodies.list_employees) > 0
-      AND position('ORDER BY f.name, p.full_name' IN bodies.list_employees) > 0
       AND position('UPDATE ' IN bodies.list_employees) = 0
       AND position('INSERT ' IN bodies.list_employees) = 0
       AND position('DELETE ' IN bodies.list_employees) = 0
       AND (
-        position('is_active' IN bodies.list_employees) = 0
-        OR position('manager.is_active = true' IN bodies.list_employees) > 0
-        OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0
+        (
+          position('manager.user_id = auth.uid()' IN bodies.list_employees) > 0
+          AND position('manager.organization_id = m.organization_id' IN bodies.list_employees) > 0
+          AND position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
+          AND position('manager.role = ''facility_manager''' IN bodies.list_employees) > 0
+          AND position('manager.facility_id = m.facility_id' IN bodies.list_employees) > 0
+          AND position('ORDER BY f.name, p.full_name' IN bodies.list_employees) > 0
+          AND (
+            position('is_active' IN bodies.list_employees) = 0
+            OR position('manager.is_active = true' IN bodies.list_employees) > 0
+            OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0
+          )
+        )
+        OR position('private.can_manage_facility(' IN bodies.list_employees) > 0
+        OR position('private.can_access_facility(' IN bodies.list_employees) > 0
       ) AS list_employees_known,
     position('manager.is_active = true' IN bodies.list_employees) > 0
-      OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0 AS list_employees_active,
+      OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0
+      OR position('private.can_manage_facility(' IN bodies.list_employees) > 0
+      OR position('private.can_access_facility(' IN bodies.list_employees) > 0 AS list_employees_active,
     signatures.request_invitation IS NOT NULL AS has_request_invitation,
     position('SECURITY DEFINER' IN bodies.request_invitation) > 0
       AND position('Anmeldung erforderlich' IN bodies.request_invitation) > 0
@@ -99,57 +107,77 @@ facts AS (
       AND position('Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.' IN bodies.request_invitation) > 0
       AND position('An diese E-Mail-Adresse wurde bereits eine Einladung versendet.' IN bodies.request_invitation) > 0
       AND position('Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.' IN bodies.request_invitation) > 0
-      AND position('m.role = ''company_admin''' IN bodies.request_invitation) > 0
-      AND position('m.role = ''facility_manager''' IN bodies.request_invitation) > 0
-      AND position('m.facility_id = p_facility_id' IN bodies.request_invitation) > 0
       AND position('INSERT INTO public.staff_invitations' IN bodies.request_invitation) > 0
       AND position('UPDATE public.memberships' IN bodies.request_invitation) = 0
       AND position('DELETE ' IN bodies.request_invitation) = 0
       AND (
-        position('is_active' IN bodies.request_invitation) = 0
-        OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
-        OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0
+        position('private.can_manage_facility(' IN bodies.request_invitation) > 0
+        OR (
+          position('m.role = ''company_admin''' IN bodies.request_invitation) > 0
+          AND position('m.role = ''facility_manager''' IN bodies.request_invitation) > 0
+          AND position('m.facility_id = p_facility_id' IN bodies.request_invitation) > 0
+          AND (
+            position('is_active' IN bodies.request_invitation) = 0
+            OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
+            OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0
+          )
+        )
       ) AS request_invitation_known,
     position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
-      OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0 AS request_invitation_active,
+      OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0
+      OR position('private.can_manage_facility(' IN bodies.request_invitation) > 0 AS request_invitation_active,
     signatures.revoke_invitation IS NOT NULL AS has_revoke_invitation,
     position('SECURITY DEFINER' IN bodies.revoke_invitation) > 0
       AND position('Keine offene Einladung gefunden' IN bodies.revoke_invitation) > 0
       AND position('Keine Berechtigung' IN bodies.revoke_invitation) > 0
       AND position('FOR UPDATE' IN bodies.revoke_invitation) > 0
       AND (position('status NOT IN (''pending'',''sent'')' IN bodies.revoke_invitation) > 0 OR position('status NOT IN (''pending'', ''sent'')' IN bodies.revoke_invitation) > 0)
-      AND (position('m.role=''company_admin''' IN bodies.revoke_invitation) > 0 OR position('m.role = ''company_admin''' IN bodies.revoke_invitation) > 0)
-      AND (position('m.role=''facility_manager'' AND m.facility_id=r.facility_id' IN bodies.revoke_invitation) > 0 OR position('m.role = ''facility_manager'' AND m.facility_id = r.facility_id' IN bodies.revoke_invitation) > 0)
       AND (position('status=''revoked''' IN bodies.revoke_invitation) > 0 OR position('status = ''revoked''' IN bodies.revoke_invitation) > 0)
       AND position('UPDATE public.memberships' IN bodies.revoke_invitation) = 0
       AND position('DELETE ' IN bodies.revoke_invitation) = 0
       AND (
-        position('is_active' IN bodies.revoke_invitation) = 0
-        OR position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
-        OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+        position('private.can_manage_facility(' IN bodies.revoke_invitation) > 0
+        OR (
+          (position('m.role=''company_admin''' IN bodies.revoke_invitation) > 0 OR position('m.role = ''company_admin''' IN bodies.revoke_invitation) > 0)
+          AND (position('m.role=''facility_manager'' AND m.facility_id=r.facility_id' IN bodies.revoke_invitation) > 0 OR position('m.role = ''facility_manager'' AND m.facility_id = r.facility_id' IN bodies.revoke_invitation) > 0)
+          AND (
+            position('is_active' IN bodies.revoke_invitation) = 0
+            OR position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+            OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+          )
+        )
       ) AS revoke_invitation_known,
     position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
-      OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0 AS revoke_invitation_active,
+      OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+      OR position('private.can_manage_facility(' IN bodies.revoke_invitation) > 0 AS revoke_invitation_active,
     signatures.update_name IS NOT NULL AS has_update_name,
     position('SECURITY DEFINER' IN bodies.update_name) > 0
       AND position('Nicht angemeldet' IN bodies.update_name) > 0
       AND position('Keine Berechtigung zur Namensänderung' IN bodies.update_name) > 0
       AND position('Bitte einen gültigen Namen eingeben' IN bodies.update_name) > 0
       AND position('Mitarbeiterprofil nicht gefunden' IN bodies.update_name) > 0
-      AND position('manager.role = ''company_admin''' IN bodies.update_name) > 0
-      AND position('manager.role = ''facility_manager''' IN bodies.update_name) > 0
-      AND position('manager.facility_id = employee.facility_id' IN bodies.update_name) > 0
       AND position('UPDATE public.profiles' IN bodies.update_name) > 0
       AND position('SET full_name = trim(p_full_name)' IN bodies.update_name) > 0
       AND position('UPDATE public.memberships' IN bodies.update_name) = 0
       AND position('DELETE ' IN bodies.update_name) = 0
       AND (
-        position('is_active' IN bodies.update_name) = 0
-        OR position('manager.is_active = true' IN bodies.update_name) > 0
-        OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0
+        position('private.can_manage_facility(' IN bodies.update_name) > 0
+        OR position('private.can_access_facility(' IN bodies.update_name) > 0
+        OR (
+          position('manager.role = ''company_admin''' IN bodies.update_name) > 0
+          AND position('manager.role = ''facility_manager''' IN bodies.update_name) > 0
+          AND position('manager.facility_id = employee.facility_id' IN bodies.update_name) > 0
+          AND (
+            position('is_active' IN bodies.update_name) = 0
+            OR position('manager.is_active = true' IN bodies.update_name) > 0
+            OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0
+          )
+        )
       ) AS update_name_known,
     position('manager.is_active = true' IN bodies.update_name) > 0
-      OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0 AS update_name_active,
+      OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0
+      OR position('private.can_manage_facility(' IN bodies.update_name) > 0
+      OR position('private.can_access_facility(' IN bodies.update_name) > 0 AS update_name_active,
     signatures.stamp_temperature IS NULL
       AND signatures.temperature_alert IS NULL
       AND signatures.acknowledge_temperature IS NULL
@@ -181,7 +209,8 @@ facts AS (
       AND position('Stornieren darf die Betriebsleitung oder Geschäftsführung.' IN bodies.prepare_reading) > 0
       AND position('Eine Stornierung ändert nur den Stornierungsvermerk.' IN bodies.prepare_reading) > 0
       AND position('Die Korrektur bezieht sich auf eine gültige ursprüngliche Ablesung desselben Zählers.' IN bodies.prepare_reading) > 0 AS prepare_reading_known,
-    position('technician' IN bodies.manage_membership) = 0
+    (
+      position('technician' IN bodies.manage_membership) = 0
       AND position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN bodies.manage_membership) > 0
       AND position('Ungueltige Rolle' IN bodies.manage_membership) > 0
       AND position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN bodies.manage_membership) > 0
@@ -195,7 +224,20 @@ facts AS (
       AND (
         position('Reaktivierung nur ueber gesonderte Freigabe' IN bodies.manage_membership) > 0
         OR position('DELETE FROM public.memberships' IN bodies.manage_membership) > 0
-      ) AS manage_membership_known,
+        OR position('private.can_manage_facility(' IN bodies.manage_membership) > 0
+      )
+    )
+    OR (
+      position('private.can_manage_facility(' IN bodies.manage_membership) > 0
+      AND position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN bodies.manage_membership) > 0
+      AND position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN bodies.manage_membership) > 0
+      AND position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN bodies.manage_membership) > 0
+      AND position('Eigene Berechtigungen hier nicht veraenderbar' IN bodies.manage_membership) > 0
+      AND (
+        position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN bodies.manage_membership) > 0
+        OR position('p_role NOT IN (''employee'', ''technician'', ''facility_manager'')' IN bodies.manage_membership) > 0
+      )
+    ) AS manage_membership_known,
     position('technician' IN bodies.accept_invitation) = 0
       AND position('Bitte zuerst anmelden.' IN bodies.accept_invitation) > 0
       AND position('Die E-Mail-Adresse ist noch nicht bestätigt.' IN bodies.accept_invitation) > 0
@@ -203,7 +245,8 @@ facts AS (
       AND position('role = ''employee''' IN bodies.accept_invitation) > 0
       AND position('Keine offene Einladung gefunden.' IN bodies.accept_invitation) > 0
       AND position('staff_invitations' IN bodies.accept_invitation) > 0 AS accept_invitation_known,
-    position('technician' IN bodies.claim_invitations) = 0
+    (
+      position('technician' IN bodies.claim_invitations) = 0
       AND position('IF auth.uid() IS NULL THEN RETURN 0' IN bodies.claim_invitations) > 0
       AND (
         position('status=''sent''' IN bodies.claim_invitations) > 0
@@ -212,7 +255,22 @@ facts AS (
       AND (
         position('r.facility_id,''employee''' IN bodies.claim_invitations) > 0
         OR position('r.facility_id, ''employee''' IN bodies.claim_invitations) > 0
-      ) AS claim_invitations_known,
+      )
+    )
+    OR (
+      position('IF auth.uid() IS NULL THEN RETURN 0' IN bodies.claim_invitations) > 0
+      AND (
+        position('private.can_access_facility(' IN bodies.claim_invitations) > 0
+        OR position('private.can_manage_facility(' IN bodies.claim_invitations) > 0
+      )
+      AND position('UPDATE public.memberships SET role' IN bodies.claim_invitations) = 0
+      AND (
+        position('role=''employee''' IN bodies.claim_invitations) > 0
+        OR position('role = ''employee''' IN bodies.claim_invitations) > 0
+        OR position('IN (''employee'',''technician'')' IN bodies.claim_invitations) > 0
+        OR position('IN (''employee'', ''technician'')' IN bodies.claim_invitations) > 0
+      )
+    ) AS claim_invitations_known,
     position('SECURITY DEFINER' IN bodies.update_defect) > 0
       AND position('Anmeldung erforderlich' IN bodies.update_defect) > 0
       AND position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN bodies.update_defect) > 0
@@ -223,9 +281,14 @@ facts AS (
       AND position('Keine Betriebsberechtigung' IN bodies.update_defect) > 0
       AND position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN bodies.update_defect) > 0
       AND position('FOR UPDATE' IN bodies.update_defect) > 0
-      AND (position('m.organization_id=d.organization_id' IN bodies.update_defect) > 0 OR position('m.organization_id = d.organization_id' IN bodies.update_defect) > 0)
-      AND (position('m.facility_id=d.facility_id' IN bodies.update_defect) > 0 OR position('m.facility_id = d.facility_id' IN bodies.update_defect) > 0)
-      AND (position('m.role=''company_admin''' IN bodies.update_defect) > 0 OR position('m.role = ''company_admin''' IN bodies.update_defect) > 0)
+      AND (
+        position('private.can_access_facility(' IN bodies.update_defect) > 0
+        OR (
+          (position('m.organization_id=d.organization_id' IN bodies.update_defect) > 0 OR position('m.organization_id = d.organization_id' IN bodies.update_defect) > 0)
+          AND (position('m.facility_id=d.facility_id' IN bodies.update_defect) > 0 OR position('m.facility_id = d.facility_id' IN bodies.update_defect) > 0)
+          AND (position('m.role=''company_admin''' IN bodies.update_defect) > 0 OR position('m.role = ''company_admin''' IN bodies.update_defect) > 0)
+        )
+      )
       AND (position('p_status NOT IN (''in_progress'',''pending_review'')' IN bodies.update_defect) > 0 OR position('p_status NOT IN (''in_progress'', ''pending_review'')' IN bodies.update_defect) > 0)
       AND (position('d.status IN (''resolved'',''pending_review'')' IN bodies.update_defect) > 0 OR position('d.status IN (''resolved'', ''pending_review'')' IN bodies.update_defect) > 0)
       AND position('UPDATE public.defects SET status=p_status, change_note=' IN bodies.update_defect) > 0
@@ -233,7 +296,8 @@ facts AS (
       AND position('SET facility_id' IN bodies.update_defect) = 0
       AND position('SET organization_id' IN bodies.update_defect) = 0 AS update_defect_safe,
     position('m.is_active = true' IN bodies.update_defect) > 0
-      OR position('m.is_active IS TRUE' IN bodies.update_defect) > 0 AS update_defect_active,
+      OR position('m.is_active IS TRUE' IN bodies.update_defect) > 0
+      OR position('private.can_access_facility(' IN bodies.update_defect) > 0 AS update_defect_active,
     (
       position('= ''employee''' IN bodies.update_defect) = 0
       AND position('<> ''employee''' IN bodies.update_defect) = 0
@@ -248,7 +312,8 @@ facts AS (
       AND (position('m.facility_id=d.facility_id' IN bodies.update_defect) > 0 OR position('m.facility_id = d.facility_id' IN bodies.update_defect) > 0)
     )
     OR position('= ''employee''' IN bodies.update_defect) > 0
-    OR position('<> ''employee''' IN bodies.update_defect) > 0 AS update_defect_known,
+    OR position('<> ''employee''' IN bodies.update_defect) > 0
+    OR position('private.can_access_facility(' IN bodies.update_defect) > 0 AS update_defect_known,
     to_regclass('public.facilities') IS NOT NULL AS has_facilities,
     to_regclass('public.memberships') IS NOT NULL AS has_memberships,
     to_regclass('public.utility_meters') IS NOT NULL AS has_meters,
@@ -592,8 +657,20 @@ installation AS (
     AND signatures.manage_membership IS NOT NULL
     AND position('WHEN ''technician'' THEN 3' IN bodies.meter_body) > 0
     AND position('actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular''' IN bodies.reading_body) > 0
-    AND position('Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben.' IN bodies.manage_body) > 0
-    AND position('SET is_active = true' IN bodies.manage_body) > 0
+    AND (
+      (
+        position('Eine deaktivierte Zuordnung wird nur mit derselben Rolle wieder freigegeben.' IN bodies.manage_body) > 0
+        AND position('SET is_active = true' IN bodies.manage_body) > 0
+      )
+      OR (
+        position('private.can_manage_facility(' IN bodies.manage_body) > 0
+        AND position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN bodies.manage_body) > 0
+        AND (
+          position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN bodies.manage_body) > 0
+          OR position('p_role NOT IN (''employee'', ''technician'', ''facility_manager'')' IN bodies.manage_body) > 0
+        )
+      )
+    )
     AND EXISTS (
       SELECT 1
       FROM pg_constraint AS constraint_row
@@ -669,14 +746,33 @@ installation AS (
     AND signatures.request_invitation IS NOT NULL
     AND signatures.revoke_invitation IS NOT NULL
     AND signatures.update_name IS NOT NULL
-    AND (position('manager.is_active = true' IN bodies.list_employees) > 0 OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0)
-    AND (position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0 OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0)
+    AND (
+      position('manager.is_active = true' IN bodies.list_employees) > 0
+      OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0
+      OR position('private.can_manage_facility(' IN bodies.list_employees) > 0
+      OR position('private.can_access_facility(' IN bodies.list_employees) > 0
+    )
+    AND (
+      position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
+      OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0
+      OR position('private.can_manage_facility(' IN bodies.request_invitation) > 0
+    )
     AND (
       position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
       OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+      OR position('private.can_manage_facility(' IN bodies.revoke_invitation) > 0
     )
-    AND (position('manager.is_active = true' IN bodies.update_name) > 0 OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0)
-    AND position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
+    AND (
+      position('manager.is_active = true' IN bodies.update_name) > 0
+      OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0
+      OR position('private.can_manage_facility(' IN bodies.update_name) > 0
+      OR position('private.can_access_facility(' IN bodies.update_name) > 0
+    )
+    AND (
+      position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
+      OR position('private.can_manage_facility(' IN bodies.list_employees) > 0
+      OR position('private.can_access_facility(' IN bodies.list_employees) > 0
+    )
     AND position('Keine Berechtigung fuer diesen Betrieb' IN bodies.request_invitation) > 0
     AND position('Keine Berechtigung' IN bodies.revoke_invitation) > 0
     AND position('Keine Berechtigung zur Namensänderung' IN bodies.update_name) > 0 AS ok

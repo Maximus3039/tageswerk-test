@@ -297,7 +297,36 @@ BEGIN
     RAISE EXCEPTION 'manage_facility_membership(text, uuid, text, boolean) fehlt und wurde nicht neu erfunden.';
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure), '[[:space:]]+', ' ', 'g');
-  IF position('technician' IN definition) > 0 THEN
+  IF position('private.can_manage_facility(' IN definition) > 0 THEN
+    IF position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
+       OR position('Ungueltige Rolle' IN definition) = 0
+       OR position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN definition) = 0
+       OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
+       OR position('Eigene Berechtigungen hier nicht veraenderbar' IN definition) = 0
+       OR position('UPDATE public.memberships SET role = ''company_admin''' IN definition) > 0 THEN
+      RAISE EXCEPTION 'manage_facility_membership entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    IF position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN definition) > 0
+       OR position('p_role NOT IN (''employee'', ''technician'', ''facility_manager'')' IN definition) > 0 THEN
+      NULL;
+    ELSIF position('p_role NOT IN (''employee'',''facility_manager'')' IN definition) > 0
+       OR position('p_role NOT IN (''employee'', ''facility_manager'')' IN definition) > 0 THEN
+      updated := replace(definition, 'p_role NOT IN (''employee'',''facility_manager'')', 'p_role NOT IN (''employee'',''technician'',''facility_manager'')');
+      updated := replace(updated, 'p_role NOT IN (''employee'', ''facility_manager'')', 'p_role NOT IN (''employee'', ''technician'', ''facility_manager'')');
+      updated := replace(updated, 'm.role<>''employee''', 'm.role NOT IN (''employee'',''technician'')');
+      updated := replace(updated, 'm.role <> ''employee''', 'm.role NOT IN (''employee'', ''technician'')');
+      updated := replace(updated, 'Betriebsleitung darf nur Mitarbeiterzuordnungen bearbeiten', 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten');
+      IF updated = definition
+         OR position('private.can_manage_facility(' IN updated) = 0
+         OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN updated) = 0
+         OR position('technician' IN updated) = 0 THEN
+        RAISE EXCEPTION 'manage_facility_membership erkennt Techniker nicht an einer erwarteten Stelle.';
+      END IF;
+      EXECUTE updated;
+    ELSE
+      RAISE EXCEPTION 'manage_facility_membership entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+  ELSIF position('technician' IN definition) > 0 THEN
     IF position('p_role NOT IN (''employee'',''technician'',''facility_manager'')' IN definition) = 0
        OR position('m.role NOT IN (''employee'',''technician'')' IN definition) = 0
        OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
@@ -448,7 +477,23 @@ BEGIN
     AND procedure.proname = 'employee_update_assigned_defect';
   IF signature IS NOT NULL THEN
     definition := regexp_replace(pg_get_functiondef(signature::regprocedure), '[[:space:]]+', ' ', 'g');
-    IF position('SECURITY DEFINER' IN definition) = 0
+    IF position('private.can_access_facility(' IN definition) > 0 THEN
+      IF position('SECURITY DEFINER' IN definition) = 0
+         OR position('Anmeldung erforderlich' IN definition) = 0
+         OR position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN definition) = 0
+         OR position('Arbeitsvermerk mit 3 bis 2000 Zeichen erforderlich' IN definition) = 0
+         OR position('Mangel nicht gefunden' IN definition) = 0
+         OR position('assigned_to IS DISTINCT FROM auth.uid()' IN definition) = 0
+         OR position('Dieser Mangel ist dir nicht zugewiesen' IN definition) = 0
+         OR position('Keine Betriebsberechtigung' IN definition) = 0
+         OR position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN definition) = 0
+         OR position('FOR UPDATE' IN definition) = 0
+         OR position('SET assigned_to' IN definition) > 0
+         OR position('SET facility_id' IN definition) > 0
+         OR position('SET organization_id' IN definition) > 0 THEN
+        RAISE EXCEPTION 'employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+      END IF;
+    ELSIF position('SECURITY DEFINER' IN definition) = 0
        OR position('Anmeldung erforderlich' IN definition) = 0
        OR position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN definition) = 0
        OR position('Arbeitsvermerk mit 3 bis 2000 Zeichen erforderlich' IN definition) = 0
@@ -470,6 +515,7 @@ BEGIN
     THEN
       RAISE EXCEPTION 'employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
     END IF;
+    IF position('private.can_access_facility(' IN definition) = 0 THEN
     recognized := position('technician' IN definition) > 0
       OR (
         position('= ''employee''' IN definition) = 0
@@ -536,6 +582,7 @@ BEGIN
         RAISE EXCEPTION 'employee_update_assigned_defect erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
       EXECUTE updated;
+    END IF;
     END IF;
   END IF;
 END;
