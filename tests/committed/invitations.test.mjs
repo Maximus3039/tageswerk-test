@@ -14,23 +14,35 @@ function membership(role, target = facility, active = true) {
  return {organization_id: target.organization_id, facility_id: role === 'company_admin' ? null : target.id, role, is_active: active};
 }
 
-function database(rows = []) {
- const state = {rows: rows.map(item => ({...item})), sent: []};
+function database(rows = [], members = []) {
+ const state = {rows: rows.map(item => ({...item})), members: members.map(item => ({...item}))};
  return {
   state,
-  async facility(id) {
-   return [facility, second, foreign].find(item => item.id === id) || null;
-  },
-  async openInvitation(row) {
-   return state.rows.find(item => item.email === row.email && item.facility_id === row.facility_id && ['pending', 'sent'].includes(item.status)) || null;
-  },
-  async insert(row) {
-   const stored = {...row, id: `invite-${state.rows.length + 1}`};
+  async requestInvitation(input) {
+   const target = [facility, second, foreign].find(item => item.id === input.facilityId);
+   if (!target) return {ok: false, status: 404, error: 'Betrieb nicht gefunden'};
+   const allowed = (input.caller?.memberships || []).some(item => item.is_active === true && item.organization_id === target.organization_id && (item.role === 'company_admin' || (item.role === 'facility_manager' && item.facility_id === target.id)));
+   if (!allowed) return {ok: false, status: 403, error: 'Keine aktive Verwaltungsberechtigung fuer diesen Betrieb'};
+   if (!['employee', 'technician'].includes(input.role)) return {ok: false, status: 400, error: 'Eine Einladung kann nur Mitarbeiter oder Techniker vorsehen.'};
+   const email = String(input.email ?? '').trim().toLowerCase();
+   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return {ok: false, status: 400, error: 'Ungueltige E-Mail-Adresse'};
+   const firstName = String(input.firstName ?? '').trim();
+   const lastName = String(input.lastName ?? '').trim();
+   if (!firstName || !lastName) return {ok: false, status: 400, error: 'Vor- und Nachname erforderlich'};
+   if (state.members.some(item => item.email === email && item.organization_id === target.organization_id && (item.facility_id === target.id || item.role === 'company_admin'))) {
+    return {ok: false, status: 409, error: 'Dieser Benutzer ist bereits zugeordnet. Bitte bei Bedarf reaktivieren.'};
+   }
+   const open = state.rows.find(item => item.email === email && item.facility_id === target.id && ['pending', 'sent', 'failed'].includes(item.status));
+   if (open?.status === 'pending') return {ok: false, status: 409, error: 'Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.'};
+   if (open?.status === 'sent') return {ok: false, status: 409, error: 'An diese E-Mail-Adresse wurde bereits eine Einladung versendet.'};
+   if (open?.status === 'failed') return {ok: false, status: 409, error: 'Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.'};
+   const stored = {id: `invite-${state.rows.length + 1}`, email, first_name: firstName, last_name: lastName, facility_id: target.id, role: input.role, status: 'pending'};
    state.rows.push(stored);
-   return stored;
+   return {ok: true, invitation: stored};
   },
   async mark(id, status) {
    const row = state.rows.find(item => item.id === id);
+   if (!row) throw new Error('Einladung nicht gefunden');
    row.status = status;
   }
  };
@@ -87,11 +99,11 @@ test('Einladung verweigert höhere Rollen, fremde Betriebe und Selbstaufwertung'
   inviteStaff({caller: manager, body: {facility_id: second.id, role: 'technician', email: 'c@example.test', first_name: 'C', last_name: 'C'}, database: store, mailer: post, now}),
   inviteStaff({caller: manager, body: {facility_id: facility.id, role: 'facility_manager', email: 'd@example.test', first_name: 'D', last_name: 'D'}, database: store, mailer: post, now}),
   inviteStaff({caller: admin, body: {facility_id: foreign.id, role: 'technician', email: 'e@example.test', first_name: 'E', last_name: 'E'}, database: store, mailer: post, now}),
-  inviteStaff({caller: {userId: 'bound-admin', memberships: [{...membership('company_admin'), facility_id: facility.id}]}, body: {facility_id: facility.id, role: 'technician', email: 'f@example.test', first_name: 'F', last_name: 'F'}, database: store, mailer: post, now}),
+  inviteStaff({caller: {...manager, memberships: [{...membership('facility_manager'), is_active: false}]}, body: {facility_id: facility.id, role: 'employee', email: 'g@example.test', first_name: 'G', last_name: 'G'}, database: store, mailer: post, now}),
   inviteStaff({caller: manager, body: {facility_id: facility.id, role: 'technician', email: 'neu@example.test', first_name: 'Nils', last_name: 'Techniker'}, database: store, mailer: post, now})
  ];
  const results = await Promise.all(blocked);
- assert.deepEqual(results.map(item => item.status), [403, 403, 403, 400, 403, 403, 409]);
+ assert.deepEqual(results.map(item => item.status), [403, 400, 403, 400, 403, 403, 409]);
  assert.equal(store.state.rows.length, 1);
  assert.equal(store.state.rows[0].role, 'employee');
  assert.equal(store.state.rows[0].status, 'sent');
@@ -102,16 +114,63 @@ test('Einladung verweigert höhere Rollen, fremde Betriebe und Selbstaufwertung'
 
 test('Ein fehlender Versand lässt die Einladung fehlgeschlagen und versendet sie nicht erneut als gesendet', async () => {
  const store = database();
+ const notes = [];
  const result = await inviteStaff({
   caller: manager,
   body: {facility_id: facility.id, role: 'technician', email: 'fehler@example.test', first_name: 'Eva', last_name: 'Fehler'},
   database: store,
   mailer: {async send() {throw new Error('Versand fehlgeschlagen');}},
+  log: message => notes.push(message),
   now
  });
  assert.equal(result.status, 502);
  assert.equal(store.state.rows[0].status, 'failed');
  assert.equal(store.state.rows[0].role, 'technician');
+ assert.deepEqual(notes, ['Versand fehlgeschlagen']);
+});
+
+test('Einladung unterscheidet neue Konten, bestehende Konten und deaktivierte Zuordnungen', async () => {
+ const employeeInvite = database();
+ const employeeResult = await inviteStaff({
+  caller: admin,
+  body: {facility_id: facility.id, role: 'employee', email: 'mia@example.test', first_name: 'Mia', last_name: 'Muster'},
+  database: employeeInvite,
+  mailer: mailer(),
+  now
+ });
+ assert.equal(employeeResult.status, 200);
+ assert.equal(employeeInvite.state.rows[0].role, 'employee');
+ assert.equal(employeeInvite.state.members.length, 0);
+
+ const notes = [];
+ const existingMembers = [{email: 'bestand@example.test', organization_id: organization, facility_id: facility.id, role: 'employee', is_active: false}];
+ const existing = database([], existingMembers);
+ const existingResult = await inviteStaff({
+  caller: manager,
+  body: {facility_id: facility.id, role: 'technician', email: 'Bestand@Example.Test', first_name: 'Bea', last_name: 'Bestand'},
+  database: existing,
+  mailer: mailer(),
+  now
+ });
+ assert.equal(existingResult.status, 409);
+ assert.equal(existing.state.rows.length, 0);
+ assert.equal(existing.state.members[0].role, 'employee');
+ assert.equal(existing.state.members[0].is_active, false);
+
+ const registered = database();
+ const registeredResult = await inviteStaff({
+  caller: admin,
+  body: {facility_id: second.id, email: 'konto@example.test', first_name: 'Kim', last_name: 'Konto'},
+  database: registered,
+  mailer: {async send() { return {existingAccount: true}; }},
+  log: (...parts) => notes.push(parts.join(' ')),
+  now
+ });
+ assert.equal(registeredResult.body.existing_account, true);
+ assert.equal(registered.state.rows[0].role, 'employee');
+ assert.equal(registered.state.rows[0].status, 'sent');
+ assert.equal(registered.state.members.length, 0);
+ assert.match(notes[0], /ändert keine Mitgliedschaft/);
 });
 
 test('Die Annahme übernimmt gespeicherte Rollen je Betrieb und ignoriert eine selbst gewählte Rolle', () => {
@@ -181,6 +240,7 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  const roleSql = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
  const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
  const prepared = readFileSync(new URL('../../supabase/functions/invite-staff/index.ts', import.meta.url), 'utf8');
+ const roleSqlFile = readFileSync(new URL('../../tageswerk_3_4_invitation_role_parameter.sql', import.meta.url), 'utf8');
  assert.match(sql, /tageswerk_guard_invitation_role/);
  assert.match(sql, /accept_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.accept_staff_invitation\(\)/);
@@ -204,7 +264,17 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.match(roleSql, /tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
  assert.doesNotMatch(roleSql, /actor_role NOT IN \(''company_admin'', ''facility_manager'', ''technician''\)/);
  assert.match(prepared, /nicht bereitgestellt/);
+ assert.match(prepared, /auth\.getUser\(\)/);
+ assert.match(prepared, /userClient\.rpc\('request_staff_invitation'/);
+ assert.match(prepared, /p_role: input\.role/);
  assert.match(prepared, /inviteUserByEmail/);
+ assert.match(prepared, /console\.error/);
+ assert.match(prepared, /update\(\{status\}\)/);
+ assert.doesNotMatch(prepared, /staff_invitations'\)\.insert/);
+ assert.match(roleSqlFile, /private\.can_manage_facility\(p_facility_id\)/);
+ assert.match(roleSqlFile, /v_role NOT IN \('employee', 'technician'\)/);
+ assert.match(roleSqlFile, /Dieser Benutzer ist bereits zugeordnet\. Bitte bei Bedarf reaktivieren\./);
+ assert.doesNotMatch(roleSqlFile, /UPDATE public\.memberships/);
  assert.match(prepared, /role/);
  assert.match(app, /role:inviteRole/);
  assert.match(app, /PGRST204/);

@@ -127,7 +127,11 @@ Am 10. November 2026, 22:47 Uhr, ließ sich die Supabase CLI 3.1.0 über `npx su
 
 Für den Vergleich wird die produktive Funktionsdatei benötigt, so wie sie im Supabase-Dashboard unter `invite-staff` steht, einschließlich aller importierten Dateien. Ein späterer Download darf nicht in `supabase/functions/invite-staff` schreiben, weil dort die vorbereitete Fassung liegt.
 
-Solange diese Datei fehlt, bleibt die vorbereitete Fassung unverändert. Eine Anpassung ohne die veröffentlichte Quelle würde bestehende Prüfungen nur vermuten. Die vorbereitete Fassung behandelt eine fehlende Rolle als `employee`, speichert `technician` nur für eine aktive Geschäftsführung ohne Betrieb oder die aktive Betriebsleitung dieses Betriebs und lehnt `facility_manager` und `company_admin` ab. Ob die veröffentlichte Funktion dieselben Prüfungen für Anmeldung, Betrieb, bestehende Mitarbeiter, deaktivierte Mitgliedschaften und Versandfehler enthält, ist ohne ihre Quelle offen.
+Die aus dem Dashboard beschriebene produktive Fassung bleibt die Grundlage: `auth.getUser()`, `request_staff_invitation`, `inviteUserByEmail`, die Status `pending`, `sent` und `failed` sowie eine Protokollzeile bei einem Versandfehler. Die vorbereitete Datei `supabase/functions/invite-staff/index.ts` folgt diesem Ablauf. Die Rolle schreibt sie nicht mit dem Dienstschlüssel. Der Dienstschlüssel setzt nur den Versandstatus.
+
+`tageswerk_3_4_invitation_role_parameter.sql` ergänzt `request_staff_invitation(uuid, text, text, text, text)`. Die vierstellige Funktion bleibt. Die neue Funktion prüft `private.can_manage_facility`, lässt nur `employee` und `technician` zu und behandelt eine leere Rolle als Mitarbeiter. Eine bestehende oder deaktivierte Zuordnung wird nicht überschrieben. Die Datei ist nicht ausgeführt.
+
+Ein bereits registriertes Konto ohne Zuordnung erhält die Einladung mit Status `sent` und keine Mitgliedschaft. Die Rolle gilt erst bei der Annahme, wenn noch keine Zuordnung besteht. Ein Versandfehler setzt `failed` und wird protokolliert. Die Oberfläche sendet die Auswahl Mitarbeiter oder Techniker bereits an `invite-staff`.
 
 Die veröffentlichte Oberfläche auf `main` (`98d6d9c`) sendet `facility_id`, `email`, `first_name` und `last_name`, ohne `role`. Im Repository liegt ausschließlich die vorbereitete Fassung unter `supabase/functions/invite-staff`.
 
@@ -152,6 +156,6 @@ Festgestellte Fehler in diesem Lauf: keine.
 Offen vor dem Livebetrieb:
 
 - Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche.
-- Die produktive Datei von `invite-staff` zur manuellen Prüfung. Danach erst der Vergleich und eine gesonderte Freigabe zur Bereitstellung.
+- Die Freigabe für `tageswerk_3_4_invitation_role_parameter.sql` und danach die Bereitstellung der vorbereiteten Edge Function. Beides ist noch nicht erfolgt.
 - Die Veröffentlichung von `modularisierung`. Sie ist von dieser Datenbankinstallation getrennt und braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
 - Die sechs installierten SQL-Dateien bleiben stehen.

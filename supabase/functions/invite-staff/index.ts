@@ -1,15 +1,24 @@
 // Tageswerk 3.4, Einladung von Mitarbeitern und Technikern.
 // Diese Datei ist vorbereitet und nicht bereitgestellt.
 // Sie ersetzt die produktive Edge Function invite-staff nicht.
-// Vor einer späteren Freigabe muss die Live-Fassung mit dieser Datei verglichen werden.
-// Die Betriebszuordnung und die Rolle prüft handler.js. Eine fehlende Rolle bleibt Mitarbeiter,
-// damit bestehende Aufrufe ohne Rollenfeld unverändert Mitarbeiter einladen.
-// Die Annahme bleibt public.accept_staff_invitation. Sie darf keine Rolle vom Eingeladenen annehmen.
+// Die produktive Fassung bleibt die Grundlage:
+// JWT über auth.getUser(), request_staff_invitation, inviteUserByEmail,
+// Status pending, sent und failed, Protokoll bei einem Versandfehler.
+// Die Rolle setzt nur die fünfstellige Datenbankfunktion.
+// Der Dienstschlüssel ändert ausschließlich den Versandstatus.
+// Eine fehlende Rolle bleibt Mitarbeiter.
+// Die Annahme bleibt public.accept_staff_invitation.
 
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {inviteStaff} from './handler.js';
 
-const openStatuses = new Set(['pending', 'sent']);
+function rejectionStatus(message: string) {
+ if (message.includes('Anmeldung erforderlich')) return 401;
+ if (message.includes('nicht gefunden')) return 404;
+ if (message.includes('bereits')) return 409;
+ if (message.includes('Berechtigung') || message.includes('nur Mitarbeiter oder Techniker')) return 403;
+ return 400;
+}
 
 Deno.serve(async request => {
  const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -29,25 +38,32 @@ Deno.serve(async request => {
  } catch {
   body = {};
  }
- const memberships = user ? (await admin.from('memberships').select('organization_id,facility_id,role,is_active').eq('user_id', user.id)).data || [] : [];
  const result = await inviteStaff({
   method: request.method,
-  caller: user ? {userId: user.id, email: user.email, memberships} : null,
+  caller: user ? {userId: user.id, email: user.email} : null,
   body,
-  now: new Date().toISOString(),
+  log: (...parts: unknown[]) => console.error(...parts),
   database: {
-   async facility(id: string) {
-    const {data} = await admin.from('facilities').select('id,organization_id').eq('id', id).maybeSingle();
-    return data;
-   },
-   async openInvitation(row: {email: string, facility_id: string}) {
-    const {data} = await admin.from('staff_invitations').select('id,status').eq('facility_id', row.facility_id).eq('email', row.email);
-    return (data || []).find(item => openStatuses.has(item.status)) || null;
-   },
-   async insert(row: Record<string, unknown>) {
-    const {data, error} = await admin.from('staff_invitations').insert(row).select('id,email,first_name,last_name,facility_id,role,status,invited_at').single();
-    if (error) throw error;
-    return data;
+   async requestInvitation(input: {facilityId?: unknown, email?: unknown, firstName?: unknown, lastName?: unknown, role: string}) {
+    const {data, error} = await userClient.rpc('request_staff_invitation', {
+     p_facility_id: input.facilityId,
+     p_email: input.email,
+     p_first_name: input.firstName,
+     p_last_name: input.lastName,
+     p_role: input.role
+    });
+    if (error) {
+     const message = error.message || 'Die Einladung wurde abgelehnt.';
+     return {ok: false, status: rejectionStatus(message), error: message};
+    }
+    return {
+     ok: true,
+     invitation: {
+      id: data,
+      email: String(input.email ?? '').trim().toLowerCase(),
+      role: input.role
+     }
+    };
    },
    async mark(id: string, status: string) {
     const {error} = await admin.from('staff_invitations').update({status}).eq('id', id);
@@ -58,7 +74,9 @@ Deno.serve(async request => {
    async send(invitation: {email: string}) {
     const redirectTo = Deno.env.get('INVITE_REDIRECT_URL') || undefined;
     const {error} = await admin.auth.admin.inviteUserByEmail(invitation.email, redirectTo ? {redirectTo} : undefined);
-    if (error && !/already been registered|already registered/i.test(error.message || '')) throw error;
+    if (!error) return {existingAccount: false};
+    if (/already been registered|already registered/i.test(error.message || '')) return {existingAccount: true};
+    throw error;
    }
   }
  });
