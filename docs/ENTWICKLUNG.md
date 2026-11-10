@@ -81,7 +81,7 @@ Keine Commits ohne Freigabe. `main` nicht anfassen. Vor einem freigegebenen Comm
 
 ## Installation 3.4 am 10. November 2026
 
-Die sechs Migrationsdateien sind in der produktiven Datenbank ausgeführt. Die anschließende SQL-Kontrolle hat für alle 13 geprüften Objekte den Status OK ergeben. Dieselbe Datei nicht erneut ausführen. `main` bleibt unverändert. Die Edge Function `invite-staff` ist nicht bereitgestellt.
+Die sieben Migrationsdateien sind in der produktiven Datenbank ausgeführt. Die ersten sechs Kontrollen waren OK, die siebte Kontrolle war viermal `bereit`. Dieselben Dateien nicht erneut ausführen. `main` bleibt unverändert. Die Edge Function `invite-staff` ist im Projekt `eqtrifscedpsngsysxvc` als Version 9 aktiv. `verify_jwt` bleibt `false`.
 
 | Modul | Datei |
 | --- | --- |
@@ -91,6 +91,7 @@ Die sechs Migrationsdateien sind in der produktiven Datenbank ausgeführt. Die a
 | Technikerrolle in Zählern, Mitgliedschaften und Mängeln | `tageswerk_3_4_technician_role.sql` |
 | Einladungsrolle Mitarbeiter oder Techniker | `tageswerk_3_4_invitation_role.sql` |
 | Aktive Verwaltungsberechtigung für Liste, Einladung, Widerruf und Namen | `tageswerk_3_4_management_guard.sql` |
+| Fünfstellige Einladung mit Mitarbeiter- oder Technikerrolle | `tageswerk_3_4_invitation_role_parameter.sql` |
 
 Eine Rolle gilt nur bei `is_active = true` und nur in der eigenen Organisation. Die Geschäftsführung ist in `tageswerk_meter_role` an `facility_id IS NULL` gebunden. Die Betriebsleitung, der Techniker und der Mitarbeiter sind an ihren Betrieb gebunden.
 
@@ -123,11 +124,11 @@ Anmeldung, Mängel, Tagesbericht, Zählerstände und die bisherige Mitarbeiterve
 
 ### Edge Function invite-staff
 
-Die produktive Funktion im Projekt `eqtrifscedpsngsysxvc` ist Version 8 und aktiv. `verify_jwt` steht dort auf `false`. Die Funktion prüft den Bearer-Token selbst mit `auth.getUser()`. Ein Aufruf ohne gültige Anmeldung legt keine Einladung an. Die Gateway-Prüfung ist damit nicht die erste Sperre. Eine spätere Bereitstellung muss diese Einstellung ausdrücklich beibehalten, sonst schaltet die CLI sie ein:
+Die produktive Funktion im Projekt `eqtrifscedpsngsysxvc` ist seit dem 11. November 2026 Version 9 und `ACTIVE`. `verify_jwt` bleibt `false`. Die Funktion prüft den Bearer-Token selbst mit `auth.getUser()`. Ein Aufruf ohne gültige Anmeldung legt keine Einladung an. Die Gateway-Prüfung ist damit nicht die erste Sperre. Eine erneute Bereitstellung muss diese Einstellung ausdrücklich beibehalten:
 
-`npx supabase functions deploy invite-staff --remote eqtrifscedpsngsysxvc --no-verify-jwt --use-api`
+`npx supabase functions deploy invite-staff --remote=eqtrifscedpsngsysxvc --no-verify-jwt --use-api`
 
-Der Funktionsname muss genannt sein. `--prune` darf nicht verwendet werden. Die Funktion ist noch nicht bereitgestellt.
+Der Funktionsname muss genannt sein. `--prune` darf nicht verwendet werden.
 
 Die korrigierte lokale Fassung übernimmt Version 8 und ergänzt nur die Rolle. Erhalten bleiben CORS, `OPTIONS`, die Eingabeprüfung, `inviteUserByEmail`, `TAGESWERK_REDIRECT_URL`, die Status `pending`, `sent` und `failed`, die Statusänderung nur bei `pending`, `error_detail` und die Fehlerprotokolle. `employee` und `technician` gehen an die fünfstellige `request_staff_invitation`. Eine fehlende oder leere Rolle bleibt Mitarbeiter. Andere Rollen werden abgelehnt, bevor die Datenbankfunktion läuft. Der Dienstschlüssel schreibt keine Rolle und keine Mitgliedschaft.
 
@@ -135,17 +136,16 @@ Offen bleibt das bereits registrierte Konto. Version 8 erkennt es nicht gesonder
 
 Die veröffentlichte Oberfläche auf `main` sendet keine Rolle. Daraus wird weiterhin ein Mitarbeiter. Die Oberfläche auf `modularisierung` sendet Mitarbeiter oder Techniker.
 
-### Testergebnis am 10. November 2026
+### Testergebnis am 11. November 2026
 
-- `npm test`: 80 bestanden, 0 fehlgeschlagen. Syntax, Rollen, Temperatur, Wasser, Techniker, Einladung, Mängel, Tagesbericht, Zähler und Mandantentrennung.
+- `npm test`: 82 bestanden, 0 fehlgeschlagen. Syntax, Rollen, Temperatur, Wasser, Techniker, Einladung, Mängel, Tagesbericht, Zähler und Mandantentrennung.
 - `npm run test:ui`: 8 bestanden, 0 fehlgeschlagen. Desktop und Smartphone, ohne Schreibzugriff auf die Datenbank.
 - `npm run test:integration`: nicht gestartet. Es ist keine bestätigte Testdatenbank gesetzt, und die produktive Verbindung wird abgelehnt.
 
-Festgestellte Fehler in diesem Lauf: keine.
+Festgestellte Fehler in diesem Lauf: keine. Die sichtbare Kennung der Anwendung bleibt `3.2`, weil der Anwendungszwischenspeicher daran gebunden ist. Die Funktionen von 3.4 sind in dieser Oberfläche enthalten.
 
 Offen vor dem Livebetrieb:
 
-- Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche.
-- Die korrigierte Edge Function `invite-staff` ist noch nicht bereitgestellt. Die sieben SQL-Migrationen sind ausgeführt. Eine Bereitstellung muss `verify_jwt` mit `--no-verify-jwt` beibehalten.
-- Die Veröffentlichung von `modularisierung`. Sie ist von dieser Datenbankinstallation getrennt und braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
-- Die sechs installierten SQL-Dateien bleiben stehen.
+- Der beschriebene Durchgang der vier Rollen in der produktiven Oberfläche. Dabei dürfen keine Testeinladungen ohne Freigabe versendet und keine Betriebsdaten verändert werden.
+- Ein bereits registriertes Konto bleibt bei einem Versandfehler auf `failed`. Die Oberfläche zeigt dafür keinen eigenen Erfolgssatz.
+- Die Veröffentlichung von `modularisierung` auf `main` braucht eine eigene Freigabe. `main` wird dafür nicht verändert.
