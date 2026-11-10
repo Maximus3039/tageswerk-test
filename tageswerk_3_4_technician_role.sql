@@ -6,9 +6,9 @@
 -- Bestehende Rollen employee, facility_manager und company_admin bleiben erhalten.
 -- Techniker sind einem Betrieb zugeordnet und stehen in tageswerk_meter_role
 -- neben Mitarbeitern, nicht über der Betriebsleitung.
--- Die Funktion invite-staff liegt nicht in diesem Repository. Die Einladung sendet
--- die Rolle technician bereits mit. Diese Datei speichert sie an der Einladung,
--- sobald die Edge Function das Feld role übernimmt.
+-- Die Einladung sendet die Rolle technician mit. Diese Datei speichert sie an der
+-- Einladung. Die vorbereitete, nicht bereitgestellte Edge Function liegt unter
+-- supabase/functions/invite-staff. Die Annahme prüft tageswerk_3_4_invitation_role.sql.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
