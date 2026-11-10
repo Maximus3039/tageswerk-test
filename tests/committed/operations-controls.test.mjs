@@ -18,14 +18,23 @@ import {
  updateTemperaturePoint,
  acknowledgeWaterAlert,
  addWaterParameter,
+ clearWaterRound,
  createWaterPool,
+ emptyWaterRound,
+ loadWaterRound,
+ moveWaterRound,
  recordWaterCheck,
+ rememberWaterEntry,
+ reviewWaterRound,
+ storeWaterRound,
+ waterRoundPools,
+ waterRoundProgress,
  recordWaterMeasure,
  setWaterPoolActive,
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {emptyOperations, materialStock, operationMetrics, waterControlState, waterMeasurementCsv, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
+import {emptyOperations, materialStock, operationMetrics, waterControlState, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
 import {
  loadOperations,
  saveMaterial,
@@ -38,6 +47,7 @@ import {
  saveTemperatureReading,
  saveWaterAcknowledgement,
  saveWaterCheck,
+ saveWaterRound,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterPool,
@@ -657,19 +667,21 @@ test('Techniker sehen die Wasserhistorie und verändern keine Grenzwerte', () =>
  const oldOwn = recordWaterCheck(strand.bundle, created.pool.id, {values: hygieneValues({ph: '8.20'})}, manager, '2026-11-08T10:00:00.000Z');
  const oldStrand = recordWaterCheck(oldOwn.bundle, strand.pool.id, {values: hygieneValues()}, admin, '2026-11-08T10:00:00.000Z');
  const currentOwn = recordWaterCheck(oldStrand.bundle, created.pool.id, {values: hygieneValues()}, technician, now);
+ const ownToday = recordWaterCheck(currentOwn.bundle, created.pool.id, {values: hygieneValues()}, employee, now);
  assert.equal(currentOwn.ok, true);
  const withForeign = {
-  ...currentOwn.bundle,
-  waterChecks: [...currentOwn.bundle.waterChecks, {id: 'foreign-check', poolId: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, measuredAt: '2026-11-01T10:00:00.000Z', readings: [{parameterCode: 'ph', value: '7.00'}]}],
-  waterPools: [...currentOwn.bundle.waterPools, {id: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, name: 'Fremdbecken', scheduleMode: 'daily', intervalCount: 1}]
+  ...ownToday.bundle,
+  waterChecks: [...ownToday.bundle.waterChecks, {id: 'foreign-check', poolId: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, measuredAt: '2026-11-01T10:00:00.000Z', readings: [{parameterCode: 'ph', value: '7.00'}]}],
+  waterPools: [...ownToday.bundle.waterPools, {id: 'foreign-pool', facilityId: foreign.id, organizationId: foreign.organization_id, name: 'Fremdbecken', scheduleMode: 'daily', intervalCount: 1}]
  };
- const employeeRows = waterRowsForMember(withForeign, employee.memberships, now);
- const technicianRows = waterRowsForMember(withForeign, technician.memberships, now);
- const managerRows = waterRowsForMember(withForeign, manager.memberships, now);
- const adminRows = waterRowsForMember(withForeign, admin.memberships, now);
- const mixedRows = waterRowsForMember(withForeign, mixed.memberships, now);
+ const employeeRows = waterRowsForMember(withForeign, employee.memberships, now, employee.userId);
+ const technicianRows = waterRowsForMember(withForeign, technician.memberships, now, technician.userId);
+ const managerRows = waterRowsForMember(withForeign, manager.memberships, now, manager.userId);
+ const adminRows = waterRowsForMember(withForeign, admin.memberships, now, admin.userId);
+ const mixedRows = waterRowsForMember(withForeign, mixed.memberships, now, mixed.userId);
  assert.equal(employeeRows.checks.some(item => item.measuredAt === '2026-11-08T10:00:00.000Z'), false);
- assert.equal(employeeRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === now), true);
+ assert.equal(employeeRows.checks.some(item => item.recordedBy === technician.userId), false);
+ assert.equal(employeeRows.checks.some(item => item.recordedBy === employee.userId && item.measuredAt === now), true);
  assert.equal(technicianRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
  assert.equal(managerRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
  assert.equal(adminRows.checks.some(item => item.facilityId === second.id), true);
@@ -695,4 +707,189 @@ test('Techniker sehen die Wasserhistorie und verändern keine Grenzwerte', () =>
  assert.match(waterMigration, /'technician', 'facility_manager', 'company_admin'/);
  assert.match(waterMigration, /water_pools_update[\s\S]{0,240}IN \('company_admin', 'facility_manager'\)/);
  assert.doesNotMatch(waterMigration, /redox/);
+});
+
+function withWaterRound(db, userId, failAt = -1) {
+ db.rpc = async (name, args) => {
+  if (name !== 'tageswerk_record_water_round') return {data: null, error: {code: '42883', message: 'function does not exist'}};
+  if (!args?.p_round_id || !Array.isArray(args.p_checks) || args.p_checks.length < 1) {
+   return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde ist unvollständig.'}};
+  }
+  const existing = db.rows.water_checks.filter(row => row.round_id === args.p_round_id && row.recorded_by === userId);
+  if (existing.length) return {data: existing.map(row => row.id), error: null};
+  const checks = db.rows.water_checks.map(row => structuredClone(row));
+  const alerts = db.rows.water_alerts.map(row => structuredClone(row));
+  const ids = [];
+  for (let index = 0; index < args.p_checks.length; index += 1) {
+   if (index === failAt) {
+    db.rows.water_checks.splice(0, db.rows.water_checks.length, ...checks);
+    db.rows.water_alerts.splice(0, db.rows.water_alerts.length, ...alerts);
+    return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde ist unvollständig.'}};
+   }
+   const item = args.p_checks[index];
+   const inserted = await db.insert('water_checks', {
+    pool_id: item.pool_id,
+    facility_id: item.facility_id,
+    note: item.note || '',
+    round_id: args.p_round_id,
+    readings: item.readings
+   });
+   if (inserted.error) {
+    db.rows.water_checks.splice(0, db.rows.water_checks.length, ...checks);
+    db.rows.water_alerts.splice(0, db.rows.water_alerts.length, ...alerts);
+    return inserted;
+   }
+   ids.push(inserted.data.id);
+  }
+  return {data: ids, error: null};
+ };
+ return db;
+}
+
+function seedWaterLimits(db, pools) {
+ for (const pool of pools) {
+  for (const code of ['free_chlorine', 'combined_chlorine', 'ph', 'temperature']) {
+   db.rows.water_pool_parameters.push({
+    id: `${pool.id}-${code}`,
+    pool_id: pool.id,
+    facility_id: pool.facilityId,
+    organization_id: pool.organizationId,
+    parameter_code: code,
+    required: true,
+    active: true,
+    min_value: code === 'ph' ? '6.50' : null,
+    max_value: code === 'ph' ? '7.60' : null
+   });
+  }
+ }
+}
+
+test('Kontrollrunden bleiben vollständig, unterbrechbar und je Rolle getrennt', async () => {
+ const kinder = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const schwimmer = createWaterPool(kinder.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const paused = createWaterPool(schwimmer.bundle, {facility, name: 'Lehrschwimm', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const inactive = setWaterPoolActive(paused.bundle, paused.pool.id, false, manager);
+ const strand = createWaterPool(inactive.bundle, {facility: second, name: 'Strand', scheduleMode: 'daily', intervalCount: 1}, admin, now);
+ let bundle = strand.bundle;
+ for (const pool of [kinder.pool, schwimmer.pool]) {
+  bundle = updateWaterParameter(bundle, parameter(bundle, pool.id, 'ph').id, {minValue: '6.50', maxValue: '7.60', required: true, active: true}, manager).bundle;
+ }
+ const pools = waterRoundPools(bundle, facility.id);
+ assert.deepEqual(pools.map(pool => pool.name), ['Kinder', 'Schwimmer']);
+ const previousStorage = globalThis.sessionStorage;
+ const bucket = new Map();
+ globalThis.sessionStorage = {
+  getItem(key) { return bucket.has(key) ? bucket.get(key) : null; },
+  setItem(key, value) { bucket.set(key, String(value)); },
+  removeItem(key) { bucket.delete(key); }
+ };
+ try {
+  clearWaterRound(employee.userId, facility.id);
+  let round = emptyWaterRound(facility.id, 'round-1');
+  round = moveWaterRound(round, pools, 1, {values: hygieneValues(), note: 'erst'});
+  round = rememberWaterEntry(round, schwimmer.pool.id, {values: hygieneValues({temperature: '27,5'}), note: 'später'});
+  assert.equal(round.index, 1);
+  assert.equal(round.entries[kinder.pool.id].note, 'erst');
+  const back = moveWaterRound(round, pools, -1, round.entries[schwimmer.pool.id]);
+  assert.equal(back.index, 0);
+  assert.equal(back.entries[schwimmer.pool.id].values.temperature, '27,5');
+  assert.equal(waterRoundProgress(bundle, back, pools, employee, now).filled, 2);
+  storeWaterRound(employee.userId, back);
+  const raw = sessionStorage.getItem(`tageswerk-water-round:${employee.userId}:${facility.id}`);
+  clearWaterRound(employee.userId, facility.id);
+  sessionStorage.setItem(`tageswerk-water-round:${employee.userId}:${facility.id}`, raw);
+  const resumed = loadWaterRound(employee.userId, facility.id);
+  assert.equal(resumed.roundId, 'round-1');
+  assert.equal(resumed.entries[kinder.pool.id].note, 'erst');
+  assert.equal(resumed.entries[schwimmer.pool.id].values.temperature, '27,5');
+  const incomplete = reviewWaterRound(bundle, {...resumed, entries: {...resumed.entries, [schwimmer.pool.id]: {values: hygieneValues({ph: ''}), note: ''}}}, employee, now);
+  assert.equal(incomplete.ok, false);
+  assert.match(incomplete.error, /Schwimmer/);
+  const breach = reviewWaterRound(bundle, {...resumed, entries: {...resumed.entries, [kinder.pool.id]: {values: hygieneValues({ph: '8,20'}), note: 'hoch'}}}, employee, now);
+  assert.equal(breach.ok, true);
+  assert.equal(breach.checks.length, 2);
+  assert.equal(breach.bundle.waterAlerts.some(item => item.poolId === kinder.pool.id && item.parameterCode === 'ph'), true);
+  assert.equal(reviewWaterRound(bundle, resumed, inactive, now).ok, false);
+  const historicReadings = [{parameterCode: 'ph', value: '7.10', unit: '', minLimit: '6.50', maxLimit: '7.60'}];
+  const withHistory = {
+   ...bundle,
+   waterChecks: [{
+    id: 'historic-1', poolId: kinder.pool.id, facilityId: facility.id, organizationId: facility.organization_id,
+    measuredAt: '2026-11-01T10:00:00.000Z', recordedBy: manager.userId, recordedName: 'Lea', note: 'alt', roundId: null, readings: historicReadings
+   }]
+  };
+  const db = withWaterRound(controlDb({userId: employee.userId}), employee.userId);
+  seedWaterLimits(db, [kinder.pool, schwimmer.pool]);
+  db.rows.water_checks.push({
+   id: 'historic-1', pool_id: kinder.pool.id, facility_id: facility.id, organization_id: facility.organization_id,
+   measured_at: '2026-11-01T10:00:00.000Z', recorded_by: manager.userId, note: 'alt', round_id: null,
+   readings: [{parameter_code: 'ph', value: '7.10', unit: '', min_limit: '6.50', max_limit: '7.60'}]
+  });
+  const ready = {...resumed, entries: {...resumed.entries, [kinder.pool.id]: {values: hygieneValues({ph: '8,20'}), note: 'hoch'}}};
+  const saved = await saveWaterRound(db, withHistory, ready, employee, now, context);
+  assert.equal(saved.ok, true, saved.error);
+  assert.equal(saved.id, 'round-1');
+  assert.equal(db.rows.water_checks.filter(row => row.round_id === 'round-1').length, 2);
+  assert.equal(db.rows.water_alerts.some(item => item.parameter_code === 'ph' && item.value_amount === '8.20'), true);
+  assert.equal(saved.bundle.waterChecks.find(item => item.id === 'historic-1').readings[0].value, '7.10');
+  const again = await saveWaterRound(db, withHistory, ready, employee, now, context);
+  assert.equal(again.ok, true, again.error);
+  assert.equal(db.rows.water_checks.filter(row => row.round_id === 'round-1').length, 2);
+  assert.deepEqual(again.ids, saved.ids);
+  const rollback = withWaterRound(controlDb({userId: employee.userId}), employee.userId, 1);
+  seedWaterLimits(rollback, [kinder.pool, schwimmer.pool]);
+  const failed = await saveWaterRound(rollback, bundle, ready, employee, now, context);
+  assert.equal(failed.ok, false);
+  assert.equal(rollback.rows.water_checks.length, 0);
+  assert.equal(rollback.rows.water_alerts.length, 0);
+  const technician = {userId: 'technician-1', name: 'Timo', memberships: [membership('technician')]};
+  const technicianDb = withWaterRound(controlDb({userId: technician.userId}), technician.userId);
+  seedWaterLimits(technicianDb, [kinder.pool, schwimmer.pool]);
+  const technicianRound = {...ready, roundId: 'round-tech'};
+  const technicianSaved = await saveWaterRound(technicianDb, bundle, technicianRound, technician, now, context);
+  assert.equal(technicianSaved.ok, true);
+  const managerSaved = await saveWaterRound(withWaterRound(controlDb({userId: manager.userId}), manager.userId), bundle, {...ready, roundId: 'round-manager'}, manager, now, context);
+  assert.equal(managerSaved.ok, true);
+  const adminRound = emptyWaterRound(second.id, 'round-admin');
+  adminRound.entries[strand.pool.id] = {values: hygieneValues(), note: ''};
+  const adminSaved = await saveWaterRound(withWaterRound(controlDb({userId: admin.userId}), admin.userId), bundle, adminRound, admin, now, context);
+  assert.equal(adminSaved.ok, true);
+  const combined = {
+   ...bundle,
+   waterChecks: [...saved.bundle.waterChecks, ...technicianSaved.bundle.waterChecks, ...adminSaved.bundle.waterChecks],
+   waterPools: bundle.waterPools
+  };
+  const employeeView = waterRowsForMember(combined, employee.memberships, now, employee.userId);
+  const technicianView = waterRowsForMember(combined, technician.memberships, now, technician.userId);
+  const managerView = waterRowsForMember(combined, manager.memberships, now, manager.userId);
+  const adminView = waterRowsForMember(combined, admin.memberships, now, admin.userId);
+  assert.equal(employeeView.checks.every(item => item.recordedBy === employee.userId), true);
+  assert.equal(employeeView.checks.some(item => item.facilityId === second.id), false);
+  assert.equal(technicianView.checks.some(item => item.recordedBy === employee.userId), true);
+  assert.equal(technicianView.checks.some(item => item.facilityId === second.id), false);
+  assert.equal(managerView.checks.some(item => item.recordedBy === technician.userId), true);
+  assert.equal(adminView.checks.some(item => item.facilityId === second.id), true);
+  const rows = waterHistoryRows(combined, facility.id, {from: '2026-11-09', to: '2026-11-09', poolId: kinder.pool.id, recordedBy: employee.userId});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].values.ph.value, '8.20');
+  assert.match(rows[0].limitStatus, /Abweichung/);
+  assert.equal(waterHistoryRows(combined, facility.id, {from: '2026-11-10', to: '2026-11-10'}).length, 0);
+  const csv = waterHistoryCsv(waterHistoryRows(technicianView, facility.id, {}));
+  assert.match(csv, /Datum;Uhrzeit;Becken;Freies Chlor;Gebundenes Chlor;pH-Wert;Wassertemperatur;Mitarbeiter;Grenzwertstatus/);
+  assert.doesNotMatch(csv, /Strand/);
+  assert.equal(waterHistoryRows(employeeView, facility.id, {}).some(row => row.recordedName === 'Timo'), false);
+  const waterMigration = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+  const roleMigration = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
+  assert.match(waterMigration, /tageswerk_record_water_round/);
+  assert.match(waterMigration, /recorded_by = auth\.uid\(\)/);
+  assert.match(waterMigration, /Gespeicherte Hygienemessungen bleiben unverändert/);
+  assert.match(waterMigration, /1\. tageswerk_3_1_temperature\.sql/);
+  assert.match(roleMigration, /tageswerk_3_3_water_hygiene\.sql, diese Datei, danach tageswerk_3_4_invitation_role\.sql/);
+  assert.doesNotMatch(waterMigration, /SECURITY DEFINER/);
+  assert.doesNotMatch(waterMigration, /redox/);
+ } finally {
+  clearWaterRound(employee.userId, facility.id);
+  if (previousStorage === undefined) delete globalThis.sessionStorage;
+  else globalThis.sessionStorage = previousStorage;
+ }
 });

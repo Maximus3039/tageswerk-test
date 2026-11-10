@@ -6,6 +6,10 @@
 -- Bestehende Rollen employee, facility_manager und company_admin bleiben erhalten.
 -- Techniker sind einem Betrieb zugeordnet und stehen in tageswerk_meter_role
 -- neben Mitarbeitern, nicht über der Betriebsleitung.
+-- Installationsreihenfolge: tageswerk_3_1_temperature.sql, tageswerk_3_2_temperature_points.sql,
+-- tageswerk_3_3_water_hygiene.sql, diese Datei, danach tageswerk_3_4_invitation_role.sql.
+-- Diese Datei darf auch vor der Wasserhygiene laufen. Die Wasserregeln setzt sie nur,
+-- wenn die Tabellen schon vorhanden sind, und dann mit derselben Mitarbeiterbegrenzung.
 -- Die Einladung sendet die Rolle technician mit. Diese Datei speichert sie an der
 -- Einladung. Die vorbereitete, nicht bereitgestellte Edge Function liegt unter
 -- supabase/functions/invite-staff. Die Annahme prüft tageswerk_3_4_invitation_role.sql.
@@ -371,6 +375,7 @@ BEGIN
       public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
       OR (
         public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+        AND recorded_by = auth.uid()
         AND public.tageswerk_water_check_in_round(pool_id, measured_at)
       )
     );
@@ -381,6 +386,7 @@ BEGIN
       public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
       OR (
         public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+        AND recorded_by = auth.uid()
         AND public.tageswerk_water_check_in_round(pool_id, measured_at)
       )
     );

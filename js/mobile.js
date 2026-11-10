@@ -109,7 +109,7 @@ export function workAgenda(bundle, options = {}) {
    ...scope(asset.responsibleUserId, actor.userId)
   });
  }
- const waterView = waterRowsForMember(bundle, actor.memberships, now);
+ const waterView = waterRowsForMember(bundle, actor.memberships, now, actor.userId);
  const waterBundle = {...(bundle || {}), waterChecks: waterView.checks, waterAlerts: waterView.alerts, waterMeasures: waterView.measures};
  for (const facilityId of ids) {
   for (const pool of waterAttention(waterBundle, facilityId, now)) {

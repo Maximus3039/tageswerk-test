@@ -4,12 +4,21 @@
 -- und public.tageswerk_bind_operation_facility.
 -- Die Datei hängt nicht von den Temperaturmigrationen ab und ist nicht wiederholbar.
 -- Ein zweiter Lauf setzt die Transaktion zurück.
+-- Installationsreihenfolge, jeweils nur nach Freigabe und ohne Wiederholung:
+-- 1. tageswerk_3_1_temperature.sql
+-- 2. tageswerk_3_2_temperature_points.sql
+-- 3. tageswerk_3_3_water_hygiene.sql
+-- 4. tageswerk_3_4_technician_role.sql
+-- 5. tageswerk_3_4_invitation_role.sql
+-- Temperatur und Wasserhygiene sind voneinander unabhängig. Die Technikerrolle
+-- kann vor dieser Datei laufen; danach setzt sie dieselben Leseregeln erneut.
+-- Die Einladungsdatei hängt nicht vom Wasser ab.
 -- Die Zahlen in water_parameter_definitions begrenzen nur die Erfassung.
 -- Sie sind keine Sollwerte und keine normativen Grenzwerte.
 -- Die reguläre Kontrollrunde umfasst Freies Chlor, gebundenes Chlor, den pH-Wert
 -- und die Wassertemperatur. Weitere Parameter können später in den Katalog aufgenommen werden.
--- Mitarbeiter sehen nur die laufende Kontrollrunde. Techniker, Betriebsleitung
--- und Geschäftsführung sehen die Messhistorie, Maßnahmen und Wiederholungsmessungen.
+-- Mitarbeiter lesen nur eigene Messungen der laufenden Kontrollrunde.
+-- Techniker, Betriebsleitung und Geschäftsführung lesen die Messhistorie.
 -- Sollbereiche bleiben leer, bis die Betriebsleitung sie je Becken setzt.
 -- Messungen, damalige Sollbereiche und Warnwerte werden nicht umgeschrieben.
 -- Eine Quittierung kennzeichnet die Abweichung nicht als behoben.
@@ -124,9 +133,11 @@ CREATE TABLE public.water_checks (
   recorded_by uuid NOT NULL DEFAULT auth.uid(),
   note text NOT NULL DEFAULT '',
   follow_up_alert_id uuid,
+  round_id uuid,
   readings jsonb NOT NULL DEFAULT '[]'::jsonb,
   CONSTRAINT water_checks_note CHECK (char_length(note) <= 2000),
-  CONSTRAINT water_checks_readings CHECK (jsonb_typeof(readings) = 'array')
+  CONSTRAINT water_checks_readings CHECK (jsonb_typeof(readings) = 'array'),
+  CONSTRAINT water_checks_round_pool UNIQUE (round_id, pool_id)
 );
 
 CREATE TABLE public.water_alerts (
@@ -643,6 +654,7 @@ CREATE POLICY water_checks_select ON public.water_checks FOR SELECT TO authentic
     public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
     OR (
       public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+      AND recorded_by = auth.uid()
       AND public.tageswerk_water_check_in_round(pool_id, measured_at)
     )
   );
@@ -661,6 +673,7 @@ CREATE POLICY water_alerts_select ON public.water_alerts FOR SELECT TO authentic
     public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
     OR (
       public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
+      AND recorded_by = auth.uid()
       AND public.tageswerk_water_check_in_round(pool_id, measured_at)
     )
   );
@@ -742,6 +755,60 @@ GRANT SELECT, INSERT ON TABLE public.water_checks TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.water_alerts TO authenticated;
 GRANT SELECT, INSERT ON TABLE public.water_alert_measures TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round(
+  p_round_id uuid,
+  p_checks jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = ''
+AS $tageswerk$
+DECLARE
+  item jsonb;
+  facility uuid;
+  pool uuid;
+  seen uuid[] := ARRAY[]::uuid[];
+  existing uuid[];
+  inserted uuid;
+  ids uuid[] := ARRAY[]::uuid[];
+BEGIN
+  IF p_round_id IS NULL OR jsonb_typeof(p_checks) IS DISTINCT FROM 'array' OR jsonb_array_length(p_checks) < 1 OR jsonb_array_length(p_checks) > 30 THEN
+    RAISE EXCEPTION 'Die Kontrollrunde ist unvollständig.';
+  END IF;
+  SELECT coalesce(array_agg(check_row.id ORDER BY check_row.measured_at, check_row.id), ARRAY[]::uuid[])
+    INTO existing
+  FROM public.water_checks AS check_row
+  WHERE check_row.round_id = p_round_id
+    AND check_row.recorded_by = auth.uid();
+  IF cardinality(existing) > 0 THEN
+    RETURN to_jsonb(existing);
+  END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(p_checks) LOOP
+    pool := (item->>'pool_id')::uuid;
+    IF pool IS NULL OR pool = ANY (seen) THEN
+      RAISE EXCEPTION 'Jedes Becken wird in der Kontrollrunde nur einmal gespeichert.';
+    END IF;
+    seen := seen || pool;
+    IF facility IS NULL THEN
+      facility := (item->>'facility_id')::uuid;
+    ELSIF facility IS DISTINCT FROM (item->>'facility_id')::uuid THEN
+      RAISE EXCEPTION 'Eine Kontrollrunde gehört zu einem Betrieb.';
+    END IF;
+    INSERT INTO public.water_checks (pool_id, facility_id, note, round_id, readings)
+    VALUES (
+      pool,
+      facility,
+      coalesce(item->>'note', ''),
+      p_round_id,
+      coalesce(item->'readings', '[]'::jsonb)
+    )
+    RETURNING id INTO inserted;
+    ids := ids || inserted;
+  END LOOP;
+  RETURN to_jsonb(ids);
+END;
+$tageswerk$;
+
 REVOKE ALL ON FUNCTION public.tageswerk_water_schedule_valid(text, integer, text[], smallint[]) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_normalize_water_pool() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_pool() FROM PUBLIC, anon;
@@ -756,6 +823,7 @@ REVOKE ALL ON FUNCTION public.tageswerk_protect_water_alert() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_measure() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_measure() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_water_check_in_round(uuid, timestamptz) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.tageswerk_record_water_round(uuid, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.tageswerk_water_schedule_valid(text, integer, text[], smallint[]) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_normalize_water_pool() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_pool() TO authenticated;
@@ -770,5 +838,6 @@ GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_alert() TO authenticate
 GRANT EXECUTE ON FUNCTION public.tageswerk_stamp_water_measure() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_measure() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_water_check_in_round(uuid, timestamptz) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tageswerk_record_water_round(uuid, jsonb) TO authenticated;
 
 COMMIT;

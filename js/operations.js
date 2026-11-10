@@ -440,17 +440,18 @@ function waterFacility(record) {
  return {id: record?.facilityId, organization_id: record?.organizationId};
 }
 
-function waterRecordVisible(bundle, memberships, record, now) {
+function waterRecordVisible(bundle, memberships, record, now, userId) {
  const facility = waterFacility(record);
  if (!facilityVisibleToMember(facility, memberships)) return false;
  if (waterHistoryRole(facility, memberships)) return true;
+ if (!userId || record.recordedBy !== userId) return false;
  const pool = (bundle?.waterPools || []).find(item => item.id === record.poolId) || {scheduleMode: 'daily', intervalCount: 1};
  return waterCheckInRound(pool, record.measuredAt, now);
 }
 
-export function waterRowsForMember(bundle, memberships, now) {
- const checks = (bundle?.waterChecks || []).filter(check => waterRecordVisible(bundle, memberships, check, now));
- const alerts = (bundle?.waterAlerts || []).filter(alert => waterRecordVisible(bundle, memberships, alert, now));
+export function waterRowsForMember(bundle, memberships, now, userId) {
+ const checks = (bundle?.waterChecks || []).filter(check => waterRecordVisible(bundle, memberships, check, now, userId));
+ const alerts = (bundle?.waterAlerts || []).filter(alert => waterRecordVisible(bundle, memberships, alert, now, userId));
  const alertIds = new Set(alerts.map(alert => alert.id));
  const measures = (bundle?.waterMeasures || []).filter(measure => {
   const facility = waterFacility(measure);
@@ -495,6 +496,68 @@ export function waterMeasurementCsv(bundle, facilityId) {
     texts
    ].map(csvCell).join(';'));
   }
+ }
+ return lines.join('\r\n');
+}
+
+function readingOutside(reading) {
+ const value = Number(reading?.value);
+ if (!Number.isFinite(value)) return false;
+ const below = reading?.minLimit != null && reading.minLimit !== '' && value < Number(reading.minLimit);
+ const above = reading?.maxLimit != null && reading.maxLimit !== '' && value > Number(reading.maxLimit);
+ return below || above;
+}
+
+export function waterHistoryRows(bundle, facilityId, filters = {}) {
+ const pools = new Map((bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId).map(pool => [pool.id, pool]));
+ const from = filters.from || '';
+ const to = filters.to || '';
+ return (bundle?.waterChecks || []).filter(check => {
+  if (check.facilityId !== facilityId) return false;
+  if (filters.poolId && check.poolId !== filters.poolId) return false;
+  if (filters.recordedBy && check.recordedBy !== filters.recordedBy) return false;
+  const day = berlinDay(check.measuredAt);
+  return (!from || day >= from) && (!to || day <= to);
+ }).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt))).map(check => {
+  const parts = berlinParts(check.measuredAt);
+  const valueOf = code => (check.readings || []).find(item => item.parameterCode === code) || null;
+  const outside = (check.readings || []).filter(readingOutside).map(reading => waterCatalog(bundle).find(item => item.code === reading.parameterCode)?.name || reading.parameterCode);
+  return {
+   id: check.id,
+   measuredAt: check.measuredAt,
+   date: parts ? new Date(check.measuredAt).toLocaleDateString('de-DE') : '',
+   time: parts ? new Date(check.measuredAt).toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'}) : '',
+   poolId: check.poolId,
+   poolName: pools.get(check.poolId)?.name || 'Becken',
+   recordedBy: check.recordedBy,
+   recordedName: check.recordedName || '',
+   values: {
+    free_chlorine: valueOf('free_chlorine'),
+    combined_chlorine: valueOf('combined_chlorine'),
+    ph: valueOf('ph'),
+    temperature: valueOf('temperature')
+   },
+   limitStatus: outside.length ? `Abweichung: ${outside.join(', ')}` : 'Im Sollbereich'
+  };
+ });
+}
+
+export function waterHistoryCsv(rows) {
+ const header = ['Datum', 'Uhrzeit', 'Becken', 'Freies Chlor', 'Gebundenes Chlor', 'pH-Wert', 'Wassertemperatur', 'Mitarbeiter', 'Grenzwertstatus'];
+ const lines = [header.join(';')];
+ for (const row of rows || []) {
+  const cell = reading => reading?.value ?? '';
+  lines.push([
+   row.date,
+   row.time,
+   row.poolName,
+   cell(row.values?.free_chlorine),
+   cell(row.values?.combined_chlorine),
+   cell(row.values?.ph),
+   cell(row.values?.temperature),
+   row.recordedName,
+   row.limitStatus
+  ].map(csvCell).join(';'));
  }
  return lines.join('\r\n');
 }

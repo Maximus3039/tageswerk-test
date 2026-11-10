@@ -11,7 +11,15 @@ import {
  procurementFromStock,
  stockOf,
  temperatureDefectDraft,
- waterParameterName
+ clearWaterRound,
+ loadWaterRound,
+ moveWaterRound,
+ rememberWaterEntry,
+ reviewWaterRound,
+ storeWaterRound,
+ waterParameterName,
+ waterRoundPools,
+ waterRoundProgress
 } from './operations-controls.js';
 import {
  assetNextDue,
@@ -23,7 +31,8 @@ import {
  operationMetrics,
  waterCatalog,
  waterControlState,
- waterMeasurementCsv,
+ waterHistoryCsv,
+ waterHistoryRows,
  waterRowsForMember,
  waterScheduleLabel
 } from './operations.js';
@@ -50,6 +59,7 @@ import {
  saveTemperatureReading,
  saveWaterAcknowledgement,
  saveWaterCheck,
+ saveWaterRound,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterParameterAdd,
@@ -161,7 +171,7 @@ function paintOperationMetrics() {
  const selected = el('dashboard-facility')?.value;
  const ids = state.accessibleFacilities.filter(item => !selected || selected === 'all' || item.id === selected).map(item => item.id);
  const nowIso = new Date().toISOString();
- const waterView = waterRowsForMember(bundle(), state.myMemberships, nowIso);
+ const waterView = waterRowsForMember(bundle(), state.myMemberships, nowIso, state.currentUser?.id);
  const metrics = operationMetrics({...bundle(), waterChecks: waterView.checks, waterAlerts: waterView.alerts, waterMeasures: waterView.measures}, ids, today(), nowIso);
  el('metric-reports').textContent = String(metrics.reportsToday);
  el('metric-inspections').textContent = String(metrics.inspectionsOverdue);
@@ -637,6 +647,183 @@ function downloadWaterCsv(text, name) {
  URL.revokeObjectURL(url);
 }
 
+function waterEntryValues(fields, note) {
+ const values = {};
+ for (const [code, field] of fields) values[code] = field.value;
+ return {values, note: note.value};
+}
+
+function renderWaterRound(host, current, data) {
+ const pools = waterRoundPools(data, current.id);
+ const person = actor();
+ let round = loadWaterRound(person.userId, current.id);
+ if (selectedWaterPoolId) {
+  const index = pools.findIndex(pool => pool.id === selectedWaterPoolId);
+  if (index >= 0) round = storeWaterRound(person.userId, {...round, index, phase: 'edit'});
+  selectedWaterPoolId = '';
+ }
+ const card = document.createElement('section');
+ const title = document.createElement('h3');
+ title.textContent = 'Kontrollrunde';
+ card.append(title);
+ if (!pools.length) {
+  const empty = document.createElement('p');
+  empty.className = 'muted';
+  empty.textContent = 'Für diesen Betrieb ist kein aktives Becken angelegt.';
+  card.append(empty);
+  host.append(card);
+  return;
+ }
+ if (round.index >= pools.length) round = storeWaterRound(person.userId, {...round, index: 0});
+ const progress = waterRoundProgress(data, round, pools, person, new Date().toISOString());
+ const progressLine = document.createElement('p');
+ progressLine.className = 'water-progress';
+ progressLine.textContent = `${progress.label} · ${progress.filled} von ${progress.total} vollständig`;
+ card.append(progressLine);
+ if (round.phase === 'summary') {
+  const review = reviewWaterRound(data, round, person, new Date().toISOString());
+  if (!review.ok) {
+   const failed = pools.findIndex(pool => pool.id === review.poolId);
+   round = storeWaterRound(person.userId, {...round, index: failed >= 0 ? failed : round.index, phase: 'edit'});
+   const message = document.createElement('p');
+   message.className = 'error';
+   message.textContent = review.error;
+   card.append(message);
+  } else {
+   for (const check of review.checks) {
+    const pool = pools.find(item => item.id === check.poolId);
+    const alerts = review.bundle.waterAlerts.filter(item => item.checkId === check.id);
+    const line = document.createElement('p');
+    line.textContent = `${pool?.name || 'Becken'}: ${check.readings.map(reading => `${waterParameterName(data, reading.parameterCode)} ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`).join(' · ')}`;
+    card.append(line);
+    if (alerts.length) {
+     const warning = document.createElement('p');
+     warning.className = 'help';
+     warning.textContent = `Grenzwertabweichung: ${alerts.map(item => waterParameterName(data, item.parameterCode)).join(', ')}. Die Messung wird trotzdem gespeichert.`;
+     card.append(warning);
+    }
+   }
+   const actions = document.createElement('div');
+   actions.className = 'point-actions';
+   actions.append(button('Zurück zur Eingabe', 'secondary', () => {
+    storeWaterRound(person.userId, {...round, phase: 'edit'});
+    renderPanel('');
+   }));
+   actions.append(button('Kontrollrunde speichern', '', () => commit(async () => {
+    const result = await saveWaterRound(database(), bundle(), round, person, new Date().toISOString(), context());
+    if (result?.ok) clearWaterRound(person.userId, current.id);
+    return result;
+   })));
+   card.append(actions);
+   host.append(card);
+   return;
+  }
+ }
+ const pool = pools[round.index] || pools[0];
+ const savedEntry = round.entries[pool.id] || {values: {}, note: ''};
+ const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id && item.active !== false).sort((left, right) => waterCatalog(data).findIndex(item => item.code === left.parameterCode) - waterCatalog(data).findIndex(item => item.code === right.parameterCode));
+ const name = document.createElement('strong');
+ name.textContent = pool.name;
+ card.append(name);
+ const readings = document.createElement('div');
+ readings.className = 'water-readings';
+ const fields = new Map();
+ for (const parameter of parameters) {
+  const definition = waterCatalog(data).find(item => item.code === parameter.parameterCode);
+  const field = input(savedEntry.values[parameter.parameterCode] || '');
+  field.inputMode = 'decimal';
+  field.lang = 'de';
+  fields.set(parameter.parameterCode, field);
+  const caption = `${waterParameterName(data, parameter.parameterCode)}${definition?.unit ? ` ${definition.unit}` : ''}${parameter.required === false ? '' : ' · erforderlich'}`;
+  readings.append(labeled(caption, field));
+ }
+ card.append(readings);
+ const note = input(savedEntry.note || '');
+ note.placeholder = 'Kommentar, falls nötig';
+ const keep = () => storeWaterRound(person.userId, rememberWaterEntry(round, pool.id, waterEntryValues(fields, note)));
+ for (const field of fields.values()) field.addEventListener('input', keep);
+ note.addEventListener('input', keep);
+ card.append(labeled('Kommentar', note));
+ const actions = document.createElement('div');
+ actions.className = 'point-actions';
+ actions.append(button('Zurück', 'secondary', () => {
+  storeWaterRound(person.userId, moveWaterRound(round, pools, -1, waterEntryValues(fields, note)));
+  renderPanel('');
+ }));
+ if (round.index < pools.length - 1) {
+  actions.append(button('Weiter', '', () => {
+   storeWaterRound(person.userId, moveWaterRound(round, pools, 1, waterEntryValues(fields, note)));
+   renderPanel('');
+  }));
+ } else {
+  actions.append(button('Zusammenfassung anzeigen', '', () => {
+   const remembered = storeWaterRound(person.userId, rememberWaterEntry(round, pool.id, waterEntryValues(fields, note)));
+   storeWaterRound(person.userId, {...remembered, phase: 'summary'});
+   renderPanel('');
+  }));
+ }
+ if (round.index === 0) actions.firstChild.disabled = true;
+ card.append(actions);
+ host.append(card);
+}
+
+function renderWaterHistory(host, current, data, visible) {
+ const wrap = document.createElement('section');
+ wrap.className = 'water-history';
+ const heading = document.createElement('h3');
+ heading.textContent = 'Messwertübersicht';
+ const from = input();
+ const to = input();
+ from.type = 'date';
+ to.type = 'date';
+ const poolOptions = [{value: '', label: 'Alle Becken'}].concat(data.waterPools.filter(pool => pool.facilityId === current.id).map(pool => ({value: pool.id, label: pool.name})));
+ const people = [...new Map(visible.checks.filter(check => check.facilityId === current.id).map(check => [check.recordedBy, check.recordedName || 'Mitarbeiter']))];
+ const personOptions = [{value: '', label: 'Alle Mitarbeiter'}].concat(people.map(([id, name]) => ({value: id, label: name})));
+ const poolFilter = select(poolOptions, '');
+ const personFilter = select(personOptions, '');
+ const tableHost = document.createElement('div');
+ const exportButton = document.createElement('button');
+ exportButton.type = 'button';
+ exportButton.className = 'secondary';
+ exportButton.textContent = 'Messwerte als CSV exportieren';
+ const paint = () => {
+  const rows = waterHistoryRows({...data, waterChecks: visible.checks}, current.id, {from: from.value, to: to.value, poolId: poolFilter.value, recordedBy: personFilter.value});
+  exportButton.disabled = !rows.length;
+  exportButton.onclick = () => downloadWaterCsv(waterHistoryCsv(rows), 'Wasserhygiene.csv');
+  tableHost.replaceChildren();
+  if (!rows.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Für diese Auswahl liegen keine Messungen vor.';
+   tableHost.append(empty);
+   return;
+  }
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  for (const label of ['Datum', 'Uhrzeit', 'Becken', 'Freies Chlor', 'Gebundenes Chlor', 'pH-Wert', 'Wassertemperatur', 'Mitarbeiter', 'Grenzwertstatus']) {
+   const cell = document.createElement('th');
+   cell.textContent = label;
+   head.append(cell);
+  }
+  table.append(head);
+  for (const row of rows) {
+   const line = document.createElement('tr');
+   const amount = reading => reading?.value ? `${reading.value}${reading.unit ? ` ${reading.unit}` : ''}` : '';
+   for (const value of [row.date, row.time, row.poolName, amount(row.values.free_chlorine), amount(row.values.combined_chlorine), amount(row.values.ph), amount(row.values.temperature), row.recordedName, row.limitStatus]) {
+    const cell = document.createElement('td');
+    cell.textContent = value;
+    line.append(cell);
+   }
+   table.append(line);
+  }
+  tableHost.append(table);
+ };
+ for (const control of [from, to, poolFilter, personFilter]) control.addEventListener('change', paint);
+ wrap.append(heading, labeled('Von', from), labeled('Bis', to), labeled('Becken', poolFilter), labeled('Mitarbeiter', personFilter), exportButton, tableHost);
+ paint();
+ host.append(wrap);
+}
+
 function renderWater(host, current) {
  missingNote(host, waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
@@ -675,7 +862,6 @@ function renderWater(host, current) {
  const duePool = pools.find(pool => waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString()).due);
  const initialPool = pools.some(pool => pool.id === selectedWaterPoolId) ? selectedWaterPoolId : (duePool || pools[0]).id;
  const picker = select(pools.map(pool => ({value: pool.id, label: pool.active === false ? `${pool.name} · deaktiviert` : pool.name})), initialPool);
- selectedWaterPoolId = picker.value;
  picker.addEventListener('change', () => {
   selectedWaterPoolId = picker.value;
   followUpAlertId = '';
@@ -688,7 +874,7 @@ function renderWater(host, current) {
  const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => parameterOrder(left.parameterCode) - parameterOrder(right.parameterCode));
  const nowIso = new Date().toISOString();
  const history = waterHistoryRole(current, state.myMemberships);
- const visible = waterRowsForMember(data, state.myMemberships, nowIso);
+ const visible = waterRowsForMember(data, state.myMemberships, nowIso, actor().userId);
  const status = waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso);
  const row = item(pool.name, [`${waterScheduleLabel(pool)}`, status.detail], status.due);
  if (isManager(current)) {
@@ -749,18 +935,16 @@ function renderWater(host, current) {
    row.append(line);
   }
  }
- if (pool.active !== false) {
+ if (followUpAlertId && !data.waterAlerts.some(item => item.id === followUpAlertId && item.poolId === pool.id)) followUpAlertId = '';
+ if (followUpAlertId && pool.active !== false) {
   const activeParameters = parameters.filter(item => item.active !== false);
   const readings = document.createElement('div');
   readings.className = 'water-readings';
   const fields = new Map();
-  if (followUpAlertId && !data.waterAlerts.some(item => item.id === followUpAlertId && item.poolId === pool.id)) followUpAlertId = '';
-  if (followUpAlertId) {
-   const banner = document.createElement('p');
-   banner.className = 'help';
-   banner.textContent = 'Diese Messung wird als Wiederholung dokumentiert. Die bestehende Warnung bleibt davon unberührt.';
-   row.append(banner);
-  }
+  const banner = document.createElement('p');
+  banner.className = 'help';
+  banner.textContent = 'Diese Messung wird als Wiederholung dokumentiert. Die bestehende Warnung bleibt davon unberührt.';
+  row.append(banner);
   for (const parameter of activeParameters) {
    const definition = catalog.find(item => item.code === parameter.parameterCode);
    const field = input();
@@ -778,7 +962,7 @@ function renderWater(host, current) {
   const note = input();
   note.placeholder = 'Kommentar, falls nötig';
   row.append(labeled('Kommentar', note));
-  row.append(button('Messung speichern', 'secondary', async () => {
+  row.append(button('Wiederholung speichern', 'secondary', async () => {
    const values = {};
    for (const [code, field] of fields) values[code] = field.value;
    const alertId = followUpAlertId;
@@ -786,65 +970,25 @@ function renderWater(host, current) {
    const result = await commit(() => saveWaterCheck(database(), bundle(), pool.id, {values, note: note.value, followUpAlertId: alertId || null}, actor(), new Date().toISOString(), context()));
    if (!result?.ok) followUpAlertId = alertId;
   }));
- } else {
+ } else if (pool.active === false) {
   const paused = document.createElement('p');
   paused.className = 'help';
   paused.textContent = history ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : 'Deaktiviert. Die laufende Kontrollrunde bleibt sichtbar.';
   row.append(paused);
  }
- const poolChecks = visible.checks.filter(item => item.poolId === pool.id);
- if (history) {
-  const wrap = document.createElement('div');
-  wrap.className = 'water-history';
-  const heading = document.createElement('h3');
-  heading.textContent = 'Messwerttabelle';
-  wrap.append(heading);
-  if (!poolChecks.length) {
-   const empty = document.createElement('p');
-   empty.className = 'help';
-   empty.textContent = 'Noch keine Messungen.';
-   wrap.append(empty);
-  } else {
-   const table = document.createElement('table');
-   const head = document.createElement('tr');
-   for (const label of ['Zeitpunkt', 'Benutzer', 'Messwerte', 'Kommentar', 'Wiederholung']) {
-    const cell = document.createElement('th');
-    cell.textContent = label;
-    head.append(cell);
-   }
-   table.append(head);
-   for (const check of poolChecks) {
-    const line = document.createElement('tr');
-    const values = check.readings.map(reading => `${waterParameterName(data, reading.parameterCode)} ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`).join(', ');
-    for (const value of [new Date(check.measuredAt).toLocaleString('de-DE'), check.recordedName || '', values, check.note || '', check.followUpAlertId ? 'ja' : '']) {
-     const cell = document.createElement('td');
-     cell.textContent = value;
-     line.append(cell);
-    }
-    table.append(line);
-   }
-   wrap.append(table);
-  }
-  const exportButton = document.createElement('button');
-  exportButton.type = 'button';
-  exportButton.className = 'secondary';
-  exportButton.textContent = 'Messwerte als CSV exportieren';
-  exportButton.disabled = !poolChecks.length;
-  exportButton.addEventListener('click', () => downloadWaterCsv(waterMeasurementCsv({...data, waterChecks: poolChecks, waterAlerts: visible.alerts, waterMeasures: visible.measures}, current.id), `${pool.name || 'Wasserhygiene'}.csv`));
-  wrap.append(exportButton);
-  row.append(wrap);
- } else {
+ const poolChecks = history ? [] : visible.checks.filter(item => item.poolId === pool.id);
+ if (!history) {
   const roundHeading = document.createElement('h3');
-  roundHeading.textContent = 'Laufende Kontrollrunde';
+  roundHeading.textContent = 'Eigene Kontrollrunde';
   row.append(roundHeading);
   if (!poolChecks.length) {
    const empty = document.createElement('p');
    empty.className = 'help';
-   empty.textContent = 'Für die laufende Kontrollrunde liegt noch keine Messung vor.';
+   empty.textContent = 'Für die laufende Kontrollrunde liegt noch keine eigene Messung vor.';
    row.append(empty);
   }
  }
- const checks = history ? [] : poolChecks;
+ const checks = poolChecks;
  for (const check of checks) {
   const values = check.readings.map(reading => {
    const name = waterParameterName(data, reading.parameterCode);
@@ -889,6 +1033,8 @@ function renderWater(host, current) {
   row.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
  }
  host.append(row);
+ if (!followUpAlertId) renderWaterRound(host, current, data);
+ if (history) renderWaterHistory(host, current, data, visible);
 }
 
 function renderStock(host, current) {

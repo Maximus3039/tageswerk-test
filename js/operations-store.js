@@ -9,6 +9,7 @@ import {
  recordMovement,
  recordTemperature,
  recordWaterCheck,
+ reviewWaterRound,
  recordWaterMeasure,
  setTemperaturePointActive,
  setWaterPoolActive,
@@ -375,6 +376,7 @@ function assemble(loaded, actor, context) {
    recordedName: personName(context, row.recorded_by, actor),
    note: row.note || '',
    followUpAlertId: row.follow_up_alert_id || null,
+   roundId: row.round_id || null,
    readings: (Array.isArray(row.readings) ? row.readings : []).map(entry => ({
     parameterCode: entry.parameter_code || entry.parameterCode,
     value: entry.value == null ? '' : String(entry.value),
@@ -1084,6 +1086,43 @@ export async function saveWaterCheck(db, bundle, poolId, draft, actor, now, cont
   }
  }
  return {ok: true, id: check.id, bundle: loaded.bundle, check, alerts: open};
+}
+
+export async function saveWaterRound(db, bundle, round, actor, now, context) {
+ const review = reviewWaterRound(bundle, round, actor, now);
+ if (!review.ok) return denied(bundle, review.error);
+ let result;
+ try {
+  result = await db.rpc('tageswerk_record_water_round', {
+   p_round_id: round.roundId,
+   p_checks: review.checks.map(check => ({
+    pool_id: check.poolId,
+    facility_id: check.facilityId,
+    note: check.note,
+    readings: check.readings.map(reading => ({parameter_code: reading.parameterCode, value: reading.value}))
+   }))
+  });
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ if (result?.error) return denied(bundle, storageMessage(result.error));
+ const ids = Array.isArray(result?.data) ? result.data : [];
+ if (ids.length !== review.checks.length) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ if (!loaded.ok) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+ for (const expected of review.checks) {
+  const check = loaded.bundle.waterChecks.find(item => item.roundId === round.roundId && item.poolId === expected.poolId && item.recordedBy === actor.userId);
+  if (!check || check.readings.length !== expected.readings.length) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+  for (const reading of expected.readings) {
+   const saved = check.readings.find(item => item.parameterCode === reading.parameterCode);
+   if (!saved || Number(saved.value) !== Number(reading.value)) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+  }
+ }
+ for (const previous of bundle?.waterChecks || []) {
+  const again = loaded.bundle.waterChecks.find(item => item.id === previous.id);
+  if (again && JSON.stringify(again.readings) !== JSON.stringify(previous.readings)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
+ }
+ return {ok: true, id: round.roundId, ids, bundle: loaded.bundle};
 }
 
 export async function saveWaterAcknowledgement(db, bundle, alertId, note, actor, now, context) {

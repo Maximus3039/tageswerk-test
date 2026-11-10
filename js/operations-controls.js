@@ -629,6 +629,91 @@ export function recordWaterMeasure(bundle, alertId, measure, actor, now) {
  return {ok: true, bundle: carry(bundle, {waterMeasures: [entry, ...(bundle?.waterMeasures || [])], waterAlerts: bundle?.waterAlerts || []}), measure: entry, alert};
 }
 
+export function waterRoundPools(bundle, facilityId) {
+ return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && pool.active !== false).sort((left, right) => left.name.localeCompare(right.name, 'de'));
+}
+
+export function emptyWaterRound(facilityId, roundId) {
+ return {facilityId, roundId, index: 0, phase: 'edit', entries: {}, saved: false};
+}
+
+const waterRoundMemory = new Map();
+
+function waterRoundKey(userId, facilityId) {
+ return `${userId || ''}:${facilityId || ''}`;
+}
+
+export function loadWaterRound(userId, facilityId) {
+ const key = waterRoundKey(userId, facilityId);
+ if (waterRoundMemory.has(key)) return waterRoundMemory.get(key);
+ let stored = null;
+ try {
+  stored = JSON.parse(globalThis.sessionStorage?.getItem(`tageswerk-water-round:${key}`) || 'null');
+ } catch {
+  stored = null;
+ }
+ if (!stored || stored.facilityId !== facilityId || stored.saved) stored = emptyWaterRound(facilityId, newId());
+ waterRoundMemory.set(key, stored);
+ return stored;
+}
+
+export function storeWaterRound(userId, round) {
+ const key = waterRoundKey(userId, round?.facilityId);
+ waterRoundMemory.set(key, round);
+ try {
+  globalThis.sessionStorage?.setItem(`tageswerk-water-round:${key}`, JSON.stringify(round));
+ } catch {
+  /* Der Entwurf bleibt im laufenden Modul, wenn der Browser den Speicher sperrt. */
+ }
+ return round;
+}
+
+export function clearWaterRound(userId, facilityId) {
+ const key = waterRoundKey(userId, facilityId);
+ waterRoundMemory.delete(key);
+ try {
+  globalThis.sessionStorage?.removeItem(`tageswerk-water-round:${key}`);
+ } catch {
+  /* Ein gesperrter Speicher lässt den geleerten Entwurf im Modul zurück. */
+ }
+}
+
+export function rememberWaterEntry(round, poolId, entry) {
+ if (!round || round.saved || !poolId) return round;
+ return {...round, entries: {...round.entries, [poolId]: {values: {...(entry?.values || {})}, note: entry?.note || ''}}};
+}
+
+export function moveWaterRound(round, pools, direction, entry) {
+ const current = pools[round?.index] || pools[0];
+ const remembered = current ? rememberWaterEntry(round, current.id, entry) : round;
+ const last = Math.max((pools || []).length - 1, 0);
+ const index = Math.min(Math.max((remembered?.index || 0) + direction, 0), last);
+ return {...remembered, index, phase: 'edit'};
+}
+
+export function waterRoundProgress(bundle, round, pools, actor, now) {
+ const filled = (pools || []).filter(pool => recordWaterCheck(bundle, pool.id, {values: round?.entries?.[pool.id]?.values || {}, note: round?.entries?.[pool.id]?.note || ''}, actor, now).ok).length;
+ const total = (pools || []).length;
+ const index = Math.min(round?.index || 0, Math.max(total - 1, 0));
+ return {index, total, filled, label: total ? `Becken ${index + 1} von ${total}` : 'Keine aktiven Becken'};
+}
+
+export function reviewWaterRound(bundle, round, actor, now) {
+ if (round?.saved) return {ok: false, error: 'Diese Kontrollrunde wurde bereits gespeichert.', bundle};
+ const pools = waterRoundPools(bundle, round?.facilityId);
+ if (!pools.length) return {ok: false, error: 'Für diesen Betrieb ist kein aktives Becken angelegt.', bundle};
+ let next = bundle;
+ const checks = [];
+ for (const pool of pools) {
+  const entry = round?.entries?.[pool.id] || {values: {}, note: ''};
+  const local = recordWaterCheck(next, pool.id, {values: entry.values, note: entry.note}, actor, now);
+  if (!local.ok) return {ok: false, error: `${pool.name}: ${local.error}`, bundle, poolId: pool.id};
+  next = local.bundle;
+  checks.push(local.check);
+ }
+ return {ok: true, bundle: next, checks, pools};
+}
+
 export function waterAttention(bundle, facilityId, now) {
  return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).bucket);
 }
@@ -643,7 +728,7 @@ export function facilityNotices(bundle, defects, options) {
  const ids = new Set(options?.facilityIds || []);
  const actor = options?.actor;
  const now = options?.now;
- const waterView = waterRowsForMember(bundle, actor?.memberships, now);
+ const waterView = waterRowsForMember(bundle, actor?.memberships, now, actor?.userId);
  const today = berlinDay(now);
  const notices = [];
  const push = notice => {
