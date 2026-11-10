@@ -27,6 +27,13 @@
 -- Geschäftsführungszuordnungen und Betriebsleitungen bleiben geschützt.
 -- tageswerk_prepare_reading behält jede bestehende Prüfung. Techniker erfassen
 -- normale Stände und stornieren oder korrigieren nicht.
+-- employee_update_assigned_defect ist SECURITY DEFINER. Anmeldung, Zuweisung,
+-- aktiver Betrieb und Status prüft die Funktion selbst. Direkte Tabellenänderungen
+-- bleiben bei den bestehenden RLS-Regeln.
+-- Die geprüfte Fassung aus Tageswerk 2.8 verlangt keine Rolle employee. Eine aktive
+-- Mitgliedschaft desselben Betriebs schließt den Techniker ein. Diese Fassung bleibt
+-- unverändert. Eine Fassung mit ausdrücklicher Mitarbeiterbedingung wird um den
+-- Techniker ergänzt. Fehlt Zuweisung oder Betriebsprüfung, wird die Datei abgebrochen.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
@@ -278,6 +285,7 @@ DECLARE
   signature text;
   definition text;
   updated text;
+  recognized boolean;
 BEGIN
   IF to_regprocedure('public.manage_facility_membership(text,uuid,text,boolean)') IS NULL THEN
     RAISE EXCEPTION 'manage_facility_membership(text, uuid, text, boolean) fehlt und wurde nicht neu erfunden.';
@@ -430,12 +438,49 @@ BEGIN
   WHERE namespace.nspname = 'public'
     AND procedure.proname = 'employee_update_assigned_defect';
   IF signature IS NOT NULL THEN
-    definition := pg_get_functiondef(signature::regprocedure);
-    IF position('technician' IN definition) = 0 THEN
-      updated := definition;
-      updated := replace(updated, '<> ''employee''', 'NOT IN (''employee'', ''technician'')');
+    definition := regexp_replace(pg_get_functiondef(signature::regprocedure), '[[:space:]]+', ' ', 'g');
+    IF position('SECURITY DEFINER' IN definition) = 0
+       OR position('Anmeldung erforderlich' IN definition) = 0
+       OR position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN definition) = 0
+       OR position('Arbeitsvermerk mit 3 bis 2000 Zeichen erforderlich' IN definition) = 0
+       OR position('Mangel nicht gefunden' IN definition) = 0
+       OR position('assigned_to IS DISTINCT FROM auth.uid()' IN definition) = 0
+       OR position('Dieser Mangel ist dir nicht zugewiesen' IN definition) = 0
+       OR position('Keine Betriebsberechtigung' IN definition) = 0
+       OR position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN definition) = 0
+       OR position('FOR UPDATE' IN definition) = 0
+       OR (position('m.is_active = true' IN definition) = 0 AND position('m.is_active IS TRUE' IN definition) = 0)
+       OR (position('m.organization_id=d.organization_id' IN definition) = 0 AND position('m.organization_id = d.organization_id' IN definition) = 0)
+       OR (position('m.facility_id=d.facility_id' IN definition) = 0 AND position('m.facility_id = d.facility_id' IN definition) = 0)
+       OR (position('m.role=''company_admin''' IN definition) = 0 AND position('m.role = ''company_admin''' IN definition) = 0)
+       OR (position('p_status NOT IN (''in_progress'',''pending_review'')' IN definition) = 0 AND position('p_status NOT IN (''in_progress'', ''pending_review'')' IN definition) = 0)
+       OR (position('d.status IN (''resolved'',''pending_review'')' IN definition) = 0 AND position('d.status IN (''resolved'', ''pending_review'')' IN definition) = 0)
+       OR position('UPDATE public.defects SET status=p_status, change_note=' IN definition) = 0
+       OR position('SET assigned_to' IN definition) > 0
+       OR position('SET facility_id' IN definition) > 0
+       OR position('SET organization_id' IN definition) > 0
+    THEN
+      RAISE EXCEPTION 'employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
+    END IF;
+    recognized := position('technician' IN definition) > 0
+      OR (
+        position('= ''employee''' IN definition) = 0
+        AND position('<> ''employee''' IN definition) = 0
+        AND (
+          position('m.role=''company_admin'' OR m.facility_id=d.facility_id' IN definition) > 0
+          OR position('m.role = ''company_admin'' OR m.facility_id = d.facility_id' IN definition) > 0
+        )
+      );
+    IF recognized THEN
+      NULL;
+    ELSE
+      updated := replace(definition, '<> ''employee''', 'NOT IN (''employee'', ''technician'')');
       updated := replace(updated, '= ''employee''', 'IN (''employee'', ''technician'')');
-      IF updated = definition THEN
+      IF updated = definition
+         OR position('assigned_to IS DISTINCT FROM auth.uid()' IN updated) = 0
+         OR position('Keine Betriebsberechtigung' IN updated) = 0
+         OR (position('m.facility_id=d.facility_id' IN updated) = 0 AND position('m.facility_id = d.facility_id' IN updated) = 0)
+      THEN
         RAISE EXCEPTION 'employee_update_assigned_defect erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
       EXECUTE updated;
