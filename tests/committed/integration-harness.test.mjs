@@ -24,9 +24,9 @@ test('Der Integrationstest startet nicht ohne bestätigte Testdatenbank', () => 
  assert.doesNotMatch(runner, /supabase\.co\/rest/);
 });
 
-test('Der Ablauf installiert die fünf Migrationen und prüft die genannten Grenzen', () => {
+test('Der Ablauf installiert die sechs Migrationen und prüft die genannten Grenzen', () => {
  const order = runner.slice(runner.indexOf('const migrations'), runner.indexOf('];'));
- assert.match(order, /tageswerk_3_1_temperature\.sql[\s\S]*tageswerk_3_2_temperature_points\.sql[\s\S]*tageswerk_3_3_water_hygiene\.sql[\s\S]*tageswerk_3_4_technician_role\.sql[\s\S]*tageswerk_3_4_invitation_role\.sql/);
+ assert.match(order, /tageswerk_3_1_temperature\.sql[\s\S]*tageswerk_3_2_temperature_points\.sql[\s\S]*tageswerk_3_3_water_hygiene\.sql[\s\S]*tageswerk_3_4_technician_role\.sql[\s\S]*tageswerk_3_4_invitation_role\.sql[\s\S]*tageswerk_3_4_management_guard\.sql/);
  assert.match(probe, /tageswerk_meter_role entspricht nicht der geprüften Ausgangsfassung/);
  assert.match(probe, /tageswerk_prepare_reading entspricht nicht der geprüften Ausgangsfassung/);
  assert.match(probe, /manage_facility_membership entspricht nicht der geprüften Ausgangsfassung/);

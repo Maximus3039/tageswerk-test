@@ -10,7 +10,8 @@ const migrations = [
  'tageswerk_3_2_temperature_points.sql',
  'tageswerk_3_3_water_hygiene.sql',
  'tageswerk_3_4_technician_role.sql',
- 'tageswerk_3_4_invitation_role.sql'
+ 'tageswerk_3_4_invitation_role.sql',
+ 'tageswerk_3_4_management_guard.sql'
 ];
 
 function fail(message, code = 2) {

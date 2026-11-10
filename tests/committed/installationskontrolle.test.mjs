@@ -86,5 +86,5 @@ test('Abschnitt 0 liefert eine Ergebnistabelle und bricht ohne Wasserfunktion ni
  assert.match(section0, /unbekannten Funktionskörper/);
  for (const name of upcoming) assert.match(control, new RegExp(name.replace(/[().]/g, '\\$&')));
  const later = control.slice(control.indexOf('-- Abschnitt 1'));
- assert.equal(statements(later).length, 5);
+ assert.equal(statements(later).length, 6);
 });

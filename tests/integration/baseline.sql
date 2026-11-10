@@ -375,3 +375,116 @@ GRANT EXECUTE ON FUNCTION public.tageswerk_facility_organization(uuid) TO authen
 GRANT EXECUTE ON FUNCTION public.manage_facility_membership(text, uuid, text, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.accept_staff_invitation() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_staff_invitations() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.list_facility_employees()
+RETURNS TABLE(user_id uuid, full_name text, email text, role text, facility_id uuid, facility_name text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+  SELECT m.user_id, p.full_name, u.email::text, m.role::text, m.facility_id, f.name::text
+  FROM public.memberships AS m
+  JOIN auth.users AS u ON u.id = m.user_id
+  LEFT JOIN public.profiles AS p ON p.id = m.user_id
+  LEFT JOIN public.facilities AS f ON f.id = m.facility_id
+  WHERE auth.uid() IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM public.memberships AS manager
+      WHERE manager.user_id = auth.uid()
+        AND manager.is_active = true
+        AND manager.organization_id = m.organization_id
+        AND (
+          manager.role = 'company_admin'
+          OR (manager.role = 'facility_manager' AND manager.facility_id = m.facility_id)
+        )
+    )
+  ORDER BY f.name, p.full_name;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.request_staff_invitation(p_facility_id uuid, p_email text, p_first_name text, p_last_name text)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_org uuid;
+  v_id uuid;
+  v_email text := lower(btrim(p_email));
+  v_existing_status text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Anmeldung erforderlich'; END IF;
+  SELECT organization_id INTO v_org FROM public.facilities WHERE id = p_facility_id;
+  IF v_org IS NULL THEN RAISE EXCEPTION 'Betrieb nicht gefunden'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.memberships AS m
+    WHERE m.user_id = auth.uid() AND m.is_active = true AND m.organization_id = v_org
+      AND (m.role = 'company_admin' OR (m.role = 'facility_manager' AND m.facility_id = p_facility_id))
+  ) THEN RAISE EXCEPTION 'Keine Berechtigung fuer diesen Betrieb'; END IF;
+  IF v_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' THEN RAISE EXCEPTION 'Ungueltige E-Mail-Adresse'; END IF;
+  IF length(btrim(p_first_name)) NOT BETWEEN 1 AND 100 OR length(btrim(p_last_name)) NOT BETWEEN 1 AND 100 THEN
+    RAISE EXCEPTION 'Vor- und Nachname erforderlich';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.memberships AS m
+    JOIN auth.users AS u ON u.id = m.user_id
+    WHERE lower(u.email) = v_email AND m.organization_id = v_org
+      AND (m.facility_id = p_facility_id OR m.role = 'company_admin')
+  ) THEN RAISE EXCEPTION 'Dieser Mitarbeiter besitzt bereits Zugang zu diesem Betrieb.'; END IF;
+  SELECT status INTO v_existing_status FROM public.staff_invitations
+  WHERE facility_id = p_facility_id AND lower(email) = v_email AND status IN ('pending', 'sent', 'failed')
+  ORDER BY invited_at DESC LIMIT 1;
+  IF v_existing_status = 'pending' THEN RAISE EXCEPTION 'Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.';
+  ELSIF v_existing_status = 'sent' THEN RAISE EXCEPTION 'An diese E-Mail-Adresse wurde bereits eine Einladung versendet.';
+  ELSIF v_existing_status = 'failed' THEN RAISE EXCEPTION 'Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.';
+  END IF;
+  INSERT INTO public.staff_invitations (organization_id, facility_id, email, first_name, last_name, invited_by)
+  VALUES (v_org, p_facility_id, v_email, btrim(p_first_name), btrim(p_last_name), auth.uid())
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.revoke_staff_invitation(p_invitation_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE r public.staff_invitations%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM public.staff_invitations WHERE id = p_invitation_id FOR UPDATE;
+  IF NOT FOUND OR r.status NOT IN ('pending','sent') THEN RAISE EXCEPTION 'Keine offene Einladung gefunden'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.memberships AS m
+    WHERE m.user_id = auth.uid() AND m.is_active = true AND m.organization_id = r.organization_id
+      AND (m.role = 'company_admin' OR (m.role = 'facility_manager' AND m.facility_id = r.facility_id))
+  ) THEN RAISE EXCEPTION 'Keine Berechtigung'; END IF;
+  UPDATE public.staff_invitations SET status = 'revoked', updated_at = now() WHERE id = p_invitation_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_employee_name(p_user_id uuid, p_full_name text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Nicht angemeldet'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.memberships AS manager
+    JOIN public.memberships AS employee ON manager.organization_id = employee.organization_id
+    WHERE manager.user_id = auth.uid() AND manager.is_active = true AND employee.user_id = p_user_id
+      AND (manager.role = 'company_admin' OR (manager.role = 'facility_manager' AND manager.facility_id = employee.facility_id))
+  ) THEN RAISE EXCEPTION 'Keine Berechtigung zur Namensänderung'; END IF;
+  IF p_full_name IS NULL OR length(trim(p_full_name)) < 2 THEN RAISE EXCEPTION 'Bitte einen gültigen Namen eingeben'; END IF;
+  UPDATE public.profiles SET full_name = trim(p_full_name) WHERE id = p_user_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Mitarbeiterprofil nicht gefunden'; END IF;
+END;
+$function$;
+
+GRANT EXECUTE ON FUNCTION public.list_facility_employees() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.request_staff_invitation(uuid, text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.revoke_staff_invitation(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.update_employee_name(uuid, text) TO authenticated;

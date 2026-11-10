@@ -1,4 +1,4 @@
-Tageswerk, Integrationstest der fünf Migrationen
+Tageswerk, Integrationstest der sechs Migrationen
 Nur für eine ausdrücklich als Testumgebung bestätigte Supabase-Datenbank.
 Dieses Paket legt keine Instanz an und spricht das produktive Projekt nicht an.
 
@@ -17,15 +17,16 @@ node tests/integration/run.mjs
 Der Ablauf
 1. Die Verbindung wird abgelehnt, wenn die Freigabe fehlt oder die Adresse das produktive Projekt nennt.
 2. Sind Temperaturtabellen schon vorhanden, endet der Lauf ohne Änderung.
-3. Fehlen die Betriebe, legt baseline.sql nur die für die fünf Dateien nötige Ausgangsfassung an.
+3. Fehlen die Betriebe, legt baseline.sql nur die für die Migrationsdateien nötige Ausgangsfassung an.
    Die Funktionskörper entsprechen den geprüften Markierungen aus Tageswerk 2.8 und 2.9.
 4. vorpruefung.sql liest die Funktionskörper. Weicht ein Körper ab, wird keine Migration gestartet.
-5. Die fünf Dateien laufen in dieser Reihenfolge:
+5. Die sechs Dateien laufen in dieser Reihenfolge:
    tageswerk_3_1_temperature.sql
    tageswerk_3_2_temperature_points.sql
    tageswerk_3_3_water_hygiene.sql
    tageswerk_3_4_technician_role.sql
    tageswerk_3_4_invitation_role.sql
+   tageswerk_3_4_management_guard.sql
 6. pruefung.sql legt Testpersonen an und prüft Temperatur, Wasserhygiene, Techniker,
    Mitarbeiterverwaltung, Einladungen und direkte Zugriffe.
 

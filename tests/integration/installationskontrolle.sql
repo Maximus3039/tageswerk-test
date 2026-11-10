@@ -1,7 +1,7 @@
 -- Tageswerk, Kontrollabfragen für die produktive Installation
 -- Nur lesen. Diese Datei legt nichts an, ändert nichts und löscht nichts.
--- Abschnitt 0 ist eine Ergebnistabelle. Die Abschnitte 1 bis 5 bleiben eigene Abfragen.
--- Die fünf Migrationsdateien werden hier nicht aufgerufen.
+-- Abschnitt 0 ist eine Ergebnistabelle. Die Abschnitte 1 bis 6 bleiben eigene Abfragen.
+-- Die Migrationsdateien werden hier nicht aufgerufen.
 -- Fehlende Funktionen und Tabellen werden mit to_regprocedure und to_regclass geprüft.
 -- pg_get_functiondef erhält nur eine zuvor aufgelöste Funktion.
 -- Eine Zeile mit stoppen oder pruefen ist keine Installationsfreigabe.
@@ -19,6 +19,10 @@ WITH signatures AS (
     to_regprocedure('public.accept_staff_invitation()') AS accept_invitation,
     to_regprocedure('public.claim_staff_invitations()') AS claim_invitations,
     to_regprocedure('public.employee_update_assigned_defect(uuid,text,text)') AS update_defect,
+    to_regprocedure('public.list_facility_employees()') AS list_employees,
+    to_regprocedure('public.request_staff_invitation(uuid,text,text,text)') AS request_invitation,
+    to_regprocedure('public.revoke_staff_invitation(uuid)') AS revoke_invitation,
+    to_regprocedure('public.update_employee_name(uuid,text)') AS update_name,
     to_regprocedure('public.tageswerk_stamp_temperature_reading()') AS stamp_temperature,
     to_regprocedure('public.tageswerk_temperature_alert()') AS temperature_alert,
     to_regprocedure('public.tageswerk_acknowledge_temperature()') AS acknowledge_temperature,
@@ -43,6 +47,14 @@ bodies AS (
       ELSE regexp_replace(pg_get_functiondef(signatures.claim_invitations), '[[:space:]]+', ' ', 'g') END AS claim_invitations,
     CASE WHEN signatures.update_defect IS NULL THEN ''
       ELSE regexp_replace(pg_get_functiondef(signatures.update_defect), '[[:space:]]+', ' ', 'g') END AS update_defect,
+    CASE WHEN signatures.list_employees IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.list_employees), '[[:space:]]+', ' ', 'g') END AS list_employees,
+    CASE WHEN signatures.request_invitation IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.request_invitation), '[[:space:]]+', ' ', 'g') END AS request_invitation,
+    CASE WHEN signatures.revoke_invitation IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.revoke_invitation), '[[:space:]]+', ' ', 'g') END AS revoke_invitation,
+    CASE WHEN signatures.update_name IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.update_name), '[[:space:]]+', ' ', 'g') END AS update_name,
     CASE WHEN signatures.stamp_water IS NULL THEN ''
       ELSE regexp_replace(pg_get_functiondef(signatures.stamp_water), '[[:space:]]+', ' ', 'g') END AS stamp_water
   FROM signatures
@@ -57,6 +69,87 @@ facts AS (
     signatures.accept_invitation IS NOT NULL AS has_accept_invitation,
     signatures.claim_invitations IS NOT NULL AS has_claim_invitations,
     signatures.update_defect IS NOT NULL AS has_update_defect,
+    signatures.list_employees IS NOT NULL AS has_list_employees,
+    position('SECURITY DEFINER' IN bodies.list_employees) > 0
+      AND position('auth.uid() IS NOT NULL' IN bodies.list_employees) > 0
+      AND position('manager.user_id = auth.uid()' IN bodies.list_employees) > 0
+      AND position('manager.organization_id = m.organization_id' IN bodies.list_employees) > 0
+      AND position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
+      AND position('manager.role = ''facility_manager''' IN bodies.list_employees) > 0
+      AND position('manager.facility_id = m.facility_id' IN bodies.list_employees) > 0
+      AND position('ORDER BY f.name, p.full_name' IN bodies.list_employees) > 0
+      AND position('UPDATE ' IN bodies.list_employees) = 0
+      AND position('INSERT ' IN bodies.list_employees) = 0
+      AND position('DELETE ' IN bodies.list_employees) = 0
+      AND (
+        position('is_active' IN bodies.list_employees) = 0
+        OR position('manager.is_active = true' IN bodies.list_employees) > 0
+        OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0
+      ) AS list_employees_known,
+    position('manager.is_active = true' IN bodies.list_employees) > 0
+      OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0 AS list_employees_active,
+    signatures.request_invitation IS NOT NULL AS has_request_invitation,
+    position('SECURITY DEFINER' IN bodies.request_invitation) > 0
+      AND position('Anmeldung erforderlich' IN bodies.request_invitation) > 0
+      AND position('Betrieb nicht gefunden' IN bodies.request_invitation) > 0
+      AND position('Keine Berechtigung fuer diesen Betrieb' IN bodies.request_invitation) > 0
+      AND position('Ungueltige E-Mail-Adresse' IN bodies.request_invitation) > 0
+      AND position('Vor- und Nachname erforderlich' IN bodies.request_invitation) > 0
+      AND position('Dieser Mitarbeiter besitzt bereits Zugang zu diesem Betrieb.' IN bodies.request_invitation) > 0
+      AND position('Fuer diese E-Mail-Adresse wird bereits eine Einladung verarbeitet.' IN bodies.request_invitation) > 0
+      AND position('An diese E-Mail-Adresse wurde bereits eine Einladung versendet.' IN bodies.request_invitation) > 0
+      AND position('Eine fruehere Einladung ist fehlgeschlagen. Bitte zuerst den Versandstatus pruefen.' IN bodies.request_invitation) > 0
+      AND position('m.role = ''company_admin''' IN bodies.request_invitation) > 0
+      AND position('m.role = ''facility_manager''' IN bodies.request_invitation) > 0
+      AND position('m.facility_id = p_facility_id' IN bodies.request_invitation) > 0
+      AND position('INSERT INTO public.staff_invitations' IN bodies.request_invitation) > 0
+      AND position('UPDATE public.memberships' IN bodies.request_invitation) = 0
+      AND position('DELETE ' IN bodies.request_invitation) = 0
+      AND (
+        position('is_active' IN bodies.request_invitation) = 0
+        OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
+        OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0
+      ) AS request_invitation_known,
+    position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0
+      OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0 AS request_invitation_active,
+    signatures.revoke_invitation IS NOT NULL AS has_revoke_invitation,
+    position('SECURITY DEFINER' IN bodies.revoke_invitation) > 0
+      AND position('Keine offene Einladung gefunden' IN bodies.revoke_invitation) > 0
+      AND position('Keine Berechtigung' IN bodies.revoke_invitation) > 0
+      AND position('FOR UPDATE' IN bodies.revoke_invitation) > 0
+      AND (position('status NOT IN (''pending'',''sent'')' IN bodies.revoke_invitation) > 0 OR position('status NOT IN (''pending'', ''sent'')' IN bodies.revoke_invitation) > 0)
+      AND (position('m.role=''company_admin''' IN bodies.revoke_invitation) > 0 OR position('m.role = ''company_admin''' IN bodies.revoke_invitation) > 0)
+      AND (position('m.role=''facility_manager'' AND m.facility_id=r.facility_id' IN bodies.revoke_invitation) > 0 OR position('m.role = ''facility_manager'' AND m.facility_id = r.facility_id' IN bodies.revoke_invitation) > 0)
+      AND (position('status=''revoked''' IN bodies.revoke_invitation) > 0 OR position('status = ''revoked''' IN bodies.revoke_invitation) > 0)
+      AND position('UPDATE public.memberships' IN bodies.revoke_invitation) = 0
+      AND position('DELETE ' IN bodies.revoke_invitation) = 0
+      AND (
+        position('is_active' IN bodies.revoke_invitation) = 0
+        OR position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+        OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+      ) AS revoke_invitation_known,
+    position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+      OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0 AS revoke_invitation_active,
+    signatures.update_name IS NOT NULL AS has_update_name,
+    position('SECURITY DEFINER' IN bodies.update_name) > 0
+      AND position('Nicht angemeldet' IN bodies.update_name) > 0
+      AND position('Keine Berechtigung zur Namensänderung' IN bodies.update_name) > 0
+      AND position('Bitte einen gültigen Namen eingeben' IN bodies.update_name) > 0
+      AND position('Mitarbeiterprofil nicht gefunden' IN bodies.update_name) > 0
+      AND position('manager.role = ''company_admin''' IN bodies.update_name) > 0
+      AND position('manager.role = ''facility_manager''' IN bodies.update_name) > 0
+      AND position('manager.facility_id = employee.facility_id' IN bodies.update_name) > 0
+      AND position('UPDATE public.profiles' IN bodies.update_name) > 0
+      AND position('SET full_name = trim(p_full_name)' IN bodies.update_name) > 0
+      AND position('UPDATE public.memberships' IN bodies.update_name) = 0
+      AND position('DELETE ' IN bodies.update_name) = 0
+      AND (
+        position('is_active' IN bodies.update_name) = 0
+        OR position('manager.is_active = true' IN bodies.update_name) > 0
+        OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0
+      ) AS update_name_known,
+    position('manager.is_active = true' IN bodies.update_name) > 0
+      OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0 AS update_name_active,
     signatures.stamp_temperature IS NULL
       AND signatures.temperature_alert IS NULL
       AND signatures.acknowledge_temperature IS NULL
@@ -349,6 +442,38 @@ checks AS (
       ELSE 'Temperatur oder Wasserhygiene ist bereits vorhanden.'
     END
   FROM facts
+  UNION ALL
+  SELECT 122, 'list_facility_employees bleibt die geprüfte Mitarbeiterliste',
+    CASE WHEN has_list_employees AND list_employees_known THEN 'bereit' ELSE 'stoppen' END,
+    CASE WHEN NOT has_list_employees THEN 'list_facility_employees fehlt.'
+      WHEN NOT list_employees_known THEN 'Der Funktionskörper ist unbekannt.'
+      WHEN NOT list_employees_active THEN 'Bekannte produktive Fassung. Die Migration ergänzt die aktive Verwaltungsberechtigung.'
+      ELSE 'Aktive Verwaltungsberechtigung wird geprüft.' END
+  FROM facts
+  UNION ALL
+  SELECT 124, 'request_staff_invitation bleibt die geprüfte Einladung',
+    CASE WHEN has_request_invitation AND request_invitation_known THEN 'bereit' ELSE 'stoppen' END,
+    CASE WHEN NOT has_request_invitation THEN 'request_staff_invitation fehlt.'
+      WHEN NOT request_invitation_known THEN 'Der Funktionskörper ist unbekannt.'
+      WHEN NOT request_invitation_active THEN 'Bekannte produktive Fassung. Die Migration ergänzt die aktive Verwaltungsberechtigung.'
+      ELSE 'Aktive Verwaltungsberechtigung wird geprüft.' END
+  FROM facts
+  UNION ALL
+  SELECT 126, 'revoke_staff_invitation bleibt die geprüfte Rücknahme',
+    CASE WHEN has_revoke_invitation AND revoke_invitation_known THEN 'bereit' ELSE 'stoppen' END,
+    CASE WHEN NOT has_revoke_invitation THEN 'revoke_staff_invitation fehlt.'
+      WHEN NOT revoke_invitation_known THEN 'Der Funktionskörper ist unbekannt.'
+      WHEN NOT revoke_invitation_active THEN 'Bekannte produktive Fassung. Die Migration ergänzt die aktive Verwaltungsberechtigung.'
+      ELSE 'Aktive Verwaltungsberechtigung wird geprüft.' END
+  FROM facts
+  UNION ALL
+  SELECT 128, 'update_employee_name bleibt die geprüfte Namensänderung',
+    CASE WHEN has_update_name AND update_name_known THEN 'bereit' ELSE 'stoppen' END,
+    CASE WHEN NOT has_update_name THEN 'update_employee_name fehlt.'
+      WHEN NOT update_name_known THEN 'Der Funktionskörper ist unbekannt.'
+      WHEN NOT update_name_active THEN 'Bekannte produktive Fassung. Die Migration ergänzt die aktive Verwaltungsberechtigung.'
+      ELSE 'Aktive Verwaltungsberechtigung wird geprüft.' END
+  FROM facts
 )
 SELECT result.pruefung, result.status, result.details
 FROM (
@@ -515,4 +640,51 @@ SELECT 'Einladung 3.4' AS pruefung,
   CASE WHEN ok THEN 'installiert' ELSE 'pruefen' END AS status,
   CASE WHEN ok THEN 'Die Annahme übernimmt die gespeicherte Mitarbeiter- oder Technikerrolle.'
     ELSE 'Die Einladungsinstallation ist nicht vollständig.' END AS details
+FROM installation;
+
+-- Abschnitt 6, unmittelbar nach tageswerk_3_4_management_guard.sql
+
+WITH signatures AS (
+  SELECT
+    to_regprocedure('public.list_facility_employees()') AS list_employees,
+    to_regprocedure('public.request_staff_invitation(uuid,text,text,text)') AS request_invitation,
+    to_regprocedure('public.revoke_staff_invitation(uuid)') AS revoke_invitation,
+    to_regprocedure('public.update_employee_name(uuid,text)') AS update_name
+),
+bodies AS (
+  SELECT
+    CASE WHEN signatures.list_employees IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.list_employees), '[[:space:]]+', ' ', 'g') END AS list_employees,
+    CASE WHEN signatures.request_invitation IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.request_invitation), '[[:space:]]+', ' ', 'g') END AS request_invitation,
+    CASE WHEN signatures.revoke_invitation IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.revoke_invitation), '[[:space:]]+', ' ', 'g') END AS revoke_invitation,
+    CASE WHEN signatures.update_name IS NULL THEN ''
+      ELSE regexp_replace(pg_get_functiondef(signatures.update_name), '[[:space:]]+', ' ', 'g') END AS update_name
+  FROM signatures
+),
+installation AS (
+  SELECT
+    signatures.list_employees IS NOT NULL
+    AND signatures.request_invitation IS NOT NULL
+    AND signatures.revoke_invitation IS NOT NULL
+    AND signatures.update_name IS NOT NULL
+    AND (position('manager.is_active = true' IN bodies.list_employees) > 0 OR position('manager.is_active IS TRUE' IN bodies.list_employees) > 0)
+    AND (position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.request_invitation) > 0 OR position('m.user_id = auth.uid() AND m.is_active IS TRUE' IN bodies.request_invitation) > 0)
+    AND (
+      position('m.user_id=auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+      OR position('m.user_id = auth.uid() AND m.is_active = true' IN bodies.revoke_invitation) > 0
+    )
+    AND (position('manager.is_active = true' IN bodies.update_name) > 0 OR position('manager.is_active IS TRUE' IN bodies.update_name) > 0)
+    AND position('manager.role = ''company_admin''' IN bodies.list_employees) > 0
+    AND position('Keine Berechtigung fuer diesen Betrieb' IN bodies.request_invitation) > 0
+    AND position('Keine Berechtigung' IN bodies.revoke_invitation) > 0
+    AND position('Keine Berechtigung zur Namensänderung' IN bodies.update_name) > 0 AS ok
+  FROM signatures
+  CROSS JOIN bodies
+)
+SELECT 'Verwaltung 3.4' AS pruefung,
+  CASE WHEN ok THEN 'installiert' ELSE 'pruefen' END AS status,
+  CASE WHEN ok THEN 'Deaktivierte Leitungen lesen keine Mitarbeiterdaten und verwalten keine Einladungen oder Namen.'
+    ELSE 'Die Verwaltungsprüfung ist nicht vollständig.' END AS details
 FROM installation;
