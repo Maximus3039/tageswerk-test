@@ -17,7 +17,9 @@
 -- Sie sind keine Sollwerte und keine normativen Grenzwerte.
 -- Die reguläre Kontrollrunde umfasst Freies Chlor, gebundenes Chlor, den pH-Wert
 -- und die Wassertemperatur. Weitere Parameter können später in den Katalog aufgenommen werden.
--- Mitarbeiter lesen nur eigene Messungen der laufenden Kontrollrunde.
+-- Mitarbeiter speichern neue Messungen. Die noch nicht bestätigte Runde bleibt im Browser.
+-- Nach dem Speichern können sie die Werte nicht lesen. Techniker, Betriebsleitung und
+-- Geschäftsführung lesen die Messungen ihres berechtigten Betriebs.
 -- Techniker, Betriebsleitung und Geschäftsführung lesen die Messhistorie.
 -- Sollbereiche bleiben leer, bis die Betriebsleitung sie je Becken setzt.
 -- Messungen, damalige Sollbereiche und Warnwerte werden nicht umgeschrieben.
@@ -652,11 +654,6 @@ $tageswerk$;
 CREATE POLICY water_checks_select ON public.water_checks FOR SELECT TO authenticated
   USING (
     public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
-    OR (
-      public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
-      AND recorded_by = auth.uid()
-      AND public.tageswerk_water_check_in_round(pool_id, measured_at)
-    )
   );
 CREATE POLICY water_checks_insert ON public.water_checks FOR INSERT TO authenticated
   WITH CHECK (
@@ -671,52 +668,26 @@ CREATE POLICY water_checks_insert ON public.water_checks FOR INSERT TO authentic
 CREATE POLICY water_alerts_select ON public.water_alerts FOR SELECT TO authenticated
   USING (
     public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
-    OR (
-      public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
-      AND recorded_by = auth.uid()
-      AND public.tageswerk_water_check_in_round(pool_id, measured_at)
-    )
   );
 CREATE POLICY water_alerts_insert ON public.water_alerts FOR INSERT TO authenticated
   WITH CHECK (
     status = 'open'
     AND acknowledged_by IS NULL
     AND acknowledgement_note = ''
+    AND recorded_by = auth.uid()
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.water_checks AS check_row
-      CROSS JOIN LATERAL jsonb_to_recordset(check_row.readings) AS reading(
-        parameter_code text,
-        value numeric,
-        unit text,
-        min_limit numeric,
-        max_limit numeric
-      )
-      WHERE check_row.id = check_id
-        AND check_row.pool_id = water_alerts.pool_id
-        AND check_row.facility_id = water_alerts.facility_id
-        AND check_row.organization_id = water_alerts.organization_id
-        AND check_row.measured_at = water_alerts.measured_at
-        AND check_row.recorded_by = water_alerts.recorded_by
-        AND reading.parameter_code = water_alerts.parameter_code
-        AND reading.value = water_alerts.value_amount
-        AND reading.min_limit IS NOT DISTINCT FROM water_alerts.min_value
-        AND reading.max_limit IS NOT DISTINCT FROM water_alerts.max_value
-        AND coalesce(reading.unit, '') = water_alerts.unit
-        AND (
-          (reading.min_limit IS NOT NULL AND reading.value < reading.min_limit)
-          OR (reading.max_limit IS NOT NULL AND reading.value > reading.max_limit)
-        )
-    )
+    AND pg_catalog.pg_trigger_depth() > 0
   );
 CREATE POLICY water_alerts_update ON public.water_alerts FOR UPDATE TO authenticated
-  USING (status = 'open' AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL)
+  USING (
+    status = 'open'
+    AND public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
+  )
   WITH CHECK (
     status = 'acknowledged'
     AND acknowledged_by = auth.uid()
     AND char_length(btrim(acknowledgement_note)) >= 3
-    AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
+    AND public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
   );
 
 CREATE POLICY water_alert_measures_select ON public.water_alert_measures FOR SELECT TO authenticated
@@ -768,44 +739,44 @@ DECLARE
   facility uuid;
   pool uuid;
   seen uuid[] := ARRAY[]::uuid[];
-  existing uuid[];
   inserted uuid;
   ids uuid[] := ARRAY[]::uuid[];
 BEGIN
   IF p_round_id IS NULL OR jsonb_typeof(p_checks) IS DISTINCT FROM 'array' OR jsonb_array_length(p_checks) < 1 OR jsonb_array_length(p_checks) > 30 THEN
     RAISE EXCEPTION 'Die Kontrollrunde ist unvollständig.';
   END IF;
-  SELECT coalesce(array_agg(check_row.id ORDER BY check_row.measured_at, check_row.id), ARRAY[]::uuid[])
-    INTO existing
-  FROM public.water_checks AS check_row
-  WHERE check_row.round_id = p_round_id
-    AND check_row.recorded_by = auth.uid();
-  IF cardinality(existing) > 0 THEN
-    RETURN to_jsonb(existing);
-  END IF;
-  FOR item IN SELECT value FROM jsonb_array_elements(p_checks) LOOP
-    pool := (item->>'pool_id')::uuid;
-    IF pool IS NULL OR pool = ANY (seen) THEN
-      RAISE EXCEPTION 'Jedes Becken wird in der Kontrollrunde nur einmal gespeichert.';
-    END IF;
-    seen := seen || pool;
-    IF facility IS NULL THEN
-      facility := (item->>'facility_id')::uuid;
-    ELSIF facility IS DISTINCT FROM (item->>'facility_id')::uuid THEN
-      RAISE EXCEPTION 'Eine Kontrollrunde gehört zu einem Betrieb.';
-    END IF;
-    INSERT INTO public.water_checks (pool_id, facility_id, note, round_id, readings)
-    VALUES (
-      pool,
-      facility,
-      coalesce(item->>'note', ''),
-      p_round_id,
-      coalesce(item->'readings', '[]'::jsonb)
-    )
-    RETURNING id INTO inserted;
-    ids := ids || inserted;
-  END LOOP;
-  RETURN to_jsonb(ids);
+  BEGIN
+    FOR item IN SELECT value FROM jsonb_array_elements(p_checks) LOOP
+      pool := (item->>'pool_id')::uuid;
+      IF pool IS NULL OR pool = ANY (seen) THEN
+        RAISE EXCEPTION 'Jedes Becken wird in der Kontrollrunde nur einmal gespeichert.';
+      END IF;
+      seen := seen || pool;
+      IF facility IS NULL THEN
+        facility := (item->>'facility_id')::uuid;
+      ELSIF facility IS DISTINCT FROM (item->>'facility_id')::uuid THEN
+        RAISE EXCEPTION 'Eine Kontrollrunde gehört zu einem Betrieb.';
+      END IF;
+      inserted := pg_catalog.gen_random_uuid();
+      INSERT INTO public.water_checks (id, pool_id, facility_id, note, round_id, readings)
+      VALUES (
+        inserted,
+        pool,
+        facility,
+        coalesce(item->>'note', ''),
+        p_round_id,
+        coalesce(item->'readings', '[]'::jsonb)
+      );
+      ids := ids || inserted;
+    END LOOP;
+  EXCEPTION
+    WHEN unique_violation THEN
+      IF SQLERRM NOT ILIKE '%water_checks_round_pool%' THEN
+        RAISE;
+      END IF;
+      RETURN jsonb_build_object('status', 'already_stored', 'round_id', p_round_id);
+  END;
+  RETURN jsonb_build_object('status', 'stored', 'round_id', p_round_id, 'ids', to_jsonb(ids));
 END;
 $tageswerk$;
 

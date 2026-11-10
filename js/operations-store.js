@@ -1,4 +1,4 @@
-import {facilityVisibleToMember} from './permissions.js';
+import {facilityVisibleToMember, waterHistoryRole} from './permissions.js';
 import {
  acknowledgeTemperatureAlert,
  acknowledgeWaterAlert,
@@ -1106,8 +1106,16 @@ export async function saveWaterRound(db, bundle, round, actor, now, context) {
   return denied(bundle, storageMessage(error));
  }
  if (result?.error) return denied(bundle, storageMessage(result.error));
- const ids = Array.isArray(result?.data) ? result.data : [];
- if (ids.length !== review.checks.length) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+ const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
+ if (payload?.status === 'already_stored' && payload.round_id === round.roundId) {
+  return {ok: true, id: round.roundId, ids: [], bundle};
+ }
+ const ids = Array.isArray(payload?.ids) ? payload.ids : [];
+ if (payload?.status !== 'stored' || payload.round_id !== round.roundId || ids.length !== review.checks.length) {
+  return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+ }
+ const facility = {id: review.checks[0].facilityId, organization_id: review.checks[0].organizationId};
+ if (!waterHistoryRole(facility, actor.memberships)) return {ok: true, id: round.roundId, ids, bundle};
  const loaded = await loadOperations(db, actor, context);
  if (!loaded.ok) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
  for (const expected of review.checks) {

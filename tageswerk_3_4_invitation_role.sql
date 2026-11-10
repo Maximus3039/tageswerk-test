@@ -3,6 +3,9 @@
 -- Die produktive Edge Function invite-staff wird hier nicht gelesen und nicht ersetzt.
 -- Ihre vorbereitete Fassung liegt unter supabase/functions/invite-staff und bleibt lokal.
 -- Bestehende Einladungen behalten ihren Status. Eine leere Rolle gilt als Mitarbeiter.
+-- Die Rollenspalte entsteht nur in dieser Datei. Sie wird gemeinsam mit dem Wächter
+-- nur festgeschrieben, wenn accept_staff_invitation die Rolle Techniker schon übernimmt.
+-- tageswerk_3_4_technician_role.sql verändert staff_invitations nicht.
 -- public.accept_staff_invitation wird nicht ersetzt, solange ihre Live-Fassung
 -- die gespeicherte Rolle nicht nachweisbar übernimmt. Ein Lauf endet dann ohne Änderung.
 --

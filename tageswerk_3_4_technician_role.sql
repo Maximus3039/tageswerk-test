@@ -8,44 +8,107 @@
 -- neben Mitarbeitern, nicht über der Betriebsleitung.
 -- Installationsreihenfolge: tageswerk_3_1_temperature.sql, tageswerk_3_2_temperature_points.sql,
 -- tageswerk_3_3_water_hygiene.sql, diese Datei, danach tageswerk_3_4_invitation_role.sql.
--- Diese Datei darf auch vor der Wasserhygiene laufen. Die Wasserregeln setzt sie nur,
--- wenn die Tabellen schon vorhanden sind, und dann mit derselben Mitarbeiterbegrenzung.
--- Die Einladung sendet die Rolle technician mit. Diese Datei speichert sie an der
--- Einladung. Die vorbereitete, nicht bereitgestellte Edge Function liegt unter
--- supabase/functions/invite-staff. Die Annahme prüft tageswerk_3_4_invitation_role.sql.
+-- Diese Datei darf auch vor der Wasserhygiene laufen. Gespeicherte Wassermessungen
+-- bleiben für Mitarbeiter unsichtbar. Techniker, Betriebsleitung und Geschäftsführung
+-- lesen sie im berechtigten Betrieb.
+-- staff_invitations wird hier nicht verändert. Die Rollenspalte, ihr Wächter und die
+-- Prüfung der Annahme liegen ausschließlich in tageswerk_3_4_invitation_role.sql.
+-- Ist memberships.role ein Enum ohne den Wert technician, ändert diese Datei nichts.
+-- Der Wert muss vorher in einer eigenen, bereits festgeschriebenen Anweisung ergänzt werden:
+-- ALTER TYPE public.<enum> ADD VALUE 'technician';
+-- Eine unbekannte Funktionsfassung setzt die Transaktion zurück.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.tageswerk_meter_role(
-  p_organization_id uuid,
-  p_facility_id uuid
-)
-RETURNS text
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = ''
-AS $tageswerk$
-  SELECT m.role
-  FROM public.memberships m
-  WHERE m.user_id = auth.uid()
-    AND m.is_active IS TRUE
-    AND m.organization_id = p_organization_id
-    AND (
-      (m.role = 'company_admin' AND m.facility_id IS NULL)
-      OR (m.role = 'facility_manager' AND m.facility_id = p_facility_id)
-      OR (m.role = 'technician' AND m.facility_id = p_facility_id)
-      OR (m.role = 'employee' AND m.facility_id = p_facility_id)
+DO $enum_gate$
+DECLARE
+  role_type text;
+BEGIN
+  SELECT t.typname INTO role_type
+  FROM pg_attribute AS attribute
+  JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+  JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+  JOIN pg_type AS t ON t.oid = attribute.atttypid
+  WHERE namespace.nspname = 'public'
+    AND relation.relname = 'memberships'
+    AND attribute.attname = 'role'
+    AND t.typtype = 'e';
+  IF role_type IS NULL THEN
+    RETURN;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_enum AS label
+    JOIN pg_type AS enum_type ON enum_type.oid = label.enumtypid
+    WHERE enum_type.typname = role_type
+      AND label.enumlabel = 'technician'
+  ) THEN
+    RAISE EXCEPTION 'memberships.role ist ein Enum ohne den Wert technician. Zuerst getrennt festschreiben: ALTER TYPE public.%s ADD VALUE ''technician''', role_type;
+  END IF;
+END;
+$enum_gate$;
+
+DO $meter_role$
+DECLARE
+  definition text;
+BEGIN
+  IF to_regprocedure('public.tageswerk_meter_role(uuid,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'tageswerk_meter_role fehlt und wurde nicht neu erfunden.';
+  END IF;
+  definition := pg_get_functiondef('public.tageswerk_meter_role(uuid,uuid)'::regprocedure);
+  IF position('technician' IN definition) > 0 THEN
+    IF position('WHEN ''technician'' THEN 3' IN definition) = 0
+       OR position('(m.role = ''employee'' AND m.facility_id = p_facility_id)' IN definition) = 0
+       OR position('WHEN ''company_admin'' THEN 1' IN definition) = 0
+       OR position('WHEN ''facility_manager'' THEN 2' IN definition) = 0 THEN
+      RAISE EXCEPTION 'tageswerk_meter_role enthält Techniker in einer unbekannten Form und wurde nicht ersetzt.';
+    END IF;
+    RETURN;
+  END IF;
+  IF position('SECURITY DEFINER' IN definition) = 0
+     OR position('m.is_active IS TRUE' IN definition) = 0
+     OR position('(m.role = ''company_admin'' AND m.facility_id IS NULL)' IN definition) = 0
+     OR position('(m.role = ''facility_manager'' AND m.facility_id = p_facility_id)' IN definition) = 0
+     OR position('(m.role = ''employee'' AND m.facility_id = p_facility_id)' IN definition) = 0
+     OR position('WHEN ''company_admin'' THEN 1' IN definition) = 0
+     OR position('WHEN ''facility_manager'' THEN 2' IN definition) = 0
+     OR position('ELSE 3' IN definition) = 0 THEN
+    RAISE EXCEPTION 'tageswerk_meter_role entspricht nicht der geprüften Fassung aus Tageswerk 2.9 und wurde nicht ersetzt.';
+  END IF;
+  EXECUTE $tageswerk$
+    CREATE OR REPLACE FUNCTION public.tageswerk_meter_role(
+      p_organization_id uuid,
+      p_facility_id uuid
     )
-  ORDER BY CASE m.role
-    WHEN 'company_admin' THEN 1
-    WHEN 'facility_manager' THEN 2
-    WHEN 'technician' THEN 3
-    ELSE 4
-  END
-  LIMIT 1;
-$tageswerk$;
+    RETURNS text
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = ''
+    AS $body$
+      SELECT m.role
+      FROM public.memberships m
+      WHERE m.user_id = auth.uid()
+        AND m.is_active IS TRUE
+        AND m.organization_id = p_organization_id
+        AND (
+          (m.role = 'company_admin' AND m.facility_id IS NULL)
+          OR (m.role = 'facility_manager' AND m.facility_id = p_facility_id)
+          OR (m.role = 'technician' AND m.facility_id = p_facility_id)
+          OR (m.role = 'employee' AND m.facility_id = p_facility_id)
+        )
+      ORDER BY CASE m.role
+        WHEN 'company_admin' THEN 1
+        WHEN 'facility_manager' THEN 2
+        WHEN 'technician' THEN 3
+        ELSE 4
+      END
+      LIMIT 1;
+    $body$
+  $tageswerk$;
+END;
+$meter_role$;
 
 DO $memberships$
 DECLARE
@@ -72,7 +135,7 @@ BEGIN
       WHERE enum_type.typname = role_type
         AND label.enumlabel = 'technician'
     ) THEN
-      EXECUTE format('ALTER TYPE public.%I ADD VALUE %L', role_type, 'technician');
+      RAISE EXCEPTION 'Der Enum-Wert technician ist noch nicht festgeschrieben. Die Datei muss einschließlich des ersten COMMIT ausgeführt werden.';
     END IF;
     technician_known := true;
   END IF;
@@ -115,9 +178,32 @@ END;
 $memberships$;
 
 DO $readings$
+DECLARE
+  policy_text text;
 BEGIN
   IF to_regclass('public.utility_meter_readings') IS NULL OR to_regclass('public.utility_meters') IS NULL THEN
     RAISE EXCEPTION 'Die Zählerstände sind nicht vorbereitet.';
+  END IF;
+  SELECT coalesce(policy.with_check, '') INTO policy_text
+  FROM pg_policies AS policy
+  WHERE policy.schemaname = 'public'
+    AND policy.tablename = 'utility_meter_readings'
+    AND policy.policyname = 'utility_meter_readings_insert';
+  IF policy_text IS NULL THEN
+    RAISE EXCEPTION 'utility_meter_readings_insert fehlt und wurde nicht neu angelegt.';
+  END IF;
+  IF position('technician' IN policy_text) > 0 THEN
+    IF position('reading_type' IN policy_text) = 0 OR position('regular' IN policy_text) = 0 THEN
+      RAISE EXCEPTION 'utility_meter_readings_insert enthält Techniker in einer unbekannten Form und wurde nicht ersetzt.';
+    END IF;
+    RETURN;
+  END IF;
+  IF position('employee' IN policy_text) = 0
+     OR position('reading_type' IN policy_text) = 0
+     OR position('regular' IN policy_text) = 0
+     OR position('company_admin' IN policy_text) = 0
+     OR position('facility_manager' IN policy_text) = 0 THEN
+    RAISE EXCEPTION 'utility_meter_readings_insert entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   END IF;
   DROP POLICY IF EXISTS utility_meter_readings_insert ON public.utility_meter_readings;
   CREATE POLICY utility_meter_readings_insert
@@ -242,34 +328,6 @@ BEGIN
 END;
 $staff$;
 
-DO $invitations$
-BEGIN
-  IF to_regclass('public.staff_invitations') IS NULL THEN
-    RAISE NOTICE 'staff_invitations fehlt. Die Einladungsrolle wird nicht ergänzt.';
-    RETURN;
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'staff_invitations'
-      AND column_name = 'role'
-  ) THEN
-    ALTER TABLE public.staff_invitations
-      ADD COLUMN role text NOT NULL DEFAULT 'employee';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'staff_invitations_role_check'
-  ) THEN
-    ALTER TABLE public.staff_invitations
-      ADD CONSTRAINT staff_invitations_role_check
-      CHECK (role IN ('employee', 'technician'));
-  END IF;
-END;
-$invitations$;
-
 DO $defects$
 DECLARE
   policy record;
@@ -373,22 +431,12 @@ BEGIN
   CREATE POLICY water_checks_select ON public.water_checks FOR SELECT TO authenticated
     USING (
       public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
-      OR (
-        public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
-        AND recorded_by = auth.uid()
-        AND public.tageswerk_water_check_in_round(pool_id, measured_at)
-      )
     );
 
   DROP POLICY IF EXISTS water_alerts_select ON public.water_alerts;
   CREATE POLICY water_alerts_select ON public.water_alerts FOR SELECT TO authenticated
     USING (
       public.tageswerk_meter_role(organization_id, facility_id) IN ('technician', 'facility_manager', 'company_admin')
-      OR (
-        public.tageswerk_meter_role(organization_id, facility_id) = 'employee'
-        AND recorded_by = auth.uid()
-        AND public.tageswerk_water_check_in_round(pool_id, measured_at)
-      )
     );
 
   DROP POLICY IF EXISTS water_alert_measures_select ON public.water_alert_measures;

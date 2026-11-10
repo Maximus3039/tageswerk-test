@@ -440,18 +440,15 @@ function waterFacility(record) {
  return {id: record?.facilityId, organization_id: record?.organizationId};
 }
 
-function waterRecordVisible(bundle, memberships, record, now, userId) {
+function waterRecordVisible(bundle, memberships, record) {
  const facility = waterFacility(record);
  if (!facilityVisibleToMember(facility, memberships)) return false;
- if (waterHistoryRole(facility, memberships)) return true;
- if (!userId || record.recordedBy !== userId) return false;
- const pool = (bundle?.waterPools || []).find(item => item.id === record.poolId) || {scheduleMode: 'daily', intervalCount: 1};
- return waterCheckInRound(pool, record.measuredAt, now);
+ return waterHistoryRole(facility, memberships);
 }
 
 export function waterRowsForMember(bundle, memberships, now, userId) {
- const checks = (bundle?.waterChecks || []).filter(check => waterRecordVisible(bundle, memberships, check, now, userId));
- const alerts = (bundle?.waterAlerts || []).filter(alert => waterRecordVisible(bundle, memberships, alert, now, userId));
+ const checks = (bundle?.waterChecks || []).filter(check => waterRecordVisible(bundle, memberships, check));
+ const alerts = (bundle?.waterAlerts || []).filter(alert => waterRecordVisible(bundle, memberships, alert));
  const alertIds = new Set(alerts.map(alert => alert.id));
  const measures = (bundle?.waterMeasures || []).filter(measure => {
   const facility = waterFacility(measure);

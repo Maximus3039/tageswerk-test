@@ -979,14 +979,12 @@ function renderWater(host, current) {
  const poolChecks = history ? [] : visible.checks.filter(item => item.poolId === pool.id);
  if (!history) {
   const roundHeading = document.createElement('h3');
-  roundHeading.textContent = 'Eigene Kontrollrunde';
+  roundHeading.textContent = 'Offene Kontrollrunde';
   row.append(roundHeading);
-  if (!poolChecks.length) {
-   const empty = document.createElement('p');
-   empty.className = 'help';
-   empty.textContent = 'Für die laufende Kontrollrunde liegt noch keine eigene Messung vor.';
-   row.append(empty);
-  }
+  const empty = document.createElement('p');
+  empty.className = 'help';
+  empty.textContent = 'Gespeicherte Messwerte werden für Mitarbeiter nicht angezeigt. Die noch nicht bestätigte Eingabe steht in der Kontrollrunde.';
+  row.append(empty);
  }
  const checks = poolChecks;
  for (const check of checks) {

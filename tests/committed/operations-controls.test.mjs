@@ -679,9 +679,9 @@ test('Techniker sehen die Wasserhistorie und verändern keine Grenzwerte', () =>
  const managerRows = waterRowsForMember(withForeign, manager.memberships, now, manager.userId);
  const adminRows = waterRowsForMember(withForeign, admin.memberships, now, admin.userId);
  const mixedRows = waterRowsForMember(withForeign, mixed.memberships, now, mixed.userId);
- assert.equal(employeeRows.checks.some(item => item.measuredAt === '2026-11-08T10:00:00.000Z'), false);
- assert.equal(employeeRows.checks.some(item => item.recordedBy === technician.userId), false);
- assert.equal(employeeRows.checks.some(item => item.recordedBy === employee.userId && item.measuredAt === now), true);
+ assert.equal(employeeRows.checks.length, 0);
+ assert.equal(employeeRows.alerts.length, 0);
+ assert.equal(employeeRows.checks.some(item => item.recordedBy === technician.userId || item.recordedBy === employee.userId), false);
  assert.equal(technicianRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
  assert.equal(managerRows.checks.some(item => item.facilityId === facility.id && item.measuredAt === '2026-11-08T10:00:00.000Z'), true);
  assert.equal(adminRows.checks.some(item => item.facilityId === second.id), true);
@@ -715,8 +715,8 @@ function withWaterRound(db, userId, failAt = -1) {
   if (!args?.p_round_id || !Array.isArray(args.p_checks) || args.p_checks.length < 1) {
    return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde ist unvollständig.'}};
   }
-  const existing = db.rows.water_checks.filter(row => row.round_id === args.p_round_id && row.recorded_by === userId);
-  if (existing.length) return {data: existing.map(row => row.id), error: null};
+  const duplicate = args.p_checks.some(item => db.rows.water_checks.some(row => row.round_id === args.p_round_id && row.pool_id === item.pool_id));
+  if (duplicate) return {data: {status: 'already_stored', round_id: args.p_round_id}, error: null};
   const checks = db.rows.water_checks.map(row => structuredClone(row));
   const alerts = db.rows.water_alerts.map(row => structuredClone(row));
   const ids = [];
@@ -741,7 +741,7 @@ function withWaterRound(db, userId, failAt = -1) {
    }
    ids.push(inserted.data.id);
   }
-  return {data: ids, error: null};
+  return {data: {status: 'stored', round_id: args.p_round_id, ids}, error: null};
  };
  return db;
 }
@@ -829,13 +829,14 @@ test('Kontrollrunden bleiben vollständig, unterbrechbar und je Rolle getrennt',
   const saved = await saveWaterRound(db, withHistory, ready, employee, now, context);
   assert.equal(saved.ok, true, saved.error);
   assert.equal(saved.id, 'round-1');
+  assert.equal(saved.bundle.waterChecks.some(item => item.roundId === 'round-1'), false);
   assert.equal(db.rows.water_checks.filter(row => row.round_id === 'round-1').length, 2);
   assert.equal(db.rows.water_alerts.some(item => item.parameter_code === 'ph' && item.value_amount === '8.20'), true);
   assert.equal(saved.bundle.waterChecks.find(item => item.id === 'historic-1').readings[0].value, '7.10');
   const again = await saveWaterRound(db, withHistory, ready, employee, now, context);
   assert.equal(again.ok, true, again.error);
   assert.equal(db.rows.water_checks.filter(row => row.round_id === 'round-1').length, 2);
-  assert.deepEqual(again.ids, saved.ids);
+  assert.deepEqual(again.ids, []);
   const rollback = withWaterRound(controlDb({userId: employee.userId}), employee.userId, 1);
   seedWaterLimits(rollback, [kinder.pool, schwimmer.pool]);
   const failed = await saveWaterRound(rollback, bundle, ready, employee, now, context);
@@ -854,16 +855,33 @@ test('Kontrollrunden bleiben vollständig, unterbrechbar und je Rolle getrennt',
   adminRound.entries[strand.pool.id] = {values: hygieneValues(), note: ''};
   const adminSaved = await saveWaterRound(withWaterRound(controlDb({userId: admin.userId}), admin.userId), bundle, adminRound, admin, now, context);
   assert.equal(adminSaved.ok, true);
+  const employeeStored = db.rows.water_checks.filter(row => row.round_id === 'round-1').map(row => ({
+   id: row.id,
+   poolId: row.pool_id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   measuredAt: row.measured_at,
+   recordedBy: row.recorded_by,
+   recordedName: 'Mia',
+   roundId: row.round_id,
+   readings: row.readings.map(reading => ({
+    parameterCode: reading.parameter_code,
+    value: String(reading.value),
+    unit: reading.unit || '',
+    minLimit: reading.min_limit == null ? null : String(reading.min_limit),
+    maxLimit: reading.max_limit == null ? null : String(reading.max_limit)
+   }))
+  }));
   const combined = {
    ...bundle,
-   waterChecks: [...saved.bundle.waterChecks, ...technicianSaved.bundle.waterChecks, ...adminSaved.bundle.waterChecks],
+   waterChecks: [...saved.bundle.waterChecks, ...employeeStored, ...technicianSaved.bundle.waterChecks, ...adminSaved.bundle.waterChecks],
    waterPools: bundle.waterPools
   };
   const employeeView = waterRowsForMember(combined, employee.memberships, now, employee.userId);
   const technicianView = waterRowsForMember(combined, technician.memberships, now, technician.userId);
   const managerView = waterRowsForMember(combined, manager.memberships, now, manager.userId);
   const adminView = waterRowsForMember(combined, admin.memberships, now, admin.userId);
-  assert.equal(employeeView.checks.every(item => item.recordedBy === employee.userId), true);
+  assert.equal(employeeView.checks.length, 0);
   assert.equal(employeeView.checks.some(item => item.facilityId === second.id), false);
   assert.equal(technicianView.checks.some(item => item.recordedBy === employee.userId), true);
   assert.equal(technicianView.checks.some(item => item.facilityId === second.id), false);
@@ -887,6 +905,58 @@ test('Kontrollrunden bleiben vollständig, unterbrechbar und je Rolle getrennt',
   assert.match(roleMigration, /tageswerk_3_3_water_hygiene\.sql, diese Datei, danach tageswerk_3_4_invitation_role\.sql/);
   assert.doesNotMatch(waterMigration, /SECURITY DEFINER/);
   assert.doesNotMatch(waterMigration, /redox/);
+ } finally {
+  clearWaterRound(employee.userId, facility.id);
+  if (previousStorage === undefined) delete globalThis.sessionStorage;
+  else globalThis.sessionStorage = previousStorage;
+ }
+});
+
+test('Messhistorie, Kontrollrunde und Einladung bleiben in den vorbereiteten Regeln begrenzt', () => {
+ const waterMigration = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+ const roleMigration = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
+ const invitationMigration = readFileSync(new URL('../../tageswerk_3_4_invitation_role.sql', import.meta.url), 'utf8');
+ const roundSource = readFileSync(new URL('../../js/operations-controls.js', import.meta.url), 'utf8');
+ const roundFunction = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'));
+ const checkSelect = waterMigration.slice(waterMigration.indexOf('CREATE POLICY water_checks_select'), waterMigration.indexOf('CREATE POLICY water_checks_insert'));
+ assert.match(waterMigration, /GRANT SELECT, INSERT ON TABLE public\.water_checks TO authenticated;/);
+ assert.doesNotMatch(waterMigration, /GRANT (UPDATE|DELETE)[^;]*water_checks/);
+ assert.doesNotMatch(waterMigration, /CREATE POLICY water_checks_update/);
+ assert.match(roundFunction, /SET search_path = ''/);
+ assert.doesNotMatch(roundFunction, /SECURITY DEFINER/);
+ assert.match(roundFunction, /already_stored/);
+ assert.doesNotMatch(roundFunction, /FROM public\.water_checks/);
+ assert.match(checkSelect, /'technician', 'facility_manager', 'company_admin'/);
+ assert.doesNotMatch(checkSelect, /employee/);
+ assert.match(waterMigration, /pg_catalog\.pg_trigger_depth\(\) > 0/);
+ assert.match(roleMigration, /WHEN 'technician' THEN 3/);
+ assert.match(roleMigration, /t\.typtype = 'e'/);
+ assert.match(roleMigration, /ADD VALUE/);
+ assert.match(roleMigration, /entspricht nicht der geprüften Fassung aus Tageswerk 2\.9 und wurde nicht ersetzt/);
+ assert.match(roleMigration, /memberships_role_check/);
+ assert.doesNotMatch(roleMigration, /UPDATE public\.memberships/);
+ assert.doesNotMatch(roleMigration, /ADD COLUMN role/);
+ assert.match(invitationMigration, /ADD COLUMN role text NOT NULL DEFAULT 'employee'/);
+ assert.doesNotMatch(roleMigration, /tageswerk_guard_invitation_role/);
+ assert.match(invitationMigration, /accept_staff_invitation übernimmt die gespeicherte Rolle Techniker nicht/);
+ assert.doesNotMatch(invitationMigration, /^CREATE OR REPLACE FUNCTION public\.accept_staff_invitation/m);
+ assert.match(invitationMigration, /Eine Einladung kann nur Mitarbeiter oder Techniker vorsehen/);
+ assert.match(roundSource, /sessionStorage/);
+ assert.doesNotMatch(roundSource, /localStorage/);
+ const previousStorage = globalThis.sessionStorage;
+ const bucket = new Map();
+ globalThis.sessionStorage = {
+  getItem(key) { return bucket.has(key) ? bucket.get(key) : null; },
+  setItem(key, value) { bucket.set(key, String(value)); },
+  removeItem(key) { bucket.delete(key); }
+ };
+ try {
+  clearWaterRound(employee.userId, facility.id);
+  storeWaterRound(employee.userId, emptyWaterRound(facility.id, 'round-browser'));
+  clearWaterRound(employee.userId, facility.id);
+  const reopened = loadWaterRound(employee.userId, facility.id);
+  assert.notEqual(reopened.roundId, 'round-browser');
+  assert.deepEqual(reopened.entries, {});
  } finally {
   clearWaterRound(employee.userId, facility.id);
   if (previousStorage === undefined) delete globalThis.sessionStorage;
