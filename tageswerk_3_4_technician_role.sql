@@ -22,7 +22,9 @@
 -- manage_facility_membership bleibt auf (text, uuid, text, boolean).
 -- Bekannt sind zwei Fassungen: die Deaktivierung aus Tageswerk 2.8 und die
 -- produktive Fassung, die eine Zuordnung mit DELETE entfernt.
--- Leerzeichen und Zeilenumbrüche gelten dabei als formal.
+-- Leerzeichen und Zeilenumbrüche gelten beim Vergleich als formal.
+-- Der ersetzte Funktionskörper behält die ursprünglichen Zeilenumbrüche.
+-- Eine zusammengezogene Fassung würde Zeilenkommentare über den Rest der Funktion legen.
 -- Betriebsleitungen verwalten Mitarbeiter und Techniker des eigenen Betriebs.
 -- Eine deaktivierte Zuordnung wird mit derselben Rolle wieder freigegeben.
 -- Eine andere Rolle bei der Reaktivierung wird abgelehnt.
@@ -252,13 +254,15 @@ $readings$;
 
 DO $prepare$
 DECLARE
+  source text;
   definition text;
   updated text;
 BEGIN
   IF to_regprocedure('public.tageswerk_prepare_reading()') IS NULL THEN
     RAISE EXCEPTION 'tageswerk_prepare_reading() fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := regexp_replace(pg_get_functiondef('public.tageswerk_prepare_reading()'::regprocedure), '[[:space:]]+', ' ', 'g');
+  source := pg_get_functiondef('public.tageswerk_prepare_reading()'::regprocedure);
+  definition := regexp_replace(source, '[[:space:]]+', ' ', 'g');
   IF position('technician' IN definition) > 0 THEN
     IF position('actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular''' IN definition) = 0
        OR position('actor_role NOT IN (''company_admin'', ''facility_manager'')' IN definition) = 0
@@ -275,11 +279,12 @@ BEGIN
     RAISE EXCEPTION 'tageswerk_prepare_reading entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   END IF;
   updated := replace(
-    definition,
+    source,
     'actor_role = ''employee'' AND NEW.reading_type <> ''regular''',
     'actor_role IN (''employee'', ''technician'') AND NEW.reading_type <> ''regular'''
   );
-  IF updated = definition OR position('actor_role = ''employee''' IN updated) > 0 THEN
+  IF regexp_replace(updated, '[[:space:]]+', ' ', 'g') = definition
+     OR position('actor_role = ''employee''' IN regexp_replace(updated, '[[:space:]]+', ' ', 'g')) > 0 THEN
     RAISE EXCEPTION 'tageswerk_prepare_reading konnte nicht eindeutig erweitert werden und wurde nicht ersetzt.';
   END IF;
   EXECUTE updated;
@@ -289,14 +294,17 @@ $prepare$;
 DO $staff$
 DECLARE
   signature text;
+  source text;
   definition text;
   updated text;
+  revised text;
   recognized boolean;
 BEGIN
   IF to_regprocedure('public.manage_facility_membership(text,uuid,text,boolean)') IS NULL THEN
     RAISE EXCEPTION 'manage_facility_membership(text, uuid, text, boolean) fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := regexp_replace(pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure), '[[:space:]]+', ' ', 'g');
+  source := pg_get_functiondef('public.manage_facility_membership(text,uuid,text,boolean)'::regprocedure);
+  definition := regexp_replace(source, '[[:space:]]+', ' ', 'g');
   IF position('private.can_manage_facility(' IN definition) > 0 THEN
     IF position('Keine Verwaltungsberechtigung fuer diesen Betrieb' IN definition) = 0
        OR position('Ungueltige Rolle' IN definition) = 0
@@ -311,15 +319,16 @@ BEGIN
       NULL;
     ELSIF position('p_role NOT IN (''employee'',''facility_manager'')' IN definition) > 0
        OR position('p_role NOT IN (''employee'', ''facility_manager'')' IN definition) > 0 THEN
-      updated := replace(definition, 'p_role NOT IN (''employee'',''facility_manager'')', 'p_role NOT IN (''employee'',''technician'',''facility_manager'')');
+      updated := replace(source, 'p_role NOT IN (''employee'',''facility_manager'')', 'p_role NOT IN (''employee'',''technician'',''facility_manager'')');
       updated := replace(updated, 'p_role NOT IN (''employee'', ''facility_manager'')', 'p_role NOT IN (''employee'', ''technician'', ''facility_manager'')');
       updated := replace(updated, 'm.role<>''employee''', 'm.role NOT IN (''employee'',''technician'')');
       updated := replace(updated, 'm.role <> ''employee''', 'm.role NOT IN (''employee'', ''technician'')');
       updated := replace(updated, 'Betriebsleitung darf nur Mitarbeiterzuordnungen bearbeiten', 'Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten');
-      IF updated = definition
-         OR position('private.can_manage_facility(' IN updated) = 0
-         OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN updated) = 0
-         OR position('technician' IN updated) = 0 THEN
+      revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+      IF revised = definition
+         OR position('private.can_manage_facility(' IN revised) = 0
+         OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN revised) = 0
+         OR position('technician' IN revised) = 0 THEN
         RAISE EXCEPTION 'manage_facility_membership erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
       EXECUTE updated;
@@ -463,9 +472,9 @@ BEGIN
   WHERE namespace.nspname = 'public'
     AND procedure.proname = 'list_facility_employees';
   IF signature IS NOT NULL THEN
-    definition := pg_get_functiondef(signature::regprocedure);
-    IF position('technician' IN definition) = 0 AND position('role = ''employee''' IN definition) > 0 THEN
-      EXECUTE replace(definition, 'role = ''employee''', 'role IN (''employee'', ''technician'')');
+    source := pg_get_functiondef(signature::regprocedure);
+    IF position('technician' IN source) = 0 AND position('role = ''employee''' IN source) > 0 THEN
+      EXECUTE replace(source, 'role = ''employee''', 'role IN (''employee'', ''technician'')');
     END IF;
   END IF;
 
@@ -476,7 +485,8 @@ BEGIN
   WHERE namespace.nspname = 'public'
     AND procedure.proname = 'employee_update_assigned_defect';
   IF signature IS NOT NULL THEN
-    definition := regexp_replace(pg_get_functiondef(signature::regprocedure), '[[:space:]]+', ' ', 'g');
+    source := pg_get_functiondef(signature::regprocedure);
+    definition := regexp_replace(source, '[[:space:]]+', ' ', 'g');
     IF position('private.can_access_facility(d.facility_id)' IN definition) > 0 THEN
       IF position('SECURITY DEFINER' IN definition) = 0
          OR position('Anmeldung erforderlich' IN definition) = 0
@@ -575,17 +585,19 @@ BEGIN
         $function$
       $replace_defect$;
     ELSE
-      updated := replace(definition, '<> ''employee''', 'NOT IN (''employee'', ''technician'')');
+      updated := replace(source, '<> ''employee''', 'NOT IN (''employee'', ''technician'')');
       updated := replace(updated, '= ''employee''', 'IN (''employee'', ''technician'')');
-      IF position('m.is_active = true' IN updated) = 0 AND position('m.is_active IS TRUE' IN updated) = 0 THEN
+      revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+      IF position('m.is_active = true' IN revised) = 0 AND position('m.is_active IS TRUE' IN revised) = 0 THEN
         updated := replace(updated, 'm.user_id=auth.uid() AND m.organization_id', 'm.user_id=auth.uid() AND m.is_active = true AND m.organization_id');
         updated := replace(updated, 'm.user_id = auth.uid() AND m.organization_id', 'm.user_id = auth.uid() AND m.is_active = true AND m.organization_id');
+        revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
       END IF;
-      IF updated = definition
-         OR position('assigned_to IS DISTINCT FROM auth.uid()' IN updated) = 0
-         OR position('Keine Betriebsberechtigung' IN updated) = 0
-         OR (position('m.facility_id=d.facility_id' IN updated) = 0 AND position('m.facility_id = d.facility_id' IN updated) = 0)
-         OR (position('m.is_active = true' IN updated) = 0 AND position('m.is_active IS TRUE' IN updated) = 0)
+      IF revised = definition
+         OR position('assigned_to IS DISTINCT FROM auth.uid()' IN revised) = 0
+         OR position('Keine Betriebsberechtigung' IN revised) = 0
+         OR (position('m.facility_id=d.facility_id' IN revised) = 0 AND position('m.facility_id = d.facility_id' IN revised) = 0)
+         OR (position('m.is_active = true' IN revised) = 0 AND position('m.is_active IS TRUE' IN revised) = 0)
       THEN
         RAISE EXCEPTION 'employee_update_assigned_defect erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;

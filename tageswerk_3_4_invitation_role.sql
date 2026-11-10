@@ -237,14 +237,17 @@ $accept$;
 
 DO $claim$
 DECLARE
+  source text;
   definition text;
   updated text;
+  revised text;
 BEGIN
   IF to_regprocedure('public.claim_staff_invitations()') IS NULL THEN
     RAISE NOTICE 'claim_staff_invitations() ist nicht vorhanden und wird nicht angelegt.';
     RETURN;
   END IF;
-  definition := regexp_replace(pg_get_functiondef('public.claim_staff_invitations()'::regprocedure), '[[:space:]]+', ' ', 'g');
+  source := pg_get_functiondef('public.claim_staff_invitations()'::regprocedure);
+  definition := regexp_replace(source, '[[:space:]]+', ' ', 'g');
   IF position('v_user_id := auth.uid()' IN definition) > 0
      AND position('IF v_user_id IS NULL THEN RETURN 0' IN definition) > 0
      AND (
@@ -260,13 +263,14 @@ BEGIN
     END IF;
     IF position(' AND role=''employee''' IN definition) > 0
        OR position(' AND role = ''employee''' IN definition) > 0 THEN
-      updated := replace(definition, ' AND role=''employee''', ' AND coalesce(role,''employee'') IN (''employee'',''technician'')');
+      updated := replace(source, ' AND role=''employee''', ' AND coalesce(role,''employee'') IN (''employee'',''technician'')');
       updated := replace(updated, ' AND role = ''employee''', ' AND coalesce(role, ''employee'') IN (''employee'', ''technician'')');
       updated := replace(updated, ', ''employee''', ', coalesce(r.role, ''employee'')');
       updated := replace(updated, ',''employee''', ',coalesce(r.role,''employee'')');
-      IF position('technician' IN updated) = 0
-         OR position('v_user_id := auth.uid()' IN updated) = 0
-         OR position('UPDATE public.memberships' IN updated) > 0 THEN
+      revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+      IF position('technician' IN revised) = 0
+         OR position('v_user_id := auth.uid()' IN revised) = 0
+         OR position('UPDATE public.memberships' IN revised) > 0 THEN
         RAISE EXCEPTION 'claim_staff_invitations erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
       EXECUTE updated;
@@ -287,14 +291,15 @@ BEGIN
        AND position('role = ''employee''' IN definition) = 0 THEN
       RAISE EXCEPTION 'claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
     END IF;
-    updated := replace(definition, 'role=''employee''', 'coalesce(role,''employee'') IN (''employee'',''technician'')');
+    updated := replace(source, 'role=''employee''', 'coalesce(role,''employee'') IN (''employee'',''technician'')');
     updated := replace(updated, 'role = ''employee''', 'coalesce(role, ''employee'') IN (''employee'', ''technician'')');
     updated := replace(updated, 'r.facility_id,''employee''', 'r.facility_id,coalesce(r.role,''employee'')');
     updated := replace(updated, 'r.facility_id, ''employee''', 'r.facility_id, coalesce(r.role, ''employee'')');
-    IF updated = definition
-       OR position('technician' IN updated) = 0
-       OR position('private.can_' IN updated) = 0
-       OR position('UPDATE public.memberships' IN updated) > 0 THEN
+    revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+    IF revised = definition
+       OR position('technician' IN revised) = 0
+       OR position('private.can_' IN revised) = 0
+       OR position('UPDATE public.memberships' IN revised) > 0 THEN
       RAISE EXCEPTION 'claim_staff_invitations erkennt Techniker nicht an einer erwarteten Stelle.';
     END IF;
     EXECUTE updated;

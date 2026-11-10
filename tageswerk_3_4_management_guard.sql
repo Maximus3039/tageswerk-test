@@ -341,13 +341,16 @@ $revoke$;
 
 DO $rename$
 DECLARE
+  source text;
   definition text;
   updated text;
+  revised text;
 BEGIN
   IF to_regprocedure('public.update_employee_name(uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'update_employee_name(uuid, text) fehlt und wurde nicht neu erfunden.';
   END IF;
-  definition := regexp_replace(pg_get_functiondef('public.update_employee_name(uuid,text)'::regprocedure), '[[:space:]]+', ' ', 'g');
+  source := pg_get_functiondef('public.update_employee_name(uuid,text)'::regprocedure);
+  definition := regexp_replace(source, '[[:space:]]+', ' ', 'g');
   IF position('private.can_manage_facility(' IN definition) > 0
      OR position('private.can_access_facility(' IN definition) > 0 THEN
     IF position('SECURITY DEFINER' IN definition) = 0
@@ -370,10 +373,11 @@ BEGIN
     END IF;
     IF position('employee.role = ''employee''' IN definition) > 0
        OR position('employee.role=''employee''' IN definition) > 0 THEN
-      updated := replace(definition, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
+      updated := replace(source, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
       updated := replace(updated, 'employee.role=''employee''', 'employee.role IN (''employee'',''technician'')');
-      IF position('technician' IN updated) = 0
-         OR position('private.can_' IN updated) = 0 THEN
+      revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+      IF position('technician' IN revised) = 0
+         OR position('private.can_' IN revised) = 0 THEN
         RAISE EXCEPTION 'update_employee_name erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
       EXECUTE updated;
@@ -409,12 +413,13 @@ BEGIN
      OR position('manager.is_active IS TRUE' IN definition) > 0 THEN
     IF position('employee.role = ''employee''' IN definition) > 0
        OR position('employee.role=''employee''' IN definition) > 0 THEN
-      updated := replace(definition, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
+      updated := replace(source, 'employee.role = ''employee''', 'employee.role IN (''employee'', ''technician'')');
       updated := replace(updated, 'employee.role=''employee''', 'employee.role IN (''employee'',''technician'')');
-      IF position('technician' IN updated) = 0
+      revised := regexp_replace(updated, '[[:space:]]+', ' ', 'g');
+      IF position('technician' IN revised) = 0
          OR (
-           position('manager.is_active = true' IN updated) = 0
-           AND position('manager.is_active IS TRUE' IN updated) = 0
+           position('manager.is_active = true' IN revised) = 0
+           AND position('manager.is_active IS TRUE' IN revised) = 0
          ) THEN
         RAISE EXCEPTION 'update_employee_name erkennt Techniker nicht an einer erwarteten Stelle.';
       END IF;
