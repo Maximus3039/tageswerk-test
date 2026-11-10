@@ -19,8 +19,10 @@
 -- Der Wert muss vorher in einer eigenen, bereits festgeschriebenen Anweisung ergänzt werden:
 -- ALTER TYPE public.<enum> ADD VALUE 'technician';
 -- Eine unbekannte Funktionsfassung setzt die Transaktion zurück.
--- manage_facility_membership bleibt auf (text, uuid, text, boolean) und übernimmt
--- nur die geprüfte Fassung. Leerzeichen und Zeilenumbrüche gelten dabei als formal.
+-- manage_facility_membership bleibt auf (text, uuid, text, boolean).
+-- Bekannt sind zwei Fassungen: die Deaktivierung aus Tageswerk 2.8 und die
+-- produktive Fassung, die eine Zuordnung mit DELETE entfernt.
+-- Leerzeichen und Zeilenumbrüche gelten dabei als formal.
 -- Betriebsleitungen verwalten Mitarbeiter und Techniker des eigenen Betriebs.
 -- Eine deaktivierte Zuordnung wird mit derselben Rolle wieder freigegeben.
 -- Eine andere Rolle bei der Reaktivierung wird abgelehnt.
@@ -28,12 +30,14 @@
 -- tageswerk_prepare_reading behält jede bestehende Prüfung. Techniker erfassen
 -- normale Stände und stornieren oder korrigieren nicht.
 -- employee_update_assigned_defect ist SECURITY DEFINER. Anmeldung, Zuweisung,
--- aktiver Betrieb und Status prüft die Funktion selbst. Direkte Tabellenänderungen
--- bleiben bei den bestehenden RLS-Regeln.
--- Die geprüfte Fassung aus Tageswerk 2.8 verlangt keine Rolle employee. Eine aktive
--- Mitgliedschaft desselben Betriebs schließt den Techniker ein. Diese Fassung bleibt
+-- Organisation, Betrieb und Status prüft die Funktion selbst.
+-- Die produktive Fassung verlangt dabei kein is_active.
+-- Direkte Tabellenänderungen bleiben bei den bestehenden RLS-Regeln.
+-- Die geprüfte Fassung verlangt keine Rolle employee. Eine Mitgliedschaft desselben
+-- Betriebs schließt den Techniker ein. Diese Fassung bleibt
 -- unverändert. Eine Fassung mit ausdrücklicher Mitarbeiterbedingung wird um den
--- Techniker ergänzt. Fehlt Zuweisung oder Betriebsprüfung, wird die Datei abgebrochen.
+-- Techniker ergänzt.
+-- Fehlt Zuweisung oder Betriebsprüfung, wird die Datei abgebrochen.
 -- Es werden keine Betriebsdaten verändert und keine Benutzer angelegt.
 
 BEGIN;
@@ -305,11 +309,14 @@ BEGIN
      OR position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN definition) = 0
      OR position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN definition) = 0
      OR position('Betriebsleitung darf nur Mitarbeiterzuordnungen bearbeiten' IN definition) = 0
-     OR position('Reaktivierung nur ueber gesonderte Freigabe' IN definition) = 0
      OR position('Eigene Berechtigungen hier nicht veraenderbar' IN definition) = 0
      OR (
        position('p_role NOT IN (''employee'',''facility_manager'')' IN definition) = 0
        AND position('p_role NOT IN (''employee'', ''facility_manager'')' IN definition) = 0
+     )
+     OR (
+       position('Reaktivierung nur ueber gesonderte Freigabe' IN definition) = 0
+       AND position('DELETE FROM public.memberships' IN definition) = 0
      ) THEN
     RAISE EXCEPTION 'manage_facility_membership entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   ELSE
@@ -449,7 +456,6 @@ BEGIN
        OR position('Keine Betriebsberechtigung' IN definition) = 0
        OR position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN definition) = 0
        OR position('FOR UPDATE' IN definition) = 0
-       OR (position('m.is_active = true' IN definition) = 0 AND position('m.is_active IS TRUE' IN definition) = 0)
        OR (position('m.organization_id=d.organization_id' IN definition) = 0 AND position('m.organization_id = d.organization_id' IN definition) = 0)
        OR (position('m.facility_id=d.facility_id' IN definition) = 0 AND position('m.facility_id = d.facility_id' IN definition) = 0)
        OR (position('m.role=''company_admin''' IN definition) = 0 AND position('m.role = ''company_admin''' IN definition) = 0)

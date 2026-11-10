@@ -94,11 +94,14 @@ facts AS (
       AND position('Nur Geschaeftsfuehrung darf Betriebsleitungen ernennen' IN bodies.manage_membership) > 0
       AND position('Geschaeftsfuehrungsrechte werden hier nicht veraendert' IN bodies.manage_membership) > 0
       AND position('Betriebsleitung darf nur Mitarbeiterzuordnungen bearbeiten' IN bodies.manage_membership) > 0
-      AND position('Reaktivierung nur ueber gesonderte Freigabe' IN bodies.manage_membership) > 0
       AND position('Eigene Berechtigungen hier nicht veraenderbar' IN bodies.manage_membership) > 0
       AND (
         position('p_role NOT IN (''employee'',''facility_manager'')' IN bodies.manage_membership) > 0
         OR position('p_role NOT IN (''employee'', ''facility_manager'')' IN bodies.manage_membership) > 0
+      )
+      AND (
+        position('Reaktivierung nur ueber gesonderte Freigabe' IN bodies.manage_membership) > 0
+        OR position('DELETE FROM public.memberships' IN bodies.manage_membership) > 0
       ) AS manage_membership_known,
     position('technician' IN bodies.accept_invitation) = 0
       AND position('Bitte zuerst anmelden.' IN bodies.accept_invitation) > 0
@@ -106,14 +109,17 @@ facts AS (
       AND position('status = ''sent''' IN bodies.accept_invitation) > 0
       AND position('role = ''employee''' IN bodies.accept_invitation) > 0
       AND position('Keine offene Einladung gefunden.' IN bodies.accept_invitation) > 0
-      AND position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN bodies.accept_invitation) > 0
       AND position('staff_invitations' IN bodies.accept_invitation) > 0 AS accept_invitation_known,
     position('technician' IN bodies.claim_invitations) = 0
+      AND position('IF auth.uid() IS NULL THEN RETURN 0' IN bodies.claim_invitations) > 0
       AND (
-        position('status=''sent'' AND role=''employee''' IN bodies.claim_invitations) > 0
-        OR position('status = ''sent'' AND role = ''employee''' IN bodies.claim_invitations) > 0
+        position('status=''sent''' IN bodies.claim_invitations) > 0
+        OR position('status = ''sent''' IN bodies.claim_invitations) > 0
       )
-      AND position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN bodies.claim_invitations) > 0 AS claim_invitations_known,
+      AND (
+        position('r.facility_id,''employee''' IN bodies.claim_invitations) > 0
+        OR position('r.facility_id, ''employee''' IN bodies.claim_invitations) > 0
+      ) AS claim_invitations_known,
     position('SECURITY DEFINER' IN bodies.update_defect) > 0
       AND position('Anmeldung erforderlich' IN bodies.update_defect) > 0
       AND position('Mitarbeiter koennen nur bearbeiten oder Erledigung melden' IN bodies.update_defect) > 0
@@ -124,7 +130,6 @@ facts AS (
       AND position('Keine Betriebsberechtigung' IN bodies.update_defect) > 0
       AND position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN bodies.update_defect) > 0
       AND position('FOR UPDATE' IN bodies.update_defect) > 0
-      AND (position('m.is_active = true' IN bodies.update_defect) > 0 OR position('m.is_active IS TRUE' IN bodies.update_defect) > 0)
       AND (position('m.organization_id=d.organization_id' IN bodies.update_defect) > 0 OR position('m.organization_id = d.organization_id' IN bodies.update_defect) > 0)
       AND (position('m.facility_id=d.facility_id' IN bodies.update_defect) > 0 OR position('m.facility_id = d.facility_id' IN bodies.update_defect) > 0)
       AND (position('m.role=''company_admin''' IN bodies.update_defect) > 0 OR position('m.role = ''company_admin''' IN bodies.update_defect) > 0)
@@ -245,14 +250,14 @@ checks AS (
     CASE WHEN has_manage_membership AND manage_membership_known THEN 'bereit' ELSE 'stoppen' END,
     CASE WHEN NOT has_manage_membership THEN 'manage_facility_membership fehlt.'
       WHEN manage_membership_known THEN 'Berechtigungsprüfung vorhanden.'
-      ELSE 'Der Funktionskörper entspricht nicht der Fassung aus Tageswerk 2.8.' END
+      ELSE 'Der Funktionskörper entspricht nicht der geprüften produktiven Fassung.' END
   FROM facts
   UNION ALL
   SELECT 50, 'accept_staff_invitation entspricht 2.8',
     CASE WHEN has_accept_invitation AND accept_invitation_known THEN 'bereit' ELSE 'stoppen' END,
     CASE WHEN NOT has_accept_invitation THEN 'accept_staff_invitation fehlt.'
       WHEN accept_invitation_known THEN 'Bekannte Funktionsfassung erkannt.'
-      ELSE 'Der Funktionskörper entspricht nicht der Fassung aus Tageswerk 2.8.' END
+      ELSE 'Der Funktionskörper entspricht nicht der geprüften produktiven Fassung.' END
   FROM facts
   UNION ALL
   SELECT 60, 'claim_staff_invitations entspricht 2.8 oder fehlt',

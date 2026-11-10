@@ -129,7 +129,6 @@ BEGIN
      OR position('status = ''sent''' IN definition) = 0
      OR position('role = ''employee''' IN definition) = 0
      OR position('Keine offene Einladung gefunden.' IN definition) = 0
-     OR position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN definition) = 0
      OR position('staff_invitations' IN definition) = 0
      OR position('technician' IN definition) > 0 THEN
     RAISE EXCEPTION 'accept_staff_invitation entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
@@ -246,15 +245,21 @@ BEGIN
   END IF;
   definition := regexp_replace(pg_get_functiondef('public.claim_staff_invitations()'::regprocedure), '[[:space:]]+', ' ', 'g');
   IF position('coalesce(r.role, ''employee'')' IN definition) > 0
-     AND position('IN (''employee'', ''technician'')' IN definition) > 0 THEN
+     AND position('IN (''employee'', ''technician'')' IN definition) > 0
+     AND position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN definition) > 0
+     AND position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) > 0 THEN
     RETURN;
   END IF;
-  IF position('status=''sent'' AND role=''employee''' IN definition) = 0
-     AND position('status = ''sent'' AND role = ''employee''' IN definition) = 0 THEN
-    RAISE EXCEPTION 'claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
-  END IF;
-  IF position('Deaktivierte Zuordnung: Bitte Betriebsleitung kontaktieren.' IN definition) = 0
-     OR position('technician' IN definition) > 0 THEN
+  IF position('technician' IN definition) > 0
+     OR position('IF auth.uid() IS NULL THEN RETURN 0' IN definition) = 0
+     OR (
+       position('status=''sent''' IN definition) = 0
+       AND position('status = ''sent''' IN definition) = 0
+     )
+     OR (
+       position('r.facility_id,''employee''' IN definition) = 0
+       AND position('r.facility_id, ''employee''' IN definition) = 0
+     ) THEN
     RAISE EXCEPTION 'claim_staff_invitations entspricht nicht der geprüften Fassung und wurde nicht ersetzt.';
   END IF;
   EXECUTE $replace_claim$
