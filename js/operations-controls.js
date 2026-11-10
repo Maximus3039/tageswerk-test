@@ -53,11 +53,24 @@ function quantity(value, allowZero) {
 }
 
 function celsius(value) {
- const raw = String(value ?? '').trim().replace(',', '.');
+ const raw = String(value ?? '').trim().replace(/[−–—﹣－]/g, '-').replace(',', '.');
  if (!/^-?\d+(\.\d)?$/.test(raw)) return null;
  const amount = Number(raw);
  if (amount < -50 || amount > 200) return null;
  return raw;
+}
+
+export function configureTemperatureInput(node, value) {
+ node.type = 'text';
+ node.inputMode = 'text';
+ node.lang = 'de';
+ node.autocomplete = 'off';
+ node.spellcheck = false;
+ node.min = '-50';
+ node.max = '200';
+ node.step = '0.1';
+ if (value != null && value !== '') node.value = String(value);
+ return node;
 }
 
 function facilityOf(record) {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
  acknowledgeTemperatureAlert,
  createMaterial,
+ configureTemperatureInput,
  createTemperaturePoint,
  facilityNotices,
  materialBelowMinimum,
@@ -77,6 +78,47 @@ const manager = {userId: 'manager-1', name: 'Lea', memberships: [membership('fac
 const admin = {userId: 'admin-1', name: 'Kim', memberships: [membership('company_admin')]};
 const inactive = {userId: 'employee-2', name: 'Inaktiv', memberships: [membership('employee', facility, false)]};
 const otherEmployee = {userId: 'employee-9', name: 'Fremd', memberships: [membership('employee', second)]};
+
+test('Negative Temperaturgrenzen und Messwerte bleiben zulässig', () => {
+ const field = configureTemperatureInput({spellcheck: true, autocomplete: 'on'});
+ assert.equal(field.type, 'text');
+ assert.equal(field.inputMode, 'text');
+ assert.equal(field.lang, 'de');
+ assert.equal(field.min, '-50');
+ assert.equal(field.max, '200');
+ assert.equal(field.step, '0.1');
+ assert.equal(field.spellcheck, false);
+ const freezer = createTemperaturePoint(emptyOperations(), {facility, name: 'Tiefkühlraum', location: 'Lager', minimum: '−22', maximum: '-18'}, manager, now);
+ assert.equal(freezer.ok, true);
+ assert.equal(freezer.point.minC, '-22');
+ assert.equal(freezer.point.maxC, '-18');
+ const decimal = createTemperaturePoint(emptyOperations(), {facility, name: 'Kühltruhe', location: 'Küche', minimum: '-18,5', maximum: '-5'}, manager, now);
+ assert.equal(decimal.ok, true);
+ assert.equal(decimal.point.minC, '-18.5');
+ assert.equal(decimal.point.maxC, '-5');
+ assert.match(createTemperaturePoint(emptyOperations(), {facility, name: 'Vertauscht', location: 'Lager', minimum: '-5', maximum: '-18,5'}, manager, now).error, /Mindestwert/);
+ assert.equal(createTemperaturePoint(emptyOperations(), {facility, name: 'Zu tief', location: 'Lager', minimum: '-50,1', maximum: '-18'}, manager, now).ok, false);
+ const inside = recordTemperature(freezer.bundle, freezer.point.id, {value: '-18,5'}, employee, now);
+ assert.equal(inside.ok, true);
+ assert.equal(inside.reading.valueC, '-18.5');
+ assert.equal(inside.alert, null);
+ assert.equal(recordTemperature(freezer.bundle, freezer.point.id, {value: '-22'}, employee, now).alert, null);
+ assert.equal(recordTemperature(freezer.bundle, freezer.point.id, {value: '-18'}, employee, now).alert, null);
+ const colder = recordTemperature(freezer.bundle, freezer.point.id, {value: '-22.1'}, employee, now);
+ assert.equal(colder.alert.status, 'open');
+ assert.equal(colder.alert.valueC, '-22.1');
+ assert.equal(colder.alert.minC, '-22');
+ assert.equal(colder.alert.maxC, '-18');
+ const warmer = recordTemperature(freezer.bundle, freezer.point.id, {value: '−17,9'}, employee, now);
+ assert.equal(warmer.alert.status, 'open');
+ assert.equal(warmer.alert.valueC, '-17.9');
+ const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const temperatureUi = ui.slice(ui.indexOf('function renderTemperature'), ui.indexOf('function choice'));
+ assert.match(temperatureUi, /configureTemperatureInput\(input\(\)\)/);
+ assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.minC\)\)/);
+ assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.maxC\)\)/);
+ assert.doesNotMatch(temperatureUi, /inputMode = 'decimal'/);
+});
 
 test('Die Sitzungsprüfung für Betriebsleitung und Mitarbeiter aus Tageswerk 3.0 bleibt offen', () => {
  assert.equal(roleSessionConfirmation.facilityManager, 'open');
