@@ -40,6 +40,7 @@ import {
  updateWaterPool,
 } from '../../js/operations-controls.js';
 import {emptyOperations, materialStock, operationMetrics, waterControlState, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
+import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
  saveMaterial,
@@ -933,7 +934,7 @@ test('Kontrollrunden bleiben vollständig, unterbrechbar und je Rolle getrennt',
   assert.match(waterMigration, /Gespeicherte Hygienemessungen bleiben unverändert/);
   assert.match(waterMigration, /1\. tageswerk_3_1_temperature\.sql/);
   assert.match(roleMigration, /tageswerk_3_3_water_hygiene\.sql, diese Datei, danach tageswerk_3_4_invitation_role\.sql/);
-  assert.doesNotMatch(waterMigration, /SECURITY DEFINER/);
+  assert.doesNotMatch(waterMigration, /set_config\('tageswerk\.water_round_close/);
   assert.doesNotMatch(waterMigration, /redox/);
  } finally {
   clearWaterRound(employee.userId, facility.id);
@@ -947,7 +948,7 @@ test('Messhistorie, Kontrollrunde und Einladung bleiben in den vorbereiteten Reg
  const roleMigration = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
  const invitationMigration = readFileSync(new URL('../../tageswerk_3_4_invitation_role.sql', import.meta.url), 'utf8');
  const roundSource = readFileSync(new URL('../../js/operations-controls.js', import.meta.url), 'utf8');
- const roundFunction = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'));
+ const roundFunction = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_discard_water_round_draft'));
  const checkSelect = waterMigration.slice(waterMigration.indexOf('CREATE POLICY water_checks_select'), waterMigration.indexOf('CREATE POLICY water_checks_insert'));
  assert.match(waterMigration, /GRANT SELECT, INSERT ON TABLE public\.water_checks TO authenticated;/);
  assert.doesNotMatch(waterMigration, /GRANT (UPDATE|DELETE)[^;]*water_checks/);
@@ -969,24 +970,48 @@ test('Messhistorie, Kontrollrunde und Einladung bleiben in den vorbereiteten Reg
  assert.match(saveFunction, /tageswerk_facility_organization/);
  assert.match(saveFunction, /'conflict'/);
  assert.doesNotMatch(saveFunction, /water_round_close/);
+ assert.doesNotMatch(saveFunction, /water_checks/);
  const updatePolicy = waterMigration.slice(waterMigration.indexOf('CREATE POLICY water_round_drafts_update'), waterMigration.indexOf('REVOKE ALL ON TABLE public.water_parameter_definitions'));
- assert.match(updatePolicy, /pg_catalog\.current_setting\('tageswerk\.water_round_close', true\) = round_id::text/);
- assert.match(updatePolicy, /pg_catalog\.current_setting\('tageswerk\.water_round_close_as', true\) = status/);
+ assert.match(updatePolicy, /tageswerk_water_round_checks_in_transaction\(round_id, facility_id\)/);
+ assert.match(updatePolicy, /tageswerk_water_round_discard_in_transaction\(round_id\)/);
  assert.match(updatePolicy, /status = 'open'/);
+ assert.doesNotMatch(updatePolicy, /current_setting/);
  assert.doesNotMatch(updatePolicy, /status IN \('open', 'completed'\)/);
  const guardFunction = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_guard_water_round_draft'), waterMigration.indexOf('CREATE TRIGGER water_round_drafts_bind_facility'));
  assert.match(guardFunction, /Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen/);
- assert.match(guardFunction, /Ein abgeschlossener oder verworfener Entwurf kann nicht mehr bearbeitet werden/);
+ assert.match(guardFunction, /tageswerk_water_round_checks_in_transaction/);
+ assert.match(guardFunction, /tageswerk_water_round_discard_in_transaction/);
+ assert.doesNotMatch(guardFunction, /current_setting/);
  const successPath = roundFunction.slice(0, roundFunction.indexOf('WHEN unique_violation'));
- assert.ok(successPath.indexOf("set_config('tageswerk.water_round_close_as', 'completed'") >= 0);
- assert.ok(successPath.indexOf("set_config('tageswerk.water_round_close_as', 'completed'") < successPath.indexOf("status = 'completed'"));
+ const insertedAt = successPath.indexOf('INSERT INTO public.water_checks');
+ const closedAt = successPath.lastIndexOf('UPDATE public.water_round_drafts');
+ assert.ok(insertedAt >= 0 && closedAt > insertedAt);
+ assert.doesNotMatch(successPath, /set_config/);
+ const proof = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_checks_in_transaction'), waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_discard_in_transaction'));
+ assert.match(proof, /RETURNS boolean/);
+ assert.match(proof, /SECURITY DEFINER/);
+ assert.match(proof, /SET search_path = ''/);
+ assert.match(proof, /check_row\.recorded_by = auth\.uid\(\)/);
+ assert.match(proof, /check_row\.xmin = pg_current_xact_id\(\)::xid/);
+ assert.doesNotMatch(proof, /jsonb_build_object/);
  const discardFunction = waterMigration.slice(waterMigration.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_discard_water_round_draft'), waterMigration.indexOf('REVOKE ALL ON FUNCTION public.tageswerk_water_schedule_valid'));
+ assert.match(discardFunction, /SECURITY DEFINER/);
  assert.match(discardFunction, /SET search_path = ''/);
- assert.doesNotMatch(discardFunction, /SECURITY DEFINER/);
+ assert.match(discardFunction, /INSERT INTO public\.water_round_discards/);
  assert.doesNotMatch(discardFunction, /water_checks/);
+ assert.doesNotMatch(discardFunction, /set_config/);
  assert.match(discardFunction, /user_id = auth\.uid\(\)/);
  assert.match(discardFunction, /'discarded'/);
- assert.match(discardFunction, /water_round_close_as', 'discarded'/);
+ assert.match(waterMigration, /REVOKE ALL ON TABLE public\.water_round_discards FROM PUBLIC, anon, authenticated;/);
+ assert.doesNotMatch(waterMigration, /GRANT [^;]*water_round_discards/);
+ assert.doesNotMatch(waterMigration, /set_config\('tageswerk\.water_round_close/);
+ let withoutBoundedDefiners = waterMigration;
+ for (const name of ['tageswerk_water_round_checks_in_transaction', 'tageswerk_water_round_discard_in_transaction', 'tageswerk_discard_water_round_draft']) {
+  const start = withoutBoundedDefiners.indexOf(`CREATE OR REPLACE FUNCTION public.${name}`);
+  const end = withoutBoundedDefiners.indexOf('$tageswerk$;', start);
+  withoutBoundedDefiners = withoutBoundedDefiners.slice(0, start) + withoutBoundedDefiners.slice(end + '$tageswerk$;'.length);
+ }
+ assert.doesNotMatch(withoutBoundedDefiners, /SECURITY DEFINER/);
  assert.match(checkSelect, /'technician', 'facility_manager', 'company_admin'/);
  assert.doesNotMatch(checkSelect, /employee/);
  assert.match(waterMigration, /pg_catalog\.pg_trigger_depth\(\) > 0/);
@@ -996,6 +1021,7 @@ test('Messhistorie, Kontrollrunde und Einladung bleiben in den vorbereiteten Reg
  assert.match(roleMigration, /entspricht nicht der geprüften Fassung aus Tageswerk 2\.9 und wurde nicht ersetzt/);
  assert.match(roleMigration, /memberships_role_check/);
  assert.doesNotMatch(roleMigration, /UPDATE public\.memberships/);
+ assert.doesNotMatch(roleMigration, /DROP (TABLE|POLICY)[^;]*water_round/);
  assert.doesNotMatch(roleMigration, /ADD COLUMN role/);
  assert.match(invitationMigration, /ADD COLUMN role text NOT NULL DEFAULT 'employee'/);
  assert.doesNotMatch(roleMigration, /tageswerk_guard_invitation_role/);
@@ -1256,4 +1282,29 @@ test('Direkte Statusänderungen bleiben verboten und Verwerfen schreibt keine Me
  const loaded = await loadOperations(db, employee, context);
  assert.equal(ownOpenWaterDraft(loaded.bundle, facility.id, employee.userId), null);
  assert.equal(loaded.bundle.waterRoundDrafts.length, 0);
+});
+
+test('Dieselbe Person sieht Wasserwerte nur im Betrieb mit Historienrolle', () => {
+ const mixed = [membership('technician'), membership('employee', second)];
+ const bundle = {
+  ...emptyOperations(),
+  waterChecks: [
+   {id: 'home', facilityId: facility.id, organizationId: facility.organization_id, poolId: 'pool-a', recordedBy: employee.userId, readings: [{parameterCode: 'ph', value: '7.20'}]},
+   {id: 'other-site', facilityId: second.id, organizationId: second.organization_id, poolId: 'pool-b', recordedBy: employee.userId, readings: [{parameterCode: 'ph', value: '8.20'}]}
+  ]
+ };
+ const view = waterRowsForMember(bundle, mixed, now, 'mixed-1');
+ assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, mixed), true);
+ assert.equal(waterHistoryRole({id: second.id, organization_id: second.organization_id}, mixed), false);
+ assert.deepEqual(view.checks.map(item => item.id), ['home']);
+ assert.equal(view.checks.some(item => item.readings.some(reading => reading.value === '8.20')), false);
+ const employeeOnly = waterRowsForMember(bundle, [membership('employee'), membership('employee', second)], now, employee.userId);
+ assert.equal(employeeOnly.checks.length, 0);
+ const managerBoth = [membership('facility_manager'), membership('facility_manager', second)];
+ const managed = waterRowsForMember(bundle, managerBoth, now, manager.userId);
+ assert.equal(managed.checks.length, 2);
+ const adminView = waterRowsForMember(bundle, [membership('company_admin')], now, admin.userId);
+ assert.equal(adminView.checks.length, 2);
+ const foreignAdmin = waterRowsForMember(bundle, [membership('company_admin', foreign)], now, 'foreign-admin');
+ assert.equal(foreignAdmin.checks.length, 0);
 });

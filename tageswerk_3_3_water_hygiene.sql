@@ -23,9 +23,11 @@
 -- verworfene Entwürfe sowie gespeicherte Messwerte bleiben für sie unsichtbar.
 -- Techniker, Betriebsleitung und Geschäftsführung lesen die Messungen ihres
 -- berechtigten Betriebs und führen eigene Entwürfe.
--- Abschluss und Verwerfen laufen über Funktionen mit SECURITY INVOKER. Sie setzen
--- ein transaktionslokales Kennzeichen. Eine direkte Statusänderung kann es nicht setzen.
--- Die Richtlinien prüfen dabei weiter Benutzer und Betrieb.
+-- Abschluss bleibt SECURITY INVOKER. Er gilt nur, wenn dieselbe Transaktion die
+-- Messungen geschrieben hat. Das prüft eine eng begrenzte Funktion am Transaktionskennzeichen
+-- der Messzeile, nicht an einem setzbaren Konfigurationswert. Verwerfen schreibt eine
+-- interne Markierung, auf die angemeldete Benutzer keinen Zugriff haben, und ändert
+-- danach nur den eigenen offenen Entwurf. Die Richtlinien prüfen weiter Benutzer und Betrieb.
 -- Techniker, Betriebsleitung und Geschäftsführung lesen die Messhistorie.
 -- Sollbereiche bleiben leer, bis die Betriebsleitung sie je Becken setzt.
 -- Messungen, damalige Sollbereiche und Warnwerte werden nicht umgeschrieben.
@@ -210,6 +212,14 @@ CREATE UNIQUE INDEX water_round_drafts_one_open
   WHERE status = 'open';
 CREATE UNIQUE INDEX water_round_drafts_round
   ON public.water_round_drafts (round_id);
+
+CREATE TABLE public.water_round_discards (
+  id uuid PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
+  round_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT pg_catalog.now()
+);
+REVOKE ALL ON TABLE public.water_round_discards FROM PUBLIC, anon, authenticated;
 
 INSERT INTO public.water_parameter_definitions
   (code, name, unit, decimals, min_plausible, max_plausible, sort_order)
@@ -626,6 +636,45 @@ BEGIN
 END;
 $tageswerk$;
 
+CREATE OR REPLACE FUNCTION public.tageswerk_water_round_checks_in_transaction(
+  p_round_id uuid,
+  p_facility_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $tageswerk$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.water_checks AS check_row
+    WHERE check_row.round_id = p_round_id
+      AND check_row.facility_id = p_facility_id
+      AND check_row.recorded_by = auth.uid()
+      AND check_row.xmin = pg_current_xact_id()::xid
+      AND public.tageswerk_meter_role(check_row.organization_id, check_row.facility_id) IS NOT NULL
+  );
+$tageswerk$;
+
+CREATE OR REPLACE FUNCTION public.tageswerk_water_round_discard_in_transaction(
+  p_round_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $tageswerk$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.water_round_discards AS mark
+    WHERE mark.round_id = p_round_id
+      AND mark.user_id = auth.uid()
+      AND mark.xmin = pg_current_xact_id()::xid
+  );
+$tageswerk$;
+
 CREATE OR REPLACE FUNCTION public.tageswerk_guard_water_round_draft()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -646,10 +695,13 @@ BEGIN
   IF NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN
     RAISE EXCEPTION 'Der Entwurf wurde zwischenzeitlich geändert.';
   END IF;
-  IF NEW.status IS DISTINCT FROM 'open'
-     AND (NEW.status NOT IN ('completed', 'discarded')
-       OR pg_catalog.current_setting('tageswerk.water_round_close', true) IS DISTINCT FROM NEW.round_id::text
-       OR pg_catalog.current_setting('tageswerk.water_round_close_as', true) IS DISTINCT FROM NEW.status) THEN
+  IF NEW.status = 'completed' AND NOT public.tageswerk_water_round_checks_in_transaction(NEW.round_id, NEW.facility_id) THEN
+    RAISE EXCEPTION 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.';
+  END IF;
+  IF NEW.status = 'discarded' AND NOT public.tageswerk_water_round_discard_in_transaction(NEW.round_id) THEN
+    RAISE EXCEPTION 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.';
+  END IF;
+  IF NEW.status IS NOT NULL AND NEW.status NOT IN ('open', 'completed', 'discarded') THEN
     RAISE EXCEPTION 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.';
   END IF;
   IF public.tageswerk_meter_role(NEW.organization_id, NEW.facility_id) IS NULL THEN
@@ -831,11 +883,8 @@ CREATE POLICY water_round_drafts_update ON public.water_round_drafts FOR UPDATE 
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND (
       status = 'open'
-      OR (
-        status IN ('completed', 'discarded')
-        AND pg_catalog.current_setting('tageswerk.water_round_close', true) = round_id::text
-        AND pg_catalog.current_setting('tageswerk.water_round_close_as', true) = status
-      )
+      OR (status = 'completed' AND public.tageswerk_water_round_checks_in_transaction(round_id, facility_id))
+      OR (status = 'discarded' AND public.tageswerk_water_round_discard_in_transaction(round_id))
     )
   );
 
@@ -976,31 +1025,28 @@ BEGIN
       );
       ids := ids || inserted;
     END LOOP;
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close', p_round_id::text, true);
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', 'completed', true);
     UPDATE public.water_round_drafts
     SET status = 'completed',
         revision = revision + 1
     WHERE round_id = p_round_id
       AND user_id = auth.uid()
       AND status = 'open';
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close', '', true);
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', '', true);
   EXCEPTION
     WHEN unique_violation THEN
       IF SQLERRM NOT ILIKE '%water_checks_round_pool%' THEN
         RAISE;
       END IF;
-      PERFORM pg_catalog.set_config('tageswerk.water_round_close', p_round_id::text, true);
-      PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', 'completed', true);
-      UPDATE public.water_round_drafts
-      SET status = 'completed',
-          revision = revision + 1
-      WHERE round_id = p_round_id
-        AND user_id = auth.uid()
-        AND status = 'open';
-      PERFORM pg_catalog.set_config('tageswerk.water_round_close', '', true);
-      PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', '', true);
+      BEGIN
+        UPDATE public.water_round_drafts
+        SET status = 'completed',
+            revision = revision + 1
+        WHERE round_id = p_round_id
+          AND user_id = auth.uid()
+          AND status = 'open';
+      EXCEPTION
+        WHEN insufficient_privilege OR raise_exception THEN
+          NULL;
+      END;
       RETURN jsonb_build_object('status', 'already_stored', 'round_id', p_round_id);
   END;
   RETURN jsonb_build_object('status', 'stored', 'round_id', p_round_id, 'ids', to_jsonb(ids));
@@ -1012,25 +1058,29 @@ CREATE OR REPLACE FUNCTION public.tageswerk_discard_water_round_draft(
 )
 RETURNS jsonb
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = ''
 AS $tageswerk$
 DECLARE
   existing uuid;
+  organization uuid;
+  facility uuid;
 BEGIN
-  IF p_round_id IS NULL THEN
+  IF p_round_id IS NULL OR auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Der Entwurf ist unvollständig.';
   END IF;
-  SELECT id INTO existing
+  SELECT id, organization_id, facility_id
+  INTO existing, organization, facility
   FROM public.water_round_drafts
   WHERE round_id = p_round_id
     AND user_id = auth.uid()
     AND status = 'open'
   LIMIT 1;
-  IF NOT FOUND THEN
+  IF NOT FOUND OR public.tageswerk_meter_role(organization, facility) IS NULL THEN
     RETURN pg_catalog.jsonb_build_object('status', 'absent', 'round_id', p_round_id);
   END IF;
-  PERFORM pg_catalog.set_config('tageswerk.water_round_close', p_round_id::text, true);
-  PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', 'discarded', true);
+  INSERT INTO public.water_round_discards (round_id, user_id)
+  VALUES (p_round_id, auth.uid());
   UPDATE public.water_round_drafts
   SET status = 'discarded',
       revision = revision + 1
@@ -1038,12 +1088,8 @@ BEGIN
     AND user_id = auth.uid()
     AND status = 'open';
   IF NOT FOUND THEN
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close', '', true);
-    PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', '', true);
-    RETURN pg_catalog.jsonb_build_object('status', 'absent', 'round_id', p_round_id);
+    RAISE EXCEPTION 'Der Entwurf wurde nicht verworfen.';
   END IF;
-  PERFORM pg_catalog.set_config('tageswerk.water_round_close', '', true);
-  PERFORM pg_catalog.set_config('tageswerk.water_round_close_as', '', true);
   RETURN pg_catalog.jsonb_build_object('status', 'discarded', 'round_id', p_round_id);
 END;
 $tageswerk$;
@@ -1067,6 +1113,8 @@ REVOKE ALL ON FUNCTION public.tageswerk_save_water_round_draft(uuid, uuid, jsonb
 REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_round_draft() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_guard_water_round_draft() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_discard_water_round_draft(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.tageswerk_water_round_checks_in_transaction(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.tageswerk_water_round_discard_in_transaction(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.tageswerk_water_schedule_valid(text, integer, text[], smallint[]) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_normalize_water_pool() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_protect_water_pool() TO authenticated;
@@ -1086,5 +1134,7 @@ GRANT EXECUTE ON FUNCTION public.tageswerk_save_water_round_draft(uuid, uuid, js
 GRANT EXECUTE ON FUNCTION public.tageswerk_stamp_water_round_draft() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_guard_water_round_draft() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_discard_water_round_draft(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tageswerk_water_round_checks_in_transaction(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tageswerk_water_round_discard_in_transaction(uuid) TO authenticated;
 
 COMMIT;

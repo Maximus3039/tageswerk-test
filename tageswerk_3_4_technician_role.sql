@@ -378,6 +378,7 @@ $defects$;
 
 DO $water$
 BEGIN
+  -- Entwurfstabellen, Abschluss- und Verwerffunktionen bleiben unangetastet.
   IF to_regclass('public.water_pools') IS NULL
      OR to_regclass('public.water_checks') IS NULL
      OR to_regclass('public.water_alerts') IS NULL
