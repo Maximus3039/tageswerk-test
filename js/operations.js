@@ -446,8 +446,7 @@ export const waterParameterCatalog = [
  {code: 'free_chlorine', name: 'Freies Chlor', unit: 'mg/l', decimals: 2, minPlausible: 0, maxPlausible: 20, sortOrder: 1, active: true},
  {code: 'combined_chlorine', name: 'Gebundenes Chlor', unit: 'mg/l', decimals: 2, minPlausible: 0, maxPlausible: 20, sortOrder: 2, active: true},
  {code: 'ph', name: 'pH-Wert', unit: '', decimals: 2, minPlausible: 0, maxPlausible: 14, sortOrder: 3, active: true},
- {code: 'redox', name: 'Redoxspannung', unit: 'mV', decimals: 0, minPlausible: -2000, maxPlausible: 2000, sortOrder: 4, active: true},
- {code: 'temperature', name: 'Wassertemperatur', unit: '°C', decimals: 1, minPlausible: 0, maxPlausible: 50, sortOrder: 5, active: true}
+ {code: 'temperature', name: 'Wassertemperatur', unit: '°C', decimals: 1, minPlausible: 0, maxPlausible: 50, sortOrder: 4, active: true}
 ];
 
 export function waterCatalog(bundle) {

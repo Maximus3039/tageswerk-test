@@ -670,7 +670,8 @@ function renderWater(host, current) {
  host.append(labeled('Becken auswählen', picker));
  const pool = pools.find(item => item.id === picker.value);
  if (!pool) return;
- const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => waterParameterName(data, left.parameterCode).localeCompare(waterParameterName(data, right.parameterCode), 'de'));
+ const parameterOrder = code => waterCatalog(data).findIndex(item => item.code === code);
+ const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => parameterOrder(left.parameterCode) - parameterOrder(right.parameterCode));
  const status = waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString());
  const row = item(pool.name, [`${waterScheduleLabel(pool)}`, status.detail], status.due);
  if (isManager(current)) {
@@ -707,6 +708,8 @@ function renderWater(host, current) {
    const maximum = input(limitText(parameter.maxValue));
    minimum.inputMode = 'decimal';
    maximum.inputMode = 'decimal';
+   minimum.lang = 'de';
+   maximum.lang = 'de';
    const required = choice('Erforderlich', parameter.required !== false);
    const active = choice('Aktiv', parameter.active !== false);
    block.append(title, labeled(`Mindestens ${definition?.unit || ''}`.trim(), minimum), labeled(`Höchstens ${definition?.unit || ''}`.trim(), maximum), required.node, active.node);
@@ -731,6 +734,8 @@ function renderWater(host, current) {
  }
  if (pool.active !== false) {
   const activeParameters = parameters.filter(item => item.active !== false);
+  const readings = document.createElement('div');
+  readings.className = 'water-readings';
   const fields = new Map();
   if (followUpAlertId && !data.waterAlerts.some(item => item.id === followUpAlertId && item.poolId === pool.id)) followUpAlertId = '';
   if (followUpAlertId) {
@@ -743,14 +748,16 @@ function renderWater(host, current) {
    const definition = catalog.find(item => item.code === parameter.parameterCode);
    const field = input();
    field.inputMode = 'decimal';
+   field.lang = 'de';
    fields.set(parameter.parameterCode, field);
    const caption = `${waterParameterName(data, parameter.parameterCode)}${definition?.unit ? ` ${definition.unit}` : ''}${parameter.required === false ? '' : ' · erforderlich'}`;
-   row.append(labeled(caption, field));
+   readings.append(labeled(caption, field));
    const limit = document.createElement('p');
    limit.className = 'help';
    limit.textContent = rangeText(parameter);
-   row.append(limit);
+   readings.append(limit);
   }
+  row.append(readings);
   const note = input();
   note.placeholder = 'Kommentar, falls nötig';
   row.append(labeled('Kommentar', note));

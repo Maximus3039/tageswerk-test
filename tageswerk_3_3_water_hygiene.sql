@@ -6,6 +6,8 @@
 -- Ein zweiter Lauf setzt die Transaktion zurück.
 -- Die Zahlen in water_parameter_definitions begrenzen nur die Erfassung.
 -- Sie sind keine Sollwerte und keine normativen Grenzwerte.
+-- Die reguläre Kontrollrunde umfasst Freies Chlor, gebundenes Chlor, den pH-Wert
+-- und die Wassertemperatur. Weitere Parameter können später in den Katalog aufgenommen werden.
 -- Sollbereiche bleiben leer, bis die Betriebsleitung sie je Becken setzt.
 -- Messungen, damalige Sollbereiche und Warnwerte werden nicht umgeschrieben.
 -- Eine Quittierung kennzeichnet die Abweichung nicht als behoben.
@@ -170,8 +172,7 @@ VALUES
   ('free_chlorine', 'Freies Chlor', 'mg/l', 2, 0, 20, 1),
   ('combined_chlorine', 'Gebundenes Chlor', 'mg/l', 2, 0, 20, 2),
   ('ph', 'pH-Wert', '', 2, 0, 14, 3),
-  ('redox', 'Redoxspannung', 'mV', 0, -2000, 2000, 4),
-  ('temperature', 'Wassertemperatur', '°C', 1, 0, 50, 5);
+  ('temperature', 'Wassertemperatur', '°C', 1, 0, 50, 4);
 
 CREATE OR REPLACE FUNCTION public.tageswerk_normalize_water_pool()
 RETURNS trigger

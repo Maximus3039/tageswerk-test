@@ -54,4 +54,31 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
  expect(overflow).toBeLessThanOrEqual(1);
+ await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.className = 'water-readings';
+  host.style.width = '320px';
+  for (const label of ['Freies Chlor mg/l', 'Gebundenes Chlor mg/l', 'pH-Wert', 'Wassertemperatur °C']) {
+   const field = document.createElement('label');
+   field.textContent = label;
+   const input = document.createElement('input');
+   input.inputMode = 'decimal';
+   input.lang = 'de';
+   field.append(input);
+   host.append(field);
+  }
+  document.body.append(host);
+ });
+ const readingLayout = await page.locator('.water-readings').evaluate(host => {
+  const style = getComputedStyle(host);
+  const fields = [...host.querySelectorAll('label')];
+  const tops = fields.map(field => field.getBoundingClientRect().top);
+  return {
+   direction: style.flexDirection,
+   stacked: tops.every((top, index) => index === 0 || top > tops[index - 1]),
+   fullWidth: fields.every(field => field.getBoundingClientRect().width === host.getBoundingClientRect().width),
+   decimal: [...host.querySelectorAll('input')].every(input => input.inputMode === 'decimal' && input.lang === 'de')
+  };
+ });
+ expect(readingLayout).toEqual({direction: 'column', stacked: true, fullWidth: true, decimal: true});
 });

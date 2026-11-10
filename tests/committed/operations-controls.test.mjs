@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
  acknowledgeTemperatureAlert,
@@ -482,7 +483,6 @@ function hygieneValues(overrides = {}) {
   free_chlorine: '0.50',
   combined_chlorine: '0.20',
   ph: '7.20',
-  redox: '750',
   temperature: '28.0',
   ...overrides
  };
@@ -496,7 +496,15 @@ test('Wasserhygiene trennt Betriebe, Grenzen, Historie und Quittierung', async (
  assert.equal(createWaterPool(emptyOperations(), {facility, name: 'Schwimmer', scheduleMode: 'daily'}, employee, now).ok, false);
  const created = createWaterPool(emptyOperations(), {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
  assert.equal(created.ok, true);
- assert.equal(created.parameters.every(item => item.minValue == null && item.maxValue == null), true);
+ assert.deepEqual(waterParameterCatalog.map(item => item.code), ['free_chlorine', 'combined_chlorine', 'ph', 'temperature']);
+ assert.deepEqual(created.parameters.map(item => item.parameterCode), ['free_chlorine', 'combined_chlorine', 'ph', 'temperature']);
+ assert.equal(created.parameters.every(item => item.required === true && item.active === true && item.minValue == null && item.maxValue == null), true);
+ const migration = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+ assert.match(migration, /'free_chlorine', 'Freies Chlor'/);
+ assert.match(migration, /'combined_chlorine', 'Gebundenes Chlor'/);
+ assert.match(migration, /'ph', 'pH-Wert'/);
+ assert.match(migration, /'temperature', 'Wassertemperatur'/);
+ assert.doesNotMatch(migration, /redox/);
  assert.equal(createWaterPool(created.bundle, {facility: second, name: 'Strand', scheduleMode: 'daily'}, manager, now).ok, false);
  const strand = createWaterPool(created.bundle, {facility: second, name: 'Strand', scheduleMode: 'weekly', intervalCount: 1}, admin, now);
  assert.equal(strand.ok, true);
@@ -534,8 +542,14 @@ test('Wasserhygiene trennt Betriebe, Grenzen, Historie und Quittierung', async (
  assert.equal(repeat.check.followUpAlertId, signed.alert.id);
  assert.equal(repeat.bundle.waterAlerts.find(item => item.id === signed.alert.id).status, 'acknowledged');
  assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({ph: ''})}, employee, now).ok, false);
+ assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({combined_chlorine: ''})}, employee, now).ok, false);
  assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({free_chlorine: '30'})}, employee, now).ok, false);
- assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({redox: '750.5'})}, employee, now).ok, false);
+ assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({temperature: '28,50'})}, employee, now).ok, false);
+ const comma = recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues({ph: '7,80', temperature: '28,5'})}, employee, '2026-11-10T13:00:00.000Z');
+ assert.equal(comma.ok, true);
+ assert.equal(comma.check.readings.find(item => item.parameterCode === 'ph').value, '7.80');
+ assert.equal(comma.check.readings.find(item => item.parameterCode === 'temperature').value, '28.5');
+ assert.equal(comma.alerts.some(item => item.parameterCode === 'ph' && item.value === '7.80'), true);
  assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues()}, otherEmployee, now).ok, false);
  assert.equal(recordWaterCheck(repeat.bundle, created.pool.id, {values: hygieneValues()}, inactive, now).ok, false);
  const paused = setWaterPoolActive(repeat.bundle, created.pool.id, false, manager);
@@ -577,7 +591,7 @@ test('Wasserhygiene trennt Betriebe, Grenzen, Historie und Quittierung', async (
  assert.equal(db.calls.some(call => call[0] === 'insert'), false);
  const saved = await saveWaterPool(db, emptyOperations(), {facility, name: 'Schwimmer', scheduleMode: 'times', scheduledTimes: '08:00, 14:00', weekdays: [1, 2, 3, 4, 5, 6, 7]}, manager, now, context);
  assert.equal(saved.ok, true);
- assert.equal(saved.bundle.waterPoolParameters.filter(item => item.poolId === saved.pool.id).length, 5);
+ assert.equal(saved.bundle.waterPoolParameters.filter(item => item.poolId === saved.pool.id).length, 4);
  const employeeDb = controlDb({userId: employee.userId, rows: db.rows});
  const ph = parameter(saved.bundle, saved.pool.id, 'ph');
  const limited = await saveWaterParameter(db, saved.bundle, ph.id, {minValue: '6.80', maxValue: '7.60', required: true, active: true}, manager, now, context);
@@ -623,4 +637,14 @@ test('Wasserhygiene trennt Betriebe, Grenzen, Historie und Quittierung', async (
  assert.equal(temperatureMissing.waterInstalled, true);
  assert.equal(temperatureMissing.bundle.waterPools.length, 1);
  assert.equal(addWaterParameter(again.bundle, saved.pool.id, 'ph', manager, now).ok, false);
+ const extended = {
+  ...created.bundle,
+  waterParameters: [...waterParameterCatalog, {code: 'ozone', name: 'Ozon', unit: 'mg/l', decimals: 2, minPlausible: 0, maxPlausible: 5, sortOrder: 5, active: true}]
+ };
+ const ozone = addWaterParameter(extended, created.pool.id, 'ozone', manager, now);
+ assert.equal(ozone.ok, true);
+ assert.equal(recordWaterCheck(ozone.bundle, created.pool.id, {values: hygieneValues()}, employee, now).ok, false);
+ const withOzone = recordWaterCheck(ozone.bundle, created.pool.id, {values: {...hygieneValues(), ozone: '0,20'}}, employee, now);
+ assert.equal(withOzone.ok, true);
+ assert.equal(withOzone.check.readings.find(item => item.parameterCode === 'ozone').value, '0.20');
 });
