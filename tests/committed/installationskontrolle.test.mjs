@@ -37,8 +37,26 @@ function requiredFunction(body, known) {
  return known(body) ? 'bereit' : 'stoppen';
 }
 
-test('Abschnitt 0 läuft ohne die noch nicht installierte Wasserfunktion', () => {
+function statements(sql) {
+ return sql
+  .replace(/--.*$/gm, '')
+  .split(';')
+  .map(part => part.trim())
+  .filter(Boolean);
+}
+
+test('Abschnitt 0 liefert eine Ergebnistabelle und bricht ohne Wasserfunktion nicht ab', () => {
  const section0 = control.slice(control.indexOf('-- Abschnitt 0'), control.indexOf('-- Abschnitt 1'));
+ const section0Statements = statements(section0);
+ assert.equal(section0Statements.length, 1);
+ assert.match(section0Statements[0], /^WITH\b/);
+ assert.match(section0, /AS pruefung/);
+ assert.match(section0, /AS status/);
+ assert.match(section0, /AS details/);
+ assert.match(section0, /'Freigabe'/);
+ assert.match(section0, /Keine Installation, solange eine Prüfung nicht bereit ist/);
+ assert.doesNotMatch(section0, /'spalte_fehlt'/);
+ assert.doesNotMatch(section0, /'installiert'/);
  assert.equal(section0Upcoming({}), 'bereit');
  assert.equal(section0Upcoming({
   'public.tageswerk_stamp_water_check()': 'WHERE code = code'
@@ -60,9 +78,13 @@ test('Abschnitt 0 läuft ohne die noch nicht installierte Wasserfunktion', () =>
  }), 'installiert');
  assert.doesNotMatch(control, /::regprocedure/);
  assert.doesNotMatch(control, /::regclass/);
+ assert.doesNotMatch(control, /pg_get_functiondef\(to_regprocedure/);
+ assert.match(control, /pg_get_functiondef\(signatures\./);
  assert.doesNotMatch(control, /has_table_privilege\('[^']+',\s*'public\./);
  assert.match(section0, /Neue Temperatur- und Wasserfunktionen fehlen noch/);
- assert.match(section0, /to_regprocedure\('public\.tageswerk_stamp_water_check\(\)'\) IS NULL/);
- assert.match(control, /pg_get_functiondef\(to_regprocedure\('public\.tageswerk_stamp_water_check\(\)'\)\)/);
+ assert.match(section0, /stamp_water IS NULL/);
+ assert.match(section0, /unbekannten Funktionskörper/);
  for (const name of upcoming) assert.match(control, new RegExp(name.replace(/[().]/g, '\\$&')));
+ const later = control.slice(control.indexOf('-- Abschnitt 1'));
+ assert.equal(statements(later).length, 5);
 });
