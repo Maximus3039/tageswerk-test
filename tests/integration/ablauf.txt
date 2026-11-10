@@ -1,0 +1,33 @@
+Tageswerk, Integrationstest der fünf Migrationen
+Nur für eine ausdrücklich als Testumgebung bestätigte Supabase-Datenbank.
+Dieses Paket legt keine Instanz an und spricht das produktive Projekt nicht an.
+
+Voraussetzungen
+- Eine leere Supabase-Testinstanz mit den Schemas auth und public.
+- Die Verbindungsadresse dieser Instanz, nicht die produktive Adresse.
+- psql im Suchpfad.
+- Die Freigabe, in genau dieser Testinstanz Strukturen und Testdaten anzulegen.
+
+Start, in der Projektwurzel:
+
+$env:TAGESWERK_TEST_DATABASE = 'bestaetigt'
+$env:TAGESWERK_TEST_DATABASE_URL = 'postgresql://...'
+node tests/integration/run.mjs
+
+Der Ablauf
+1. Die Verbindung wird abgelehnt, wenn die Freigabe fehlt oder die Adresse das produktive Projekt nennt.
+2. Sind Temperaturtabellen schon vorhanden, endet der Lauf ohne Änderung.
+3. Fehlen die Betriebe, legt baseline.sql nur die für die fünf Dateien nötige Ausgangsfassung an.
+   Die Funktionskörper entsprechen den geprüften Markierungen aus Tageswerk 2.8 und 2.9.
+4. vorpruefung.sql liest die Funktionskörper. Weicht ein Körper ab, wird keine Migration gestartet.
+5. Die fünf Dateien laufen in dieser Reihenfolge:
+   tageswerk_3_1_temperature.sql
+   tageswerk_3_2_temperature_points.sql
+   tageswerk_3_3_water_hygiene.sql
+   tageswerk_3_4_technician_role.sql
+   tageswerk_3_4_invitation_role.sql
+6. pruefung.sql legt Testpersonen an und prüft Temperatur, Wasserhygiene, Techniker,
+   Mitarbeiterverwaltung, Einladungen und direkte Zugriffe.
+
+Eine wiederholte Prüfung braucht eine neue leere Testinstanz. Die Migrationen sind nicht wiederholbar.
+Die Edge Function invite-staff wird hier nicht aufgerufen und nicht bereitgestellt.

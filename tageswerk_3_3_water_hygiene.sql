@@ -357,7 +357,7 @@ AS $tageswerk$
 DECLARE
   pool public.water_pools;
   item jsonb;
-  code text;
+  reading_code text;
   amount numeric;
   definition public.water_parameter_definitions;
   parameter public.water_pool_parameters;
@@ -387,17 +387,20 @@ BEGIN
     RAISE EXCEPTION 'Bitte die Messwerte eintragen.';
   END IF;
   FOR item IN SELECT value FROM jsonb_array_elements(NEW.readings) LOOP
-    code := item->>'parameter_code';
-    IF code IS NULL OR code = ANY (seen) THEN
+    reading_code := item->>'parameter_code';
+    IF reading_code IS NULL OR reading_code = ANY (seen) THEN
       RAISE EXCEPTION 'Jeder Parameter darf nur einmal gemessen werden.';
     END IF;
-    seen := seen || code;
+    seen := seen || reading_code;
     BEGIN
       amount := (item->>'value')::numeric;
     EXCEPTION WHEN others THEN
       RAISE EXCEPTION 'Bitte einen gültigen Messwert eintragen.';
     END;
-    SELECT * INTO definition FROM public.water_parameter_definitions WHERE code = code AND active IS TRUE;
+    SELECT * INTO definition
+    FROM public.water_parameter_definitions AS parameter_definition
+    WHERE parameter_definition.code = reading_code
+      AND parameter_definition.active IS TRUE;
     IF definition.code IS NULL THEN
       RAISE EXCEPTION 'Dieser Parameter ist nicht vorgesehen.';
     END IF;
@@ -406,12 +409,12 @@ BEGIN
     END IF;
     SELECT * INTO parameter
     FROM public.water_pool_parameters
-    WHERE pool_id = pool.id AND parameter_code = code AND active IS TRUE;
+    WHERE pool_id = pool.id AND parameter_code = reading_code AND active IS TRUE;
     IF parameter.id IS NULL THEN
       RAISE EXCEPTION 'Dieser Parameter ist für das Becken nicht vorgesehen.';
     END IF;
     canonical := canonical || jsonb_build_array(jsonb_build_object(
-      'parameter_code', code,
+      'parameter_code', reading_code,
       'value', amount,
       'unit', definition.unit,
       'min_limit', parameter.min_value,
