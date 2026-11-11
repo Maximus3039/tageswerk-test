@@ -27,7 +27,7 @@ jobs:
       - name: Geprüften Release holen
         uses: actions/checkout@v4
         with:
-          ref: 5dbd139448ac88e4b51449999b7b822983858f37
+          ref: ebe99210b2b9aeb7b9514a3e0a0862d8bb762fa3
 
       - name: Node.js einrichten
         uses: actions/setup-node@v4
@@ -60,6 +60,7 @@ jobs:
           js/operations-store.js
           js/operations-ui.js
           js/operations.js
+          js/password-reset.js
           js/permissions.js
           js/state.js
           js/supabase.js
@@ -70,14 +71,14 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
           diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
-          grep -q '<title>Tageswerk 3.4.1</title>' dist/index.html
+          grep -q '<title>Tageswerk 3.4.2</title>' dist/index.html
           grep -q 'src="./js/app.js"' dist/index.html
           grep -q 'href="./css/app.css"' dist/index.html
           grep -q 'href="./manifest.webmanifest"' dist/index.html
           grep -q "register('./service-worker.js')" dist/index.html
-          grep -q '"name": "Tageswerk 3.4.1"' dist/manifest.webmanifest
+          grep -q '"name": "Tageswerk 3.4.2"' dist/manifest.webmanifest
           grep -q '"start_url": "./"' dist/manifest.webmanifest
-          grep -q "SHELL_CACHE = 'tageswerk-shell-3.4.1'" dist/service-worker.js
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.4.2'" dist/service-worker.js
           grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
           if grep -R -E -n 'service_role|sb_secret_' dist; then
             exit 1
