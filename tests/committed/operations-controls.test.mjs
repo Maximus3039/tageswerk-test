@@ -98,6 +98,17 @@ test('Negative Temperaturgrenzen und Messwerte bleiben zulässig', () => {
  assert.equal(decimal.point.maxC, '-5');
  assert.match(createTemperaturePoint(emptyOperations(), {facility, name: 'Vertauscht', location: 'Lager', minimum: '-5', maximum: '-18,5'}, manager, now).error, /Mindestwert/);
  assert.equal(createTemperaturePoint(emptyOperations(), {facility, name: 'Zu tief', location: 'Lager', minimum: '-50,1', maximum: '-18'}, manager, now).ok, false);
+ assert.equal(createTemperaturePoint(emptyOperations(), {facility, name: 'Zu hoch', location: 'Lager', minimum: '-18', maximum: '200,1'}, manager, now).ok, false);
+ const bounds = createTemperaturePoint(emptyOperations(), {facility, name: 'Gesamtbereich', location: 'Technik', minimum: '-50', maximum: '200'}, manager, now);
+ assert.equal(bounds.ok, true);
+ assert.equal(bounds.point.minC, '-50');
+ assert.equal(bounds.point.maxC, '200');
+ assert.equal(recordTemperature(bounds.bundle, bounds.point.id, {value: '-50,0'}, employee, now).ok, true);
+ assert.equal(recordTemperature(bounds.bundle, bounds.point.id, {value: '200.0'}, employee, now).alert, null);
+ assert.equal(recordTemperature(bounds.bundle, bounds.point.id, {value: '-50,1'}, employee, now).ok, false);
+ assert.equal(recordTemperature(bounds.bundle, bounds.point.id, {value: '200,1'}, employee, now).ok, false);
+ assert.equal(updateTemperaturePoint(bounds.bundle, bounds.point.id, {name: 'Gesamtbereich', location: 'Technik', minimum: '-60', maximum: '10'}, manager).ok, false);
+ assert.equal(updateTemperaturePoint(bounds.bundle, bounds.point.id, {name: 'Gesamtbereich', location: 'Technik', minimum: '0', maximum: '201'}, manager).ok, false);
  const inside = recordTemperature(freezer.bundle, freezer.point.id, {value: '-18,5'}, employee, now);
  assert.equal(inside.ok, true);
  assert.equal(inside.reading.valueC, '-18.5');
