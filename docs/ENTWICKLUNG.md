@@ -142,7 +142,7 @@ Die veröffentlichte Oberfläche auf `main` sendet keine Rolle. Daraus wird weit
 - `npm run test:ui`: 8 bestanden, 0 fehlgeschlagen. Desktop und Smartphone, ohne Schreibzugriff auf die Datenbank.
 - `npm run test:integration`: nicht gestartet. Es ist keine bestätigte Testdatenbank gesetzt, und die produktive Verbindung wird abgelehnt.
 
-Festgestellte Fehler in diesem Lauf: keine. Die sichtbare Kennung ist `3.4`. Der Service Worker ersetzt nur den statischen Anwendungscache. Sitzungen, lokale Entwürfe und Datenbankzeilen bleiben erhalten.
+Festgestellte Fehler in diesem Lauf: keine. Die sichtbare Kennung ist `3.4.1`. Der Service Worker ersetzt nur den statischen Anwendungscache. Sitzungen, lokale Entwürfe und Datenbankzeilen bleiben erhalten.
 
 Offen vor dem Livebetrieb:
 

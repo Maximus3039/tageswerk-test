@@ -111,8 +111,9 @@ test('Hygienekontrollen bleiben beim Betrieb und werden nicht persönlich zugewi
 test('Die PWA ersetzt einen alten Cache und speichert keine fremden Antworten', () => {
  const source = readFileSync(new URL('../../service-worker.js', import.meta.url), 'utf8');
  const manifest = readFileSync(new URL('../../manifest.webmanifest', import.meta.url), 'utf8');
- assert.match(source, /SHELL_CACHE = 'tageswerk-shell-3\.4'/);
+ assert.match(source, /SHELL_CACHE = 'tageswerk-shell-3\.4\.1'/);
  assert.match(source, /caches\.delete/);
+ assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/);
  assert.match(source, /tageswerk-updated/);
  assert.match(source, /request\.method !== 'GET'/);
  assert.match(source, /url\.origin !== self\.location\.origin/);
