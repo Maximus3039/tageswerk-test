@@ -541,6 +541,36 @@ export function waterHistoryRows(bundle, facilityId, filters = {}) {
  });
 }
 
+export function waterOverviewRows(bundle, facilityId, checks, now) {
+ const pools = (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId).sort((left, right) => Number(left.active === false) - Number(right.active === false) || left.name.localeCompare(right.name, 'de'));
+ const parameters = bundle?.waterPoolParameters || [];
+ const visible = checks || [];
+ return pools.map(pool => {
+  const latest = visible.filter(check => check.poolId === pool.id).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt)))[0] || null;
+  const values = {};
+  const missing = {};
+  for (const code of ['temperature', 'ph', 'free_chlorine', 'combined_chlorine']) {
+   const reading = latest ? (latest.readings || []).find(item => item.parameterCode === code) : null;
+   const present = reading != null && String(reading.value ?? '') !== '';
+   values[code] = present ? String(reading.value) : 'fehlt';
+   missing[code] = !present;
+  }
+  const breached = latest ? (latest.readings || []).filter(readingOutside) : [];
+  const control = waterControlState(pool, visible, parameters, now);
+  const names = breached.map(reading => waterCatalog(bundle).find(item => item.code === reading.parameterCode)?.name || reading.parameterCode);
+  return {
+   poolId: pool.id,
+   poolName: pool.name,
+   values,
+   missing,
+   measuredAt: latest?.measuredAt || null,
+   measuredLabel: latest?.measuredAt ? new Date(latest.measuredAt).toLocaleString('de-DE') : 'keine Messung',
+   status: names.length ? `Grenzwertabweichung: ${names.join(', ')}` : control.detail,
+   breached: breached.map(reading => reading.parameterCode)
+  };
+ });
+}
+
 export function waterHistoryCsv(rows) {
  const header = ['Datum', 'Uhrzeit', 'Becken', 'Freies Chlor', 'Gebundenes Chlor', 'pH-Wert', 'Wassertemperatur', 'Mitarbeiter', 'Grenzwertstatus'];
  const lines = [header.join(';')];

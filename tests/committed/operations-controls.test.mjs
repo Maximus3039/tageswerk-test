@@ -32,6 +32,8 @@ import {
  recordWaterCheck,
  rememberWaterEntry,
  reviewWaterRound,
+ waterRoundDisplayStatus,
+ waterRoundTableRows,
  storeWaterRound,
  waterRoundPools,
  waterRoundProgress,
@@ -40,7 +42,7 @@ import {
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {emptyOperations, materialStock, operationMetrics, waterControlState, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
+import {emptyOperations, materialStock, operationMetrics, waterControlState, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
 import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
@@ -129,6 +131,61 @@ test('Negative Temperaturgrenzen und Messwerte bleiben zulässig', () => {
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.minC\)\)/);
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.maxC\)\)/);
  assert.doesNotMatch(temperatureUi, /inputMode = 'decimal'/);
+});
+
+test('Die Wasserübersicht trennt gespeicherte Werte, fehlende Werte und den Rundenstatus', () => {
+ const first = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const secondPool = createWaterPool(first.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const bundle = secondPool.bundle;
+ const ph = parameter(bundle, first.pool.id, 'ph');
+ ph.minValue = '6.50';
+ ph.maxValue = '7.60';
+ bundle.waterChecks = [{
+  id: 'check-kinder',
+  poolId: first.pool.id,
+  facilityId: facility.id,
+  organizationId: facility.organization_id,
+  measuredAt: now,
+  readings: [
+   {parameterCode: 'ph', value: '8.00', minLimit: '6.50', maxLimit: '7.60'},
+   {parameterCode: 'free_chlorine', value: '0.40', minLimit: null, maxLimit: null}
+  ]
+ }];
+ const rows = waterOverviewRows(bundle, facility.id, bundle.waterChecks, now);
+ const kinder = rows.find(row => row.poolName === 'Kinder');
+ const schwimmer = rows.find(row => row.poolName === 'Schwimmer');
+ assert.equal(rows.length, 2);
+ assert.equal(kinder.values.ph, '8.00');
+ assert.equal(kinder.values.free_chlorine, '0.40');
+ assert.equal(kinder.values.temperature, 'fehlt');
+ assert.equal(kinder.values.combined_chlorine, 'fehlt');
+ assert.equal(kinder.missing.temperature, true);
+ assert.match(kinder.status, /Grenzwertabweichung: pH-Wert/);
+ assert.equal(schwimmer.values.ph, 'fehlt');
+ assert.equal(schwimmer.measuredAt, null);
+ assert.equal(schwimmer.measuredLabel, 'keine Messung');
+ const hidden = waterRowsForMember(bundle, employee.memberships, now, employee.userId);
+ assert.equal(hidden.checks.length, 0);
+ assert.equal(waterOverviewRows(bundle, facility.id, hidden.checks, now).find(row => row.poolName === 'Kinder').values.ph, 'fehlt');
+ const draft = {...emptyWaterRound(facility.id, 'round-overview'), revision: 1, entries: {[first.pool.id]: {values: {ph: '7.20'}, note: ''}}};
+ assert.equal(waterRoundDisplayStatus(bundle, draft, employee, now), 'Entwurf gespeichert');
+ assert.equal(waterRoundDisplayStatus(bundle, emptyWaterRound(facility.id, 'round-new'), employee, now), '');
+ const pools = waterRoundPools(bundle, facility.id);
+ const complete = {...draft, revision: 2, entries: Object.fromEntries(pools.map(pool => [pool.id, {values: hygieneValues(), note: ''}]))};
+ assert.equal(waterRoundDisplayStatus(bundle, complete, employee, now), 'Vollständig ausgefüllt');
+ assert.equal(waterRoundDisplayStatus(bundle, {...complete, saved: true}, employee, now), 'Endgültig abgeschlossen');
+ const table = waterRoundTableRows(bundle, reviewWaterRound(bundle, complete, employee, now));
+ assert.equal(table.length, 2);
+ assert.deepEqual(table.map(row => row.poolName), ['Kinder', 'Schwimmer']);
+ assert.equal(table[0].values.temperature, '28.0');
+ assert.equal(table[0].values.ph, '7.20');
+ const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const waterUi = ui.slice(ui.indexOf('function renderWater('), ui.indexOf('function renderStock'));
+ assert.ok(waterUi.indexOf('⚙ Einstellungen') > waterUi.indexOf('if (isManager(current))'));
+ assert.match(ui, /Zurück zur Eingabe/);
+ assert.match(ui, /Kontrollrunde speichern/);
+ assert.match(ui, /confirm\('Kontrollrunde verwerfen\? Die erfassten Werte werden nicht als Messung gespeichert\.'\)/);
+ assert.match(ui, /water-table/);
 });
 
 test('Die Sitzungsprüfung für Betriebsleitung und Mitarbeiter aus Tageswerk 3.0 bleibt offen', () => {

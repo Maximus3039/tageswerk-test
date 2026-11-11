@@ -24,6 +24,8 @@ import {
  waterDraftSaveDelay,
  waterDraftStatusText,
  waterParameterName,
+ waterRoundDisplayStatus,
+ waterRoundTableRows,
  waterRoundPools,
  waterRoundProgress
 } from './operations-controls.js';
@@ -39,6 +41,7 @@ import {
  waterControlState,
  waterHistoryCsv,
  waterHistoryRows,
+ waterOverviewRows,
  waterRowsForMember,
  waterScheduleLabel
 } from './operations.js';
@@ -84,6 +87,8 @@ let temperatureInstalled = false;
 let materialsInstalled = false;
 let waterInstalled = false;
 let selectedWaterPoolId = '';
+let waterSettingsOpen = false;
+let waterRoundNotice = '';
 let followUpAlertId = '';
 let waterDraftTimer = 0;
 let waterDraftStatus = '';
@@ -735,6 +740,33 @@ function discardButton(person, facilityId, round) {
  });
 }
 
+function waterTable(headers, rows) {
+ const wrap = document.createElement('div');
+ wrap.className = 'water-table-wrap';
+ const table = document.createElement('table');
+ table.className = 'water-table';
+ const head = document.createElement('tr');
+ for (const label of headers) {
+  const cell = document.createElement('th');
+  cell.scope = 'col';
+  cell.textContent = label;
+  head.append(cell);
+ }
+ table.append(head);
+ for (const values of rows) {
+  const line = document.createElement('tr');
+  for (const value of values) {
+   const cell = document.createElement('td');
+   cell.textContent = value;
+   if (value === 'fehlt') cell.className = 'is-missing';
+   line.append(cell);
+  }
+  table.append(line);
+ }
+ wrap.append(table);
+ return wrap;
+}
+
 function renderWaterRound(host, current, data) {
  const pools = waterRoundPools(data, current.id);
  const person = actor();
@@ -742,6 +774,13 @@ function renderWaterRound(host, current, data) {
  const title = document.createElement('h3');
  title.textContent = 'Kontrollrunde';
  card.append(title);
+ if (waterRoundNotice) {
+  const done = document.createElement('p');
+  done.className = 'water-round-status';
+  done.textContent = waterRoundNotice;
+  card.append(done);
+  waterRoundNotice = '';
+ }
  if (!pools.length) {
   const empty = document.createElement('p');
   empty.className = 'muted';
@@ -786,6 +825,13 @@ function renderWaterRound(host, current, data) {
  progressLine.className = 'water-progress';
  progressLine.textContent = `${progress.label} · ${progress.filled} von ${progress.total} vollständig`;
  card.append(progressLine);
+ const roundState = waterRoundDisplayStatus(data, round, person, new Date().toISOString());
+ if (roundState) {
+  const stateLine = document.createElement('p');
+  stateLine.className = 'water-round-status';
+  stateLine.textContent = roundState;
+  card.append(stateLine);
+ }
  const draftStatus = document.createElement('p');
  draftStatus.className = 'water-draft-status';
  draftStatus.textContent = waterDraftStatus;
@@ -800,19 +846,8 @@ function renderWaterRound(host, current, data) {
    message.textContent = review.error;
    card.append(message);
   } else {
-   for (const check of review.checks) {
-    const pool = pools.find(item => item.id === check.poolId);
-    const alerts = review.bundle.waterAlerts.filter(item => item.checkId === check.id);
-    const line = document.createElement('p');
-    line.textContent = `${pool?.name || 'Becken'}: ${check.readings.map(reading => `${waterParameterName(data, reading.parameterCode)} ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`).join(' · ')}`;
-    card.append(line);
-    if (alerts.length) {
-     const warning = document.createElement('p');
-     warning.className = 'help';
-     warning.textContent = `Grenzwertabweichung: ${alerts.map(item => waterParameterName(data, item.parameterCode)).join(', ')}. Die Messung wird trotzdem gespeichert.`;
-     card.append(warning);
-    }
-   }
+   const summaryRows = waterRoundTableRows(data, review).map(item => [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.status]);
+   card.append(waterTable(['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Status'], summaryRows));
    const actions = document.createElement('div');
    actions.className = 'point-actions';
    actions.append(button('Zurück zur Eingabe', 'secondary', async () => {
@@ -827,6 +862,7 @@ function renderWaterRound(host, current, data) {
     if (result?.ok) {
      clearWaterRound(person.userId, current.id);
      showDraftStatus('');
+     waterRoundNotice = 'Endgültig abgeschlossen';
     }
     return result;
    })));
@@ -951,7 +987,13 @@ function renderWater(host, current) {
  missingNote(host, waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
  const catalog = waterCatalog(data);
+ let settings = null;
  if (isManager(current)) {
+  settings = document.createElement('div');
+  settings.className = waterSettingsOpen ? 'water-settings' : 'water-settings hidden';
+  host.append(button('⚙ Einstellungen', 'secondary', () => {
+   waterSettingsOpen = settings.classList.toggle('hidden') === false;
+  }));
   const name = input();
   const mode = select([{value: 'daily', label: 'Täglich'}, {value: 'weekly', label: 'Wöchentlich'}, {value: 'times', label: 'Feste Uhrzeiten'}], 'daily');
   const count = input('1');
@@ -966,13 +1008,14 @@ function renderWater(host, current) {
    days.wrap.classList.toggle('hidden', !timed);
   };
   mode.addEventListener('change', paintSchedule);
-  host.append(labeled('Becken', name), labeled('Kontrollplan', mode), labeled('Intervallanzahl', count), labeled('Uhrzeiten', times), days.wrap);
-  host.append(button('Becken speichern', '', () => commit(() => saveWaterPool(database(), bundle(), {facility: current, name: name.value, scheduleMode: mode.value, intervalCount: count.value, scheduledTimes: times.value, weekdays: selectedWeekdays(days.boxes)}, actor(), new Date().toISOString(), context()))));
+  settings.append(labeled('Becken', name), labeled('Kontrollplan', mode), labeled('Intervallanzahl', count), labeled('Uhrzeiten', times), days.wrap);
+  settings.append(button('Becken speichern', '', () => commit(() => saveWaterPool(database(), bundle(), {facility: current, name: name.value, scheduleMode: mode.value, intervalCount: count.value, scheduledTimes: times.value, weekdays: selectedWeekdays(days.boxes)}, actor(), new Date().toISOString(), context()))));
   const hint = document.createElement('p');
   hint.className = 'help';
   hint.textContent = 'Sollbereiche werden nicht automatisch gesetzt. Ohne hinterlegten Bereich entsteht keine Grenzwertwarnung.';
-  host.append(hint);
+  settings.append(hint);
   paintSchedule();
+  host.append(settings);
  }
  const pools = data.waterPools.filter(item => item.facilityId === current.id).sort((left, right) => Number(left.active === false) - Number(right.active === false) || left.name.localeCompare(right.name, 'de'));
  if (!pools.length) {
@@ -982,25 +1025,37 @@ function renderWater(host, current) {
   host.append(empty);
   return;
  }
- const duePool = pools.find(pool => waterControlState(pool, data.waterChecks, data.waterPoolParameters, new Date().toISOString()).due);
- const initialPool = pools.some(pool => pool.id === selectedWaterPoolId) ? selectedWaterPoolId : (duePool || pools[0]).id;
- const picker = select(pools.map(pool => ({value: pool.id, label: pool.active === false ? `${pool.name} · deaktiviert` : pool.name})), initialPool);
- picker.addEventListener('change', () => {
-  selectedWaterPoolId = picker.value;
-  followUpAlertId = '';
-  renderPanel('');
- });
- host.append(labeled('Becken auswählen', picker));
- const pool = pools.find(item => item.id === picker.value);
- if (!pool) return;
- const parameterOrder = code => waterCatalog(data).findIndex(item => item.code === code);
- const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => parameterOrder(left.parameterCode) - parameterOrder(right.parameterCode));
  const nowIso = new Date().toISOString();
  const history = waterHistoryRole(current, state.myMemberships);
  const visible = waterRowsForMember(data, state.myMemberships, nowIso, actor().userId);
- const status = waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso);
- const row = item(pool.name, [`${waterScheduleLabel(pool)}`, status.detail], status.due);
- if (isManager(current)) {
+ const overview = waterOverviewRows(data, current.id, visible.checks, nowIso);
+ if (!history) {
+  const hiddenValues = document.createElement('p');
+  hiddenValues.className = 'help';
+  hiddenValues.textContent = 'Gespeicherte Messwerte werden für Mitarbeiter nicht angezeigt. Die noch nicht bestätigte Eingabe steht in der Kontrollrunde.';
+  host.append(hiddenValues);
+ }
+ host.append(waterTable(
+  ['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Letzte Messung', 'Status'],
+  overview.map(item => history
+   ? [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.measuredLabel, item.status]
+   : [item.poolName, 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', item.status])
+ ));
+ const duePool = pools.find(pool => waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso).due);
+ const initialPool = pools.some(pool => pool.id === selectedWaterPoolId) ? selectedWaterPoolId : (duePool || pools[0]).id;
+ const pool = pools.find(item => item.id === initialPool) || pools[0];
+ if (!pool) return;
+ const parameterOrder = code => waterCatalog(data).findIndex(item => item.code === code);
+ const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id).sort((left, right) => parameterOrder(left.parameterCode) - parameterOrder(right.parameterCode));
+ const row = document.createElement('div');
+ if (isManager(current) && settings) {
+  const picker = select(pools.map(entry => ({value: entry.id, label: entry.active === false ? `${entry.name} · deaktiviert` : entry.name})), pool.id);
+  picker.addEventListener('change', () => {
+   selectedWaterPoolId = picker.value;
+   followUpAlertId = '';
+   renderPanel('');
+  });
+  settings.append(labeled('Becken verwalten', picker));
   const actions = document.createElement('div');
   actions.className = 'point-actions';
   const editor = document.createElement('div');
@@ -1022,7 +1077,7 @@ function renderWater(host, current) {
   editor.append(button('Änderungen speichern', '', () => commit(() => saveWaterPoolChange(database(), bundle(), pool.id, {name: name.value, scheduleMode: mode.value, intervalCount: count.value, scheduledTimes: times.value, weekdays: selectedWeekdays(days.boxes)}, actor(), new Date().toISOString(), context()))));
   actions.append(button('Bearbeiten', 'secondary', () => editor.classList.toggle('hidden')));
   actions.append(button(pool.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveWaterPoolActive(database(), bundle(), pool.id, pool.active === false, actor(), new Date().toISOString(), context()))));
-  row.append(actions, editor);
+  settings.append(actions, editor);
   paintSchedule();
   for (const parameter of parameters) {
    const definition = catalog.find(item => item.code === parameter.parameterCode);
@@ -1040,22 +1095,13 @@ function renderWater(host, current) {
    const active = choice('Aktiv', parameter.active !== false);
    block.append(title, labeled(`Mindestens ${definition?.unit || ''}`.trim(), minimum), labeled(`Höchstens ${definition?.unit || ''}`.trim(), maximum), required.node, active.node);
    block.append(button('Parameter speichern', 'secondary', () => commit(() => saveWaterParameter(database(), bundle(), parameter.id, {minValue: minimum.value, maxValue: maximum.value, required: required.box.checked, active: active.box.checked}, actor(), new Date().toISOString(), context()))));
-   row.append(block);
+   settings.append(block);
   }
   const missingCodes = catalog.filter(item => !parameters.some(parameter => parameter.parameterCode === item.code));
   if (missingCodes.length) {
    const code = select(missingCodes.map(item => ({value: item.code, label: item.name})));
-   row.append(labeled('Weiteren Parameter ergänzen', code));
-   row.append(button('Parameter ergänzen', 'secondary', () => commit(() => saveWaterParameterAdd(database(), bundle(), pool.id, code.value, actor(), new Date().toISOString(), context()))));
-  }
- }
- else {
-  for (const parameter of parameters) {
-   const line = document.createElement('p');
-   line.className = 'help';
-   const stateText = parameter.active === false ? 'deaktiviert' : parameter.required === false ? 'optional' : 'erforderlich';
-   line.textContent = `${waterParameterName(data, parameter.parameterCode)} · ${rangeText(parameter)} · ${stateText}`;
-   row.append(line);
+   settings.append(labeled('Weiteren Parameter ergänzen', code));
+   settings.append(button('Parameter ergänzen', 'secondary', () => commit(() => saveWaterParameterAdd(database(), bundle(), pool.id, code.value, actor(), new Date().toISOString(), context()))));
   }
  }
  if (followUpAlertId && !data.waterAlerts.some(item => item.id === followUpAlertId && item.poolId === pool.id)) followUpAlertId = '';
@@ -1099,31 +1145,7 @@ function renderWater(host, current) {
   paused.textContent = history ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : 'Deaktiviert. Die laufende Kontrollrunde bleibt sichtbar.';
   row.append(paused);
  }
- const poolChecks = history ? [] : visible.checks.filter(item => item.poolId === pool.id);
- if (!history) {
-  const roundHeading = document.createElement('h3');
-  roundHeading.textContent = 'Offene Kontrollrunde';
-  row.append(roundHeading);
-  const empty = document.createElement('p');
-  empty.className = 'help';
-  empty.textContent = 'Gespeicherte Messwerte werden für Mitarbeiter nicht angezeigt. Die noch nicht bestätigte Eingabe steht in der Kontrollrunde.';
-  row.append(empty);
- }
- const checks = poolChecks;
- for (const check of checks) {
-  const values = check.readings.map(reading => {
-   const name = waterParameterName(data, reading.parameterCode);
-   const unit = reading.unit ? ` ${reading.unit}` : '';
-   const limits = reading.minLimit == null && reading.maxLimit == null ? '' : ` (damals ${reading.minLimit ?? '—'} bis ${reading.maxLimit ?? '—'})`;
-   return `${name} ${reading.value}${unit}${limits}`;
-  }).join(' · ');
-  const line = document.createElement('p');
-  line.className = 'help';
-  const repeat = check.followUpAlertId ? ' · Wiederholungsmessung' : '';
-  line.textContent = `${new Date(check.measuredAt).toLocaleString('de-DE')} · ${check.recordedName}: ${values}${check.note ? ` · ${check.note}` : ''}${repeat}`;
-  row.append(line);
- }
- for (const alert of visible.alerts.filter(item => item.poolId === pool.id)) {
+ for (const alert of visible.alerts.filter(item => pools.some(entry => entry.id === item.poolId))) {
   const name = waterParameterName(data, alert.parameterCode);
   const unit = alert.unit ? ` ${alert.unit}` : '';
   const line = document.createElement('p');
@@ -1144,7 +1166,7 @@ function renderWater(host, current) {
   row.append(button('Maßnahme speichern', 'secondary', () => commit(() => saveWaterMeasure(database(), bundle(), alert.id, measure.value, actor(), new Date().toISOString(), context()))));
   row.append(button('Wiederholungsmessung', 'secondary', () => {
    followUpAlertId = alert.id;
-   selectedWaterPoolId = pool.id;
+   selectedWaterPoolId = alert.poolId;
    renderPanel('');
   }));
   if (alert.status !== 'open') continue;

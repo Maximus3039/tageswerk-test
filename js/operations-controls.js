@@ -760,6 +760,33 @@ export function reviewWaterRound(bundle, round, actor, now) {
  return {ok: true, bundle: next, checks, pools};
 }
 
+export function waterRoundDisplayStatus(bundle, round, actor, now) {
+ if (!round) return '';
+ if (round.saved === true) return 'Endgültig abgeschlossen';
+ const review = reviewWaterRound(bundle, round, actor, now);
+ if (review.ok) return 'Vollständig ausgefüllt';
+ const stored = Number(round.revision) > 0 || (bundle?.waterRoundDrafts || []).some(draft => draft.roundId === round.roundId && draft.facilityId === round.facilityId && draft.status === 'open');
+ return stored ? 'Entwurf gespeichert' : '';
+}
+
+export function waterRoundTableRows(bundle, review) {
+ const pools = new Map((review?.pools || []).map(pool => [pool.id, pool.name]));
+ return (review?.checks || []).map(check => {
+  const values = {};
+  for (const code of ['temperature', 'ph', 'free_chlorine', 'combined_chlorine']) {
+   const reading = (check.readings || []).find(item => item.parameterCode === code);
+   values[code] = reading && String(reading.value ?? '') !== '' ? String(reading.value) : 'fehlt';
+  }
+  const alerts = (review.bundle?.waterAlerts || []).filter(item => item.checkId === check.id && item.status === 'open');
+  return {
+   poolId: check.poolId,
+   poolName: pools.get(check.poolId) || 'Becken',
+   values,
+   status: alerts.length ? `Grenzwertabweichung: ${alerts.map(item => waterParameterName(bundle, item.parameterCode)).join(', ')}` : 'Im Sollbereich'
+  };
+ });
+}
+
 export function waterAttention(bundle, facilityId, now) {
  return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).bucket);
 }

@@ -29,6 +29,17 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await expect(page.locator('[data-operation="temperature"]')).toHaveClass(/active/);
  await page.locator('[data-operation="water"]').click();
  await expect(page.locator('[data-operation="water"]')).toHaveClass(/active/);
+ const overflow = await page.evaluate(() => {
+  const wrap = document.createElement('div');
+  wrap.className = 'water-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'water-table';
+  table.innerHTML = '<tr><th>Becken</th><th>Temperatur</th><th>pH-Wert</th><th>Freies Chlor</th><th>Gebundenes Chlor</th><th>Letzte Messung</th><th>Status</th></tr><tr><td>Schwimmer</td><td class="is-missing">fehlt</td><td>7.20</td><td>0.50</td><td>0.20</td><td>11.11.2026, 09:00</td><td>Grenzwertabweichung: pH-Wert</td></tr><tr><td>Kinder</td><td class="is-missing">fehlt</td><td class="is-missing">fehlt</td><td class="is-missing">fehlt</td><td class="is-missing">fehlt</td><td>keine Messung</td><td>Die Kontrolle ist fällig.</td></tr>';
+  wrap.append(table);
+  document.querySelector('main').append(wrap);
+  return document.documentElement.scrollWidth - document.documentElement.clientWidth;
+ });
+ expect(overflow).toBeLessThanOrEqual(1);
  await page.locator('[data-operation="procurement"]').click();
  await expect(page.locator('[data-operation="procurement"]')).toHaveClass(/active/);
  await page.evaluate(async () => {
