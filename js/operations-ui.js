@@ -11,6 +11,7 @@ import {
  procurementFromStock,
  stockOf,
  temperatureDefectDraft,
+ configureTemperatureInput,
  beginWaterRound,
  clearWaterRound,
  loadWaterRound,
@@ -528,12 +529,10 @@ function renderTemperature(host, current) {
  if (isManager(current)) {
   const name = input();
   const location = input();
-  const minimum = input();
-  const maximum = input();
+  const minimum = configureTemperatureInput(input());
+  const maximum = configureTemperatureInput(input());
   const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), 'day');
   const count = input('1');
-  minimum.inputMode = 'decimal';
-  maximum.inputMode = 'decimal';
   count.inputMode = 'numeric';
   host.append(labeled('Messstelle', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
   host.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
@@ -551,12 +550,10 @@ function renderTemperature(host, current) {
    editor.className = 'point-editor hidden';
    const name = input(point.name);
    const location = input(point.location);
-   const minimum = input(String(point.minC));
-   const maximum = input(String(point.maxC));
+   const minimum = configureTemperatureInput(input(), String(point.minC));
+   const maximum = configureTemperatureInput(input(), String(point.maxC));
    const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), point.intervalUnit || 'day');
    const count = input(String(point.intervalCount || 1));
-   minimum.inputMode = 'decimal';
-   maximum.inputMode = 'decimal';
    count.inputMode = 'numeric';
    editor.append(labeled('Bezeichnung', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
    editor.append(button('Änderungen speichern', '', () => commit(() => saveTemperaturePointChange(database(), bundle(), point.id, {name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
@@ -565,8 +562,7 @@ function renderTemperature(host, current) {
    row.append(actions, editor);
   }
   if (point.active !== false) {
-   const value = input();
-   value.inputMode = 'decimal';
+   const value = configureTemperatureInput(input());
    const note = input();
    note.placeholder = 'Bemerkung, falls nötig';
    row.append(labeled('Gemessener Wert °C', value), labeled('Bemerkung', note));

@@ -31,4 +31,25 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await expect(page.locator('[data-operation="water"]')).toHaveClass(/active/);
  await page.locator('[data-operation="procurement"]').click();
  await expect(page.locator('[data-operation="procurement"]')).toHaveClass(/active/);
+ await page.evaluate(async () => {
+  const {configureTemperatureInput} = await import('./js/operations-controls.js');
+  const probe = document.createElement('input');
+  probe.id = 'temperature-probe';
+  probe.style.position = 'fixed';
+  probe.style.top = '8px';
+  probe.style.left = '8px';
+  probe.style.zIndex = '10000';
+  probe.style.width = '160px';
+  configureTemperatureInput(probe);
+  document.body.append(probe);
+ });
+ const probe = page.locator('#temperature-probe');
+ await probe.click();
+ await probe.pressSequentially('-18,5');
+ await expect(probe).toHaveValue('-18,5');
+ await expect(probe).toHaveJSProperty('min', '-50');
+ await expect(probe).toHaveJSProperty('max', '200');
+ await expect(probe).toHaveJSProperty('step', '0.1');
+ await expect(probe).toHaveJSProperty('type', 'text');
+ await expect(probe).toHaveJSProperty('inputMode', 'text');
 });
