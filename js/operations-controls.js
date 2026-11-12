@@ -370,6 +370,20 @@ function optionalLimit(definition, value) {
  return {ok: true, value: amount};
 }
 
+export function parseFacilityRoundTimes(value) {
+ if (String(value ?? '').trim() === '') return [];
+ const times = parseWaterTimes(value);
+ if (!times || times.length > 6) return null;
+ return times;
+}
+
+export function facilityRoundScheduleError(facility, times, actor) {
+ if (!facility?.id) return 'Bitte einen Betrieb auswählen.';
+ if (!canManage(facility, actor)) return 'Kontrollzeiten legt die Betriebsleitung oder Geschäftsführung fest.';
+ if (parseFacilityRoundTimes(times) === null) return 'Bitte bis zu sechs Uhrzeiten eintragen, zum Beispiel 09:00, 14:00, 19:00.';
+ return '';
+}
+
 export function parseWaterTimes(value) {
  const tokens = String(value ?? '').split(/[,;\s]+/).map(item => item.trim()).filter(Boolean);
  const times = [];
@@ -720,7 +734,10 @@ export function roundFromWaterDraft(draft) {
   phase: (draft.phase || progress.phase) === 'summary' ? 'summary' : 'edit',
   entries: draft.entries && typeof draft.entries === 'object' ? draft.entries : {},
   revision: Number(draft.revision) || 0,
-  saved: false
+  saved: false,
+  slotId: progress.slotId || null,
+  kind: progress.kind === 'planned' || progress.kind === 'extra' ? progress.kind : '',
+  slotTime: progress.slotTime || ''
  };
 }
 

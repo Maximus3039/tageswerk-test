@@ -12,6 +12,8 @@ import {
  reviewWaterRound,
  recordWaterMeasure,
  waterDraftStatusText,
+ facilityRoundScheduleError,
+ parseFacilityRoundTimes,
  setTemperaturePointActive,
  setWaterPoolActive,
  updateTemperaturePoint,
@@ -25,6 +27,7 @@ import {
  createDailyReport,
  createInspectionTemplate,
  createProcurement,
+ berlinDay,
  emptyOperations,
  linkAssetDefect,
  linkReportDefect,
@@ -445,6 +448,26 @@ function assemble(loaded, actor, context) {
    revision: Number(row.revision) || 0,
    createdAt: row.created_at,
    updatedAt: row.updated_at
+  })),
+  waterFacilitySlots: (loaded.water_facility_slots || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   time: String(row.slot_time || ''),
+   active: row.active !== false,
+   effectiveOn: String(row.effective_on || '').slice(0, 10),
+   retiredOn: String(row.retired_on || '').slice(0, 10)
+  })),
+  waterRoundSlots: (loaded.water_round_slots || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   roundId: row.round_id,
+   slotId: row.slot_id || null,
+   kind: row.kind === 'extra' ? 'extra' : 'planned',
+   slotTime: String(row.slot_time || ''),
+   serviceDay: String(row.service_day || '').slice(0, 10),
+   userId: row.user_id
   }))
  };
 }
@@ -492,7 +515,22 @@ export async function loadOperations(db, actor, context) {
  if (!materials.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: false, waterInstalled: false, error: materials.error, bundle: assemble(loaded, actor, context)};
  const water = await readGroup(db, loaded, waterTables);
  if (!water.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: false, error: water.error, bundle: assemble(loaded, actor, context)};
+ const schedule = await readOptional(db, loaded, ['water_facility_slots', 'water_round_slots']);
+ if (!schedule.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: water.installed, error: schedule.error, bundle: assemble(loaded, actor, context)};
  return {ok: true, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: water.installed, bundle: assemble(loaded, actor, context)};
+}
+
+async function readOptional(db, loaded, names) {
+ for (const table of names) {
+  const result = await readTable(db, table);
+  if (result?.error) {
+   if (!missingTable(result.error)) return {ok: false, error: storageMessage(result.error)};
+   loaded[table] = [];
+   continue;
+  }
+  loaded[table] = result?.data || [];
+ }
+ return {ok: true};
 }
 
 function owned(row, facility, actor) {
@@ -1129,7 +1167,13 @@ export async function saveWaterRoundDraft(db, round) {
    p_facility_id: round.facilityId,
    p_round_id: round.roundId,
    p_entries: round.entries || {},
-   p_progress: {index: round.index || 0, phase: round.phase === 'summary' ? 'summary' : 'edit'},
+   p_progress: {
+    index: round.index || 0,
+    phase: round.phase === 'summary' ? 'summary' : 'edit',
+    slotId: round.slotId || null,
+    kind: round.kind === 'planned' || round.kind === 'extra' ? round.kind : '',
+    slotTime: round.slotTime || ''
+   },
    p_revision: Number(round.revision) || 0
   });
  } catch (error) {
@@ -1153,6 +1197,26 @@ function withoutOpenRound(bundle, round) {
  return {
   ...bundle,
   waterRoundDrafts: (bundle.waterRoundDrafts || []).filter(draft => !(draft.roundId === round?.roundId && draft.facilityId === round?.facilityId))
+ };
+}
+
+function rememberCompletedRound(bundle, round, actor, now) {
+ const next = withoutOpenRound(bundle, round);
+ if (round?.kind !== 'planned' && round?.kind !== 'extra') return next;
+ if ((next.waterRoundSlots || []).some(item => item.roundId === round.roundId)) return next;
+ return {
+  ...next,
+  waterRoundSlots: [...(next.waterRoundSlots || []), {
+   id: `local-${round.roundId}`,
+   facilityId: round.facilityId,
+   organizationId: '',
+   roundId: round.roundId,
+   slotId: round.kind === 'planned' ? round.slotId : null,
+   kind: round.kind,
+   slotTime: round.kind === 'planned' ? (round.slotTime || '') : '',
+   serviceDay: berlinDay(now),
+   userId: actor.userId
+  }]
  };
 }
 
@@ -1197,31 +1261,55 @@ function reportedWaterRoundFailure(error) {
 export async function saveWaterRound(db, bundle, round, actor, now, context) {
  const review = reviewWaterRound(bundle, round, actor, now);
  if (!review.ok) return denied(bundle, review.error);
+ if (round?.kind === 'planned' && !round.slotId) return denied(bundle, 'Die Kontrollrunde ist keinem Termin zugeordnet.');
+ const scheduled = round?.kind === 'planned' || round?.kind === 'extra';
+ const rpcName = scheduled ? 'tageswerk_record_scheduled_water_round' : 'tageswerk_record_water_round';
+ const args = {
+  p_round_id: round.roundId,
+  p_checks: review.checks.map(check => ({
+   pool_id: check.poolId,
+   facility_id: check.facilityId,
+   note: check.note,
+   readings: check.readings.map(reading => ({parameter_code: reading.parameterCode, value: reading.value}))
+  }))
+ };
+ if (scheduled) args.p_slot_id = round.kind === 'planned' ? round.slotId : null;
+ const occupiedSlot = async message => {
+  if (!(scheduled && round?.kind === 'planned' && message === 'Dieser Termin wurde bereits abgeschlossen.')) return null;
+  const loaded = await loadOperations(db, actor, context);
+  return {
+   ok: false,
+   conflict: true,
+   error: 'Dieser Termin wurde bereits abgeschlossen. Die eingegebenen Messwerte bleiben erhalten.',
+   bundle: loaded.ok ? loaded.bundle : bundle
+  };
+ };
  let result;
  try {
-  result = await db.rpc('tageswerk_record_water_round', {
-   p_round_id: round.roundId,
-   p_checks: review.checks.map(check => ({
-    pool_id: check.poolId,
-    facility_id: check.facilityId,
-    note: check.note,
-    readings: check.readings.map(reading => ({parameter_code: reading.parameterCode, value: reading.value}))
-   }))
-  });
+  result = await db.rpc(rpcName, args);
  } catch (error) {
-  return denied(bundle, reportedWaterRoundFailure(error));
+  const message = reportedWaterRoundFailure(error);
+  return await occupiedSlot(message) || denied(bundle, message);
  }
- if (result?.error) return denied(bundle, reportedWaterRoundFailure(result.error));
+ if (result?.error) {
+  const message = reportedWaterRoundFailure(result.error);
+  return await occupiedSlot(message) || denied(bundle, message);
+ }
  const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
  if (payload?.status === 'already_stored' && payload.round_id === round.roundId) {
-  return {ok: true, id: round.roundId, ids: [], bundle: withoutOpenRound(bundle, round)};
+  if (!scheduled) return {ok: true, id: round.roundId, ids: [], bundle: withoutOpenRound(bundle, round)};
+  const confirmed = await loadOperations(db, actor, context);
+  if (!confirmed.ok) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+  const linked = (confirmed.bundle.waterRoundSlots || []).some(item => item.roundId === round.roundId && item.facilityId === round.facilityId);
+  if (!linked) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
+  return {ok: true, id: round.roundId, ids: [], bundle: withoutOpenRound(confirmed.bundle, round)};
  }
  const ids = Array.isArray(payload?.ids) ? payload.ids : [];
  if (payload?.status !== 'stored' || payload.round_id !== round.roundId || ids.length !== review.checks.length) {
   return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
  }
  const facility = {id: review.checks[0].facilityId, organization_id: review.checks[0].organizationId};
- if (!waterHistoryRole(facility, actor.memberships)) return {ok: true, id: round.roundId, ids, bundle: withoutOpenRound(bundle, round)};
+ if (!waterHistoryRole(facility, actor.memberships)) return {ok: true, id: round.roundId, ids, bundle: rememberCompletedRound(bundle, round, actor, now)};
  const loaded = await loadOperations(db, actor, context);
  if (!loaded.ok) return denied(bundle, 'Die Kontrollrunde wurde nicht vollständig bestätigt.');
  for (const expected of review.checks) {
@@ -1236,7 +1324,25 @@ export async function saveWaterRound(db, bundle, round, actor, now, context) {
   const again = loaded.bundle.waterChecks.find(item => item.id === previous.id);
   if (again && JSON.stringify(again.readings) !== JSON.stringify(previous.readings)) return denied(bundle, 'Die Historie wurde nicht unverändert bestätigt.');
  }
- return {ok: true, id: round.roundId, ids, bundle: withoutOpenRound(loaded.bundle, round)};
+ return {ok: true, id: round.roundId, ids, bundle: rememberCompletedRound(loaded.bundle, round, actor, now)};
+}
+
+export async function saveWaterFacilitySlots(db, bundle, facility, times, actor, now, context) {
+ const scheduleError = facilityRoundScheduleError(facility, times, actor);
+ if (scheduleError) return denied(bundle, scheduleError);
+ let result;
+ try {
+  result = await db.rpc('tageswerk_save_water_facility_slots', {
+   p_facility_id: facility.id,
+   p_times: parseFacilityRoundTimes(times)
+  });
+ } catch (failure) {
+  return denied(bundle, storageMessage(failure));
+ }
+ if (result?.error) return denied(bundle, storageMessage(result.error));
+ const loaded = await loadOperations(db, actor, context);
+ if (!loaded.ok) return denied(bundle, loaded.error || 'Die Kontrollzeiten wurden nicht bestätigt.');
+ return {ok: true, id: facility.id, bundle: loaded.bundle};
 }
 
 export async function saveWaterAcknowledgement(db, bundle, alertId, note, actor, now, context) {
