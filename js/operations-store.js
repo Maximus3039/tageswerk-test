@@ -79,6 +79,22 @@ export function storageMessage(error) {
  return 'Die Speicherung wurde nicht bestätigt.';
 }
 
+export function waterRoundFailureMessage(error) {
+ const text = [error?.code, error?.message, error?.details, error?.hint].filter(Boolean).join(' ');
+ const readable = storageMessage(error);
+ if (/row-level security|42501|permission denied|Keine Berechtigung/i.test(text)) {
+  return 'Keine Berechtigung für diese Kontrollrunde. Die erfassten Werte bleiben im Entwurf.';
+ }
+ if (/nur über die vorgesehene Funktion/i.test(text)) {
+  return 'Die Kontrollrunde konnte nicht abgeschlossen werden. Die erfassten Werte bleiben im Entwurf.';
+ }
+ if (/water_checks_round_pool|duplicate key value/i.test(text)) {
+  return 'Die Kontrollrunde ist bereits gespeichert. Bitte den Abschluss erneut versuchen.';
+ }
+ if (readable && readable !== 'Die Speicherung wurde nicht bestätigt.') return readable;
+ return 'Die Kontrollrunde wurde nicht abgeschlossen. Die erfassten Werte bleiben im Entwurf.';
+}
+
 function denied(bundle, error) {
  return {ok: false, error, bundle};
 }
@@ -1155,6 +1171,29 @@ export async function discardWaterRound(db, round) {
  return {ok: false, error: 'Der Entwurf wurde nicht verworfen.'};
 }
 
+function reportedWaterRoundFailure(error) {
+ const code = String(error?.code || '');
+ const raw = String(error?.message || '');
+ const logged = raw
+  .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[ohne personenbezogene Daten]')
+  .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[ohne personenbezogene Daten]')
+  .replace(/"(?:[^"\\]|\\.)*"/g, '"…"')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 240);
+ console.error('tageswerk_record_water_round', code, logged);
+ const message = raw.replace(/[ \t]+/g, ' ').trim();
+ const suitable = message.length > 0
+  && message.length < 240
+  && !/[\r\n]/.test(raw)
+  && !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(message)
+  && !/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|bearer\s+/i.test(message)
+  && !/p_checks|parameter_code|"readings"/i.test(message);
+ return suitable
+  ? message
+  : 'Die Kontrollrunde konnte nicht abgeschlossen werden. Die Eingaben bleiben erhalten.';
+}
+
 export async function saveWaterRound(db, bundle, round, actor, now, context) {
  const review = reviewWaterRound(bundle, round, actor, now);
  if (!review.ok) return denied(bundle, review.error);
@@ -1170,9 +1209,9 @@ export async function saveWaterRound(db, bundle, round, actor, now, context) {
    }))
   });
  } catch (error) {
-  return denied(bundle, storageMessage(error));
+  return denied(bundle, reportedWaterRoundFailure(error));
  }
- if (result?.error) return denied(bundle, storageMessage(result.error));
+ if (result?.error) return denied(bundle, reportedWaterRoundFailure(result.error));
  const payload = result?.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : null;
  if (payload?.status === 'already_stored' && payload.round_id === round.roundId) {
   return {ok: true, id: round.roundId, ids: [], bundle: withoutOpenRound(bundle, round)};

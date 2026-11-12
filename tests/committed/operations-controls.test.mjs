@@ -58,6 +58,7 @@ import {
  saveWaterCheck,
  saveWaterRound,
  saveWaterRoundDraft,
+ waterRoundFailureMessage,
  discardWaterRound,
  saveWaterMeasure,
  saveWaterParameter,
@@ -1422,4 +1423,169 @@ test('Dieselbe Person sieht Wasserwerte nur im Betrieb mit Historienrolle', () =
  assert.equal(adminView.checks.length, 2);
  const foreignAdmin = waterRowsForMember(bundle, [membership('company_admin', foreign)], now, 'foreign-admin');
  assert.equal(foreignAdmin.checks.length, 0);
+});
+
+test('Kontrollrunde abschließen bleibt je Rolle bestätigt und übersteht einen Fehler', async () => {
+ const kinder = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const schwimmer = createWaterPool(kinder.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ let bundle = schwimmer.bundle;
+ for (const pool of [kinder.pool, schwimmer.pool]) {
+  bundle = updateWaterParameter(bundle, parameter(bundle, pool.id, 'ph').id, {minValue: '6.50', maxValue: '7.60', required: true, active: true}, manager).bundle;
+ }
+ const technician = {userId: 'technician-1', name: 'Timo', memberships: [membership('technician')]};
+ const ready = emptyWaterRound(facility.id, 'round-close');
+ ready.revision = 2;
+ ready.phase = 'summary';
+ ready.entries[kinder.pool.id] = {values: hygieneValues({ph: '8,20'}), note: 'hoch'};
+ ready.entries[schwimmer.pool.id] = {values: hygieneValues(), note: ''};
+ const incomplete = {...ready, entries: {...ready.entries, [schwimmer.pool.id]: {values: hygieneValues({ph: ''}), note: ''}}};
+ const incompleteDb = withWaterRound(controlDb({userId: employee.userId}), employee.userId);
+ const rejected = await saveWaterRound(incompleteDb, bundle, incomplete, employee, now, context);
+ assert.equal(rejected.ok, false);
+ assert.match(rejected.error, /Schwimmer/);
+ assert.equal(incompleteDb.calls.some(call => call[0] === 'rpc'), false);
+ assert.equal(incomplete.entries[kinder.pool.id].values.ph, '8,20');
+ assert.equal(waterRoundDisplayStatus(bundle, incomplete, employee, now), 'Entwurf gespeichert');
+
+ const employeeDb = withWaterRound(controlDb({userId: employee.userId}), employee.userId);
+ seedWaterLimits(employeeDb, [kinder.pool, schwimmer.pool]);
+ const employeeSaved = await saveWaterRound(employeeDb, bundle, ready, employee, now, context);
+ assert.equal(employeeSaved.ok, true, employeeSaved.error);
+ assert.equal(employeeSaved.id, ready.roundId);
+ assert.equal(employeeDb.rows.water_checks.filter(row => row.round_id === ready.roundId).length, 2);
+ assert.equal(employeeDb.rows.water_alerts.some(item => item.parameter_code === 'ph' && item.value_amount === '8.20'), true);
+ assert.equal(employeeSaved.bundle.waterChecks.some(item => item.roundId === ready.roundId), false);
+
+ const technicianDb = withWaterRound(controlDb({userId: technician.userId}), technician.userId);
+ seedWaterLimits(technicianDb, [kinder.pool, schwimmer.pool]);
+ const technicianReady = {...ready, roundId: 'round-technician'};
+ const technicianSaved = await saveWaterRound(technicianDb, bundle, technicianReady, technician, now, context);
+ assert.equal(technicianSaved.ok, true, technicianSaved.error);
+ assert.equal(technicianSaved.bundle.waterChecks.filter(item => item.roundId === technicianReady.roundId && item.recordedBy === technician.userId).length, 2);
+ assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, technician.memberships), true);
+ assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, employee.memberships), false);
+
+ const deniedDb = controlDb({userId: employee.userId});
+ deniedDb.rpc = async () => ({data: null, error: {code: '42501', message: 'new row violates row-level security policy for table "water_round_drafts"'}});
+ const denied = await saveWaterRound(deniedDb, bundle, {...ready, roundId: 'round-denied'}, employee, now, context);
+ assert.equal(denied.ok, false);
+ assert.equal(denied.error, 'new row violates row-level security policy for table "water_round_drafts"');
+ assert.doesNotMatch(denied.error, /nicht installiert/);
+ assert.equal(deniedDb.rows.water_checks.length, 0);
+ assert.equal(ready.entries[kinder.pool.id].values.ph, '8,20');
+ assert.notEqual(waterRoundDisplayStatus(bundle, ready, employee, now), 'Endgültig abgeschlossen');
+
+ const guardDb = controlDb({userId: technician.userId});
+ guardDb.rpc = async () => ({data: null, error: {code: 'P0001', message: 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.'}});
+ const guarded = await saveWaterRound(guardDb, bundle, technicianReady, technician, now, context);
+ assert.equal(guarded.ok, false);
+ assert.equal(guarded.error, 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.');
+ assert.equal(guardDb.rows.water_checks.length, 0);
+ assert.equal(technicianReady.entries[schwimmer.pool.id].values.temperature, '28.0');
+
+ const retryDb = withWaterRound(controlDb({userId: technician.userId}), technician.userId, 0);
+ seedWaterLimits(retryDb, [kinder.pool, schwimmer.pool]);
+ const retryRound = {...ready, roundId: 'round-retry'};
+ const failed = await saveWaterRound(retryDb, bundle, retryRound, technician, now, context);
+ assert.equal(failed.ok, false);
+ assert.match(failed.error, /unvollständig|bleiben im Entwurf/);
+ assert.equal(retryDb.rows.water_checks.length, 0);
+ assert.equal(retryRound.entries[kinder.pool.id].values.ph, '8,20');
+ withWaterRound(retryDb, technician.userId);
+ const retried = await saveWaterRound(retryDb, bundle, retryRound, technician, now, context);
+ assert.equal(retried.ok, true, retried.error);
+ assert.equal(retryDb.rows.water_checks.filter(row => row.round_id === 'round-retry').length, 2);
+ assert.equal(waterRoundDisplayStatus(bundle, retryRound, technician, now), 'Vollständig ausgefüllt');
+
+ const logged = [];
+ const previousError = console.error;
+ console.error = (...args) => logged.push(args);
+ try {
+  const visibleDb = controlDb({userId: employee.userId});
+  visibleDb.rpc = async () => ({data: null, error: {code: '42883', message: 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist', details: ready.entries}});
+  const visible = await saveWaterRound(visibleDb, bundle, {...ready, roundId: 'round-visible'}, employee, now, context);
+  assert.equal(visible.ok, false);
+  assert.equal(visible.error, 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist');
+  assert.doesNotMatch(visible.error, /Betriebsdatenbank ist noch nicht installiert/);
+  const thrownDb = controlDb({userId: employee.userId});
+  thrownDb.rpc = async () => { throw {code: 'PGRST202', message: 'invalid input syntax for type numeric: "8,20"', details: 'person@example.com'}; };
+  const thrown = await saveWaterRound(thrownDb, bundle, {...ready, roundId: 'round-thrown'}, employee, now, context);
+  assert.equal(thrown.error, 'invalid input syntax for type numeric: "8,20"');
+  const emptyDb = controlDb({userId: employee.userId});
+  emptyDb.rpc = async () => ({data: null, error: {code: 'XX000', message: ''}});
+  const empty = await saveWaterRound(emptyDb, bundle, {...ready, roundId: 'round-empty'}, employee, now, context);
+  assert.equal(empty.error, 'Die Kontrollrunde konnte nicht abgeschlossen werden. Die Eingaben bleiben erhalten.');
+ } finally {
+  console.error = previousError;
+ }
+ assert.deepEqual(logged[0], ['tageswerk_record_water_round', '42883', 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist']);
+ assert.equal(logged[0].length, 3);
+ assert.doesNotMatch(logged.map(entry => entry.join(' ')).join('\n'), /8,20|person@example.com|parameter_code/);
+
+ const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const handler = ui.slice(ui.indexOf("button('Kontrollrunde speichern'"), ui.indexOf('card.append(actions);', ui.indexOf("button('Kontrollrunde speichern'")));
+ const confirmed = handler.slice(handler.indexOf('if (result?.ok)'), handler.indexOf('} else {'));
+ assert.match(confirmed, /clearWaterRound/);
+ assert.match(confirmed, /Endgültig abgeschlossen/);
+ assert.doesNotMatch(handler.slice(0, handler.indexOf('if (result?.ok)')), /Endgültig abgeschlossen/);
+ assert.match(handler, /waterRoundError = result\?\.error/);
+ assert.match(handler, /if \(!result\?\.ok\) renderPanel\(\)/);
+ assert.equal(waterRoundFailureMessage({code: '42501', message: 'permission denied for table water_checks'}), 'Keine Berechtigung für diese Kontrollrunde. Die erfassten Werte bleiben im Entwurf.');
+
+ const installed = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+ const proof = installed.slice(installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_checks_in_transaction'), installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_discard_in_transaction'));
+ const oldRecord = installed.slice(installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_discard_water_round_draft'));
+ assert.match(proof, /check_row\.xmin = pg_current_xact_id\(\)::xid/);
+ assert.match(oldRecord, /INSERT INTO public\.water_checks[\s\S]*^\s*EXCEPTION\b/m);
+ const correction = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close.sql', import.meta.url), 'utf8');
+ const record = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), correction.lastIndexOf('REVOKE ALL ON FUNCTION public.tageswerk_record_water_round'));
+ const helper = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_own_water_round_stored'), correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'));
+ assert.doesNotMatch(record, /^\s*EXCEPTION\b/m);
+ assert.doesNotMatch(record, /EXCEPTION WHEN/);
+ assert.doesNotMatch(record, /SECURITY DEFINER/);
+ assert.doesNotMatch(record, /set_config/);
+ assert.ok(record.indexOf('INSERT INTO public.water_checks') < record.indexOf('UPDATE public.water_round_drafts'));
+ assert.ok(record.indexOf('UPDATE public.water_round_drafts') < record.indexOf('GET DIAGNOSTICS closed_drafts = ROW_COUNT'));
+ assert.match(record, /closed_drafts IS DISTINCT FROM 1/);
+ assert.match(record, /user_id = auth\.uid\(\)/);
+ assert.match(record, /status = 'open'/);
+ assert.match(record, /facility_id = facility/);
+ assert.match(helper, /RETURNS boolean/);
+ assert.match(helper, /SECURITY DEFINER/);
+ assert.match(helper, /SET search_path = ''/);
+ assert.match(helper, /check_row\.recorded_by = auth\.uid\(\)/);
+ assert.match(helper, /draft\.user_id = auth\.uid\(\)/);
+ assert.match(helper, /draft\.status = 'completed'/);
+ assert.match(helper, /public\.tageswerk_meter_role/);
+ assert.match(helper, /::numeric/);
+ assert.match(helper, /coalesce\(item->>'note', ''\) IS DISTINCT FROM check_row\.note/);
+ assert.match(helper, /check_row\.recorded_by IS DISTINCT FROM auth\.uid\(\)/);
+ assert.doesNotMatch(helper, /EXCEPTION WHEN/);
+ assert.doesNotMatch(helper, /INSERT|UPDATE|DELETE/);
+ assert.match(record, /tageswerk_own_water_round_stored\(p_round_id, p_checks\)/);
+ assert.doesNotMatch(correction, /DROP POLICY|CREATE POLICY|water_checks_select/);
+ assert.doesNotMatch(correction, /employee/);
+ const runner = readFileSync(new URL('../integration/run.mjs', import.meta.url), 'utf8');
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close\.sql/);
+ const check = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_pruefung.sql', import.meta.url), 'utf8');
+ assert.match(check, /to_regprocedure\('public\.tageswerk_own_water_round_stored\(uuid,jsonb\)'\)/);
+ assert.match(check, /to_regprocedure\('public\.tageswerk_own_water_round_stored\(uuid,uuid\[\]\)'\) IS NULL/);
+ assert.match(check, /check_row\.note/);
+ assert.match(check, /public\.tageswerk_meter_role/);
+ assert.match(check, /::numeric/);
+ assert.match(check, /to_regprocedure\('public\.tageswerk_record_water_round\(uuid,jsonb\)'\)/);
+ assert.match(check, /water_checks_protect/);
+ assert.match(check, /helper\.prosecdef IS TRUE/);
+ assert.match(check, /recorder\.prosecdef IS FALSE/);
+ assert.match(check, /GET DIAGNOSTICS closed_drafts = ROW_COUNT/);
+ assert.match(check, /draft\.status = ''completed''/);
+ assert.match(check, /EXCEPTION WHEN/);
+ assert.doesNotMatch(check, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
+ assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_record_water_round/i);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_pruefung\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_bereinigung\.sql/);
+ const cleanup = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_bereinigung.sql', import.meta.url), 'utf8');
+ assert.match(cleanup, /DROP FUNCTION IF EXISTS public\.tageswerk_own_water_round_stored\(uuid, uuid\[\]\);/);
+ assert.doesNotMatch(cleanup, /uuid, jsonb/);
+ assert.doesNotMatch(cleanup, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
 });
