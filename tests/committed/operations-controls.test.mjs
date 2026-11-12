@@ -1695,6 +1695,7 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
    active: true
   }));
   shared.rows.water_round_slots = shared.assignments;
+  shared.activePoolIds = [created.pool.id, secondPool.pool.id];
   shared.rows.water_checks.push({
    id: 'historic-1', pool_id: created.pool.id, facility_id: facility.id, organization_id: facility.organization_id,
    measured_at: '2026-11-01T10:00:00.000Z', recorded_by: manager.userId, note: 'alt', round_id: null,
@@ -1708,10 +1709,14 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
     if (name === 'tageswerk_discard_water_round_draft') return {data: {status: 'discarded', round_id: args.p_round_id}, error: null};
     if (name !== 'tageswerk_record_scheduled_water_round') return record(name, args);
     const day = berlinDay(now);
-    const activePoolIds = [created.pool.id, secondPool.pool.id];
+    const activePoolIds = shared.activePoolIds;
+    const required = ['free_chlorine', 'combined_chlorine', 'ph', 'temperature'];
     const supplied = [...new Set((args.p_checks || []).map(item => item.pool_id))];
-    if (supplied.length !== activePoolIds.length || supplied.some(id => !activePoolIds.includes(id))) {
+    if (!supplied.length || supplied.some(id => !activePoolIds.includes(id)) || (args.p_slot_id && supplied.length !== activePoolIds.length)) {
      return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde umfasst nicht alle aktiven Becken.'}};
+    }
+    if ((args.p_checks || []).some(item => required.some(code => !(item.readings || []).some(reading => reading.parameter_code === code && String(reading.value ?? '') !== '')))) {
+     return {data: null, error: {code: 'P0001', message: 'Bitte die Messwerte eintragen.'}};
     }
     if (args.p_slot_id) {
      const clash = shared.assignments.find(item => item.slot_id === args.p_slot_id && item.service_day === day && item.kind === 'planned' && item.round_id !== args.p_round_id);
@@ -1853,6 +1858,27 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(extraAgain.ok, true, extraAgain.error);
  assert.equal(extraDay.shared.assignments.length, 1);
  assert.equal(extraDay.shared.rows.water_checks.filter(row => row.round_id === 'round-extra').length, 2);
+ const choice = openSchedule();
+ const sport = createWaterPool(bundle, {facility, name: 'Sport', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ choice.shared.activePoolIds = [created.pool.id, secondPool.pool.id, sport.pool.id];
+ const choiceDb = choice.connect(employee.userId);
+ const readings = Object.entries(hygieneValues()).map(([parameter_code, value]) => ({parameter_code, value}));
+ const payload = poolIds => poolIds.map(poolId => ({pool_id: poolId, facility_id: facility.id, note: '', readings}));
+ const onePool = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-one', p_slot_id: null, p_checks: payload([created.pool.id])});
+ assert.equal(onePool.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-one').length, 1);
+ assert.equal(choice.shared.assignments.filter(item => item.round_id === 'extra-one' && item.kind === 'extra' && item.slot_id === null).length, 1);
+ const severalPools = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-several', p_slot_id: null, p_checks: payload([created.pool.id, secondPool.pool.id])});
+ assert.equal(severalPools.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-several').length, 2);
+ const allPools = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-all', p_slot_id: null, p_checks: payload(choice.shared.activePoolIds)});
+ assert.equal(allPools.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-all').length, 3);
+ const incompletePool = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-incomplete', p_slot_id: null, p_checks: [{pool_id: created.pool.id, facility_id: facility.id, note: '', readings: [{parameter_code: 'ph', value: '7.20'}]}]});
+ assert.match(incompletePool.error.message, /Messwerte/);
+ assert.equal(choice.shared.rows.water_checks.some(row => row.round_id === 'extra-incomplete'), false);
+ assert.equal(choice.shared.assignments.some(item => item.round_id === 'extra-incomplete'), false);
+ assert.equal(choice.shared.assignments.filter(item => item.kind === 'planned').length, 0);
  const orphanDay = openSchedule();
  const orphanDb = orphanDay.connect(employee.userId);
  const storedWithoutPlan = await saveWaterRound(orphanDb, bundle, {...filled('round-orphan', slots[0]), kind: ''}, employee, now, context);
@@ -1990,6 +2016,11 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(scheduledBeforeRecord.includes('already_stored'), false);
  assert.match(scheduled, /bereits gespeichert und kann diesem Termin nicht zugeordnet/);
  assert.match(schedule, /tageswerk_water_round_covers_active_pools\(round_id, facility_id\)/);
+ const roundPolicy = schedule.slice(schedule.indexOf('CREATE POLICY water_round_slots_insert'), schedule.indexOf('REVOKE ALL ON TABLE public.water_facility_slots'));
+ const extraPolicy = roundPolicy.slice(roundPolicy.indexOf("kind = 'extra'"), roundPolicy.indexOf("kind = 'planned'"));
+ assert.equal(extraPolicy.includes('tageswerk_water_round_covers_active_pools'), false);
+ assert.match(roundPolicy.slice(roundPolicy.indexOf("kind = 'planned'")), /tageswerk_water_round_covers_active_pools/);
+ assert.match(scheduled, /p_slot_id IS NOT NULL AND public\.tageswerk_water_round_covers_active_pools/);
  assert.match(schedule, /nicht alle aktiven Becken/);
  const savePlan = schedule.slice(schedule.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_save_water_facility_slots'), schedule.lastIndexOf('REVOKE ALL ON FUNCTION'));
  assert.equal(savePlan.indexOf('tageswerk_lock_water_facility_plan') >= 0 && savePlan.indexOf('tageswerk_lock_water_facility_plan') < savePlan.indexOf('UPDATE public.water_facility_slots'), true);

@@ -12,7 +12,8 @@
 -- Der laufende Tag und bereits gespeicherte Zuordnungen bleiben unverändert.
 -- Eine wiederholte identische Speicheranfrage bestätigt nur eine vorhandene Zuordnung.
 -- Eine bereits gespeicherte Runde wird nicht nachträglich einem anderen Termin zugeordnet.
--- Eine geplante Runde und eine Zusatzkontrolle müssen alle aktiven Becken enthalten.
+-- Eine geplante Runde muss alle aktiven Becken enthalten.
+-- Eine Zusatzkontrolle erfasst mindestens ein aktives Becken, auch eine Auswahl.
 -- Der Eigentümer der Sperrfunktion muss derselbe sein wie bei den bestehenden
 -- SECURITY-DEFINER-Funktionen der Wasserhygiene.
 
@@ -252,12 +253,12 @@ CREATE POLICY water_round_slots_insert ON public.water_round_slots
     user_id = auth.uid()
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND public.tageswerk_water_round_checks_in_transaction(round_id, facility_id)
-    AND public.tageswerk_water_round_covers_active_pools(round_id, facility_id)
     AND service_day = (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date
     AND (
       (kind = 'extra' AND slot_id IS NULL)
       OR (
         kind = 'planned'
+        AND public.tageswerk_water_round_covers_active_pools(round_id, facility_id)
         AND EXISTS (
           SELECT 1
           FROM public.water_facility_slots AS slot
@@ -384,7 +385,7 @@ BEGIN
         AND pool.active IS TRUE
     );
   IF active_pools < 1
-     OR active_pools IS DISTINCT FROM supplied_pools
+     OR supplied_pools < 1
      OR EXISTS (
        SELECT 1
        FROM pg_catalog.jsonb_array_elements(p_checks) AS item
@@ -397,6 +398,9 @@ BEGIN
               AND pool.active IS TRUE
           )
      ) THEN
+    RAISE EXCEPTION 'Die Kontrollrunde umfasst nicht alle aktiven Becken.';
+  END IF;
+  IF p_slot_id IS NOT NULL AND active_pools IS DISTINCT FROM supplied_pools THEN
     RAISE EXCEPTION 'Die Kontrollrunde umfasst nicht alle aktiven Becken.';
   END IF;
   claimed := public.tageswerk_claim_water_round_slot(facility, p_slot_id, p_round_id);
@@ -417,7 +421,7 @@ BEGIN
   IF claimed = 'already' THEN
     RAISE EXCEPTION 'Diese Kontrollrunde ist bereits einem Termin zugeordnet.';
   END IF;
-  IF public.tageswerk_water_round_covers_active_pools(p_round_id, facility) IS NOT TRUE THEN
+  IF p_slot_id IS NOT NULL AND public.tageswerk_water_round_covers_active_pools(p_round_id, facility) IS NOT TRUE THEN
     RAISE EXCEPTION 'Die Kontrollrunde umfasst nicht alle aktiven Becken.';
   END IF;
   INSERT INTO public.water_round_slots (facility_id, round_id, slot_id, kind, slot_time)
