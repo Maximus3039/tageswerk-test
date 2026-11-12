@@ -10,6 +10,9 @@
 -- Verworfene Entwürfe schreiben keine Zuordnung und blockieren keinen Termin.
 -- Neue und geänderte Kontrollzeiten gelten ab dem nächsten Kalendertag in Europe/Berlin.
 -- Der laufende Tag und bereits gespeicherte Zuordnungen bleiben unverändert.
+-- Eine wiederholte identische Speicheranfrage bestätigt nur eine vorhandene Zuordnung.
+-- Eine bereits gespeicherte Runde wird nicht nachträglich einem anderen Termin zugeordnet.
+-- Eine geplante Runde und eine Zusatzkontrolle müssen alle aktiven Becken enthalten.
 -- Der Eigentümer der Sperrfunktion muss derselbe sein wie bei den bestehenden
 -- SECURITY-DEFINER-Funktionen der Wasserhygiene.
 
@@ -56,6 +59,57 @@ CREATE UNIQUE INDEX water_round_slots_one_planned
   ON public.water_round_slots (facility_id, slot_id, service_day)
   WHERE kind = 'planned';
 
+CREATE OR REPLACE FUNCTION public.tageswerk_lock_water_facility_plan(p_facility_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+VOLATILE
+SET search_path = ''
+AS $tageswerk$
+BEGIN
+  IF p_facility_id IS NOT NULL THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('tageswerk-water-facility-plan:' || p_facility_id::text, 0::bigint)
+    );
+  END IF;
+END;
+$tageswerk$;
+
+CREATE OR REPLACE FUNCTION public.tageswerk_water_round_covers_active_pools(
+  p_round_id uuid,
+  p_facility_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $tageswerk$
+  SELECT p_round_id IS NOT NULL
+    AND p_facility_id IS NOT NULL
+    AND auth.uid() IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM public.water_pools AS pool
+      WHERE pool.facility_id = p_facility_id
+        AND pool.active IS TRUE
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.water_pools AS pool
+      WHERE pool.facility_id = p_facility_id
+        AND pool.active IS TRUE
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.water_checks AS check_row
+          WHERE check_row.round_id = p_round_id
+            AND check_row.pool_id = pool.id
+            AND check_row.facility_id = p_facility_id
+            AND check_row.recorded_by = auth.uid()
+            AND check_row.xmin = pg_catalog.pg_current_xact_id()::xid
+        )
+    );
+$tageswerk$;
+
 CREATE OR REPLACE FUNCTION public.tageswerk_guard_water_facility_slot()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -70,6 +124,7 @@ DECLARE
 BEGIN
   today := (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date;
   tomorrow := today + 1;
+  PERFORM public.tageswerk_lock_water_facility_plan(NEW.facility_id);
   IF TG_OP = 'UPDATE' AND (
     NEW.id IS DISTINCT FROM OLD.id
     OR NEW.facility_id IS DISTINCT FROM OLD.facility_id
@@ -197,6 +252,7 @@ CREATE POLICY water_round_slots_insert ON public.water_round_slots
     user_id = auth.uid()
     AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
     AND public.tageswerk_water_round_checks_in_transaction(round_id, facility_id)
+    AND public.tageswerk_water_round_covers_active_pools(round_id, facility_id)
     AND service_day = (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date
     AND (
       (kind = 'extra' AND slot_id IS NULL)
@@ -247,6 +303,16 @@ BEGIN
     RAISE EXCEPTION 'Keine Berechtigung für diesen Betrieb.';
   END IF;
   IF p_slot_id IS NULL THEN
+    SELECT link.round_id
+      INTO existing_round
+    FROM public.water_round_slots AS link
+    WHERE link.round_id = p_round_id
+      AND link.facility_id = p_facility_id
+      AND link.kind = 'extra'
+      AND link.slot_id IS NULL;
+    IF existing_round = p_round_id THEN
+      RETURN 'already';
+    END IF;
     RETURN '';
   END IF;
   today := (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date;
@@ -292,6 +358,8 @@ DECLARE
   result jsonb;
   facility uuid;
   claimed text;
+  active_pools integer;
+  supplied_pools integer;
 BEGIN
   IF p_round_id IS NULL
      OR pg_catalog.jsonb_typeof(p_checks) IS DISTINCT FROM 'array'
@@ -299,15 +367,58 @@ BEGIN
     RAISE EXCEPTION 'Die Kontrollrunde ist unvollständig.';
   END IF;
   facility := (p_checks->0->>'facility_id')::uuid;
-  claimed := public.tageswerk_claim_water_round_slot(facility, p_slot_id, p_round_id);
-  IF claimed = 'already' THEN
-    RETURN pg_catalog.jsonb_build_object('status', 'already_stored', 'round_id', p_round_id);
+  SELECT count(*)
+    INTO active_pools
+  FROM public.water_pools AS pool
+  WHERE pool.facility_id = facility
+    AND pool.active IS TRUE;
+  SELECT count(DISTINCT (item->>'pool_id')::uuid)
+    INTO supplied_pools
+  FROM pg_catalog.jsonb_array_elements(p_checks) AS item
+  WHERE (item->>'facility_id')::uuid = facility
+    AND EXISTS (
+      SELECT 1
+      FROM public.water_pools AS pool
+      WHERE pool.id = (item->>'pool_id')::uuid
+        AND pool.facility_id = facility
+        AND pool.active IS TRUE
+    );
+  IF active_pools < 1
+     OR active_pools IS DISTINCT FROM supplied_pools
+     OR EXISTS (
+       SELECT 1
+       FROM pg_catalog.jsonb_array_elements(p_checks) AS item
+       WHERE (item->>'facility_id')::uuid IS DISTINCT FROM facility
+          OR NOT EXISTS (
+            SELECT 1
+            FROM public.water_pools AS pool
+            WHERE pool.id = (item->>'pool_id')::uuid
+              AND pool.facility_id = facility
+              AND pool.active IS TRUE
+          )
+     ) THEN
+    RAISE EXCEPTION 'Die Kontrollrunde umfasst nicht alle aktiven Becken.';
   END IF;
+  claimed := public.tageswerk_claim_water_round_slot(facility, p_slot_id, p_round_id);
   result := public.tageswerk_record_water_round(p_round_id, p_checks);
   IF pg_catalog.jsonb_typeof(result) IS DISTINCT FROM 'object'
-     OR result->>'status' IS DISTINCT FROM 'stored'
      OR (result->>'round_id')::uuid IS DISTINCT FROM p_round_id THEN
     RETURN result;
+  END IF;
+  IF result->>'status' = 'already_stored' THEN
+    IF claimed = 'already' THEN
+      RETURN result;
+    END IF;
+    RAISE EXCEPTION 'Diese Kontrollrunde ist bereits gespeichert und kann diesem Termin nicht zugeordnet werden.';
+  END IF;
+  IF result->>'status' IS DISTINCT FROM 'stored' THEN
+    RETURN result;
+  END IF;
+  IF claimed = 'already' THEN
+    RAISE EXCEPTION 'Diese Kontrollrunde ist bereits einem Termin zugeordnet.';
+  END IF;
+  IF public.tageswerk_water_round_covers_active_pools(p_round_id, facility) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Die Kontrollrunde umfasst nicht alle aktiven Becken.';
   END IF;
   INSERT INTO public.water_round_slots (facility_id, round_id, slot_id, kind, slot_time)
   VALUES (
@@ -361,6 +472,13 @@ BEGIN
   END LOOP;
   today := (pg_catalog.now() AT TIME ZONE 'Europe/Berlin')::date;
   tomorrow := today + 1;
+  PERFORM public.tageswerk_lock_water_facility_plan(p_facility_id);
+  UPDATE public.water_facility_slots
+  SET active = false
+  WHERE facility_id = p_facility_id
+    AND active IS TRUE
+    AND retired_on IS NOT NULL
+    AND retired_on <= today;
   UPDATE public.water_facility_slots
   SET retired_on = tomorrow
   WHERE facility_id = p_facility_id
@@ -425,11 +543,15 @@ BEGIN
 END;
 $tageswerk$;
 
+REVOKE ALL ON FUNCTION public.tageswerk_lock_water_facility_plan(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.tageswerk_water_round_covers_active_pools(uuid, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_guard_water_facility_slot() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_round_slot() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_claim_water_round_slot(uuid, uuid, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_record_scheduled_water_round(uuid, jsonb, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_save_water_facility_slots(uuid, text[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.tageswerk_lock_water_facility_plan(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tageswerk_water_round_covers_active_pools(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_guard_water_facility_slot() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_stamp_water_round_slot() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_claim_water_round_slot(uuid, uuid, uuid) TO authenticated;

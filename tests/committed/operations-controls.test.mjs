@@ -1708,12 +1708,24 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
     if (name === 'tageswerk_discard_water_round_draft') return {data: {status: 'discarded', round_id: args.p_round_id}, error: null};
     if (name !== 'tageswerk_record_scheduled_water_round') return record(name, args);
     const day = berlinDay(now);
+    const activePoolIds = [created.pool.id, secondPool.pool.id];
+    const supplied = [...new Set((args.p_checks || []).map(item => item.pool_id))];
+    if (supplied.length !== activePoolIds.length || supplied.some(id => !activePoolIds.includes(id))) {
+     return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde umfasst nicht alle aktiven Becken.'}};
+    }
     if (args.p_slot_id) {
      const clash = shared.assignments.find(item => item.slot_id === args.p_slot_id && item.service_day === day && item.kind === 'planned' && item.round_id !== args.p_round_id);
      if (clash) return {data: null, error: {code: 'P0001', message: 'Dieser Termin wurde bereits abgeschlossen.'}};
     }
     const stored = await record('tageswerk_record_water_round', args);
-    if (stored.error || stored.data?.status !== 'stored') return stored;
+    if (stored.error) return stored;
+    const link = shared.assignments.find(item => item.round_id === args.p_round_id);
+    if (stored.data?.status === 'already_stored') {
+     if (link && (link.slot_id || null) === (args.p_slot_id || null)) return stored;
+     return {data: null, error: {code: 'P0001', message: 'Diese Kontrollrunde ist bereits gespeichert und kann diesem Termin nicht zugeordnet werden.'}};
+    }
+    if (stored.data?.status !== 'stored') return stored;
+    if (link) return {data: null, error: {code: 'P0001', message: 'Diese Kontrollrunde ist bereits einem Termin zugeordnet.'}};
     shared.assignments.push({
      id: `link-${shared.assignments.length + 1}`,
      facility_id: facility.id,
@@ -1749,6 +1761,14 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(repeated.ok, true, repeated.error);
  assert.equal(day.shared.assignments.filter(item => item.slot_id === 'slot-9').length, 1);
  assert.equal(day.shared.rows.water_checks.filter(row => row.round_id === 'round-09:00').length, 2);
+ const partial = await employeeDb.rpc('tageswerk_record_scheduled_water_round', {
+  p_round_id: 'round-partial',
+  p_slot_id: 'slot-19',
+  p_checks: [{pool_id: created.pool.id, facility_id: facility.id, note: '', readings: []}]
+ });
+ assert.match(partial.error.message, /nicht alle aktiven Becken/);
+ assert.equal(day.shared.rows.water_checks.some(row => row.round_id === 'round-partial'), false);
+ assert.equal(day.shared.assignments.some(item => item.round_id === 'round-partial'), false);
  const reloaded = await loadOperations(employeeDb, employee, context);
  assert.equal(reloaded.ok, true, reloaded.error);
  assert.equal(reloaded.bundle.waterChecks.find(item => item.id === 'historic-1').readings[0].value, '7.10');
@@ -1829,6 +1849,33 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(extraView.planned.every(item => item.status !== 'Abgeschlossen'), true);
  assert.equal(extraView.extras[0].label, 'Zusatzkontrolle');
  assert.equal(extraView.extras[0].status, 'Abgeschlossen');
+ const extraAgain = await saveWaterRound(extraDb, extra.bundle, filled('round-extra', null, 'extra'), employee, now, context);
+ assert.equal(extraAgain.ok, true, extraAgain.error);
+ assert.equal(extraDay.shared.assignments.length, 1);
+ assert.equal(extraDay.shared.rows.water_checks.filter(row => row.round_id === 'round-extra').length, 2);
+ const orphanDay = openSchedule();
+ const orphanDb = orphanDay.connect(employee.userId);
+ const storedWithoutPlan = await saveWaterRound(orphanDb, bundle, {...filled('round-orphan', slots[0]), kind: ''}, employee, now, context);
+ assert.equal(storedWithoutPlan.ok, true, storedWithoutPlan.error);
+ const orphanChecks = orphanDay.shared.rows.water_checks.filter(row => row.round_id === 'round-orphan').map(row => row.id);
+ const orphaned = await saveWaterRound(orphanDb, bundle, filled('round-orphan', slots[0]), employee, now, context);
+ assert.equal(orphaned.ok, false);
+ assert.match(orphaned.error, /bereits gespeichert und kann diesem Termin nicht zugeordnet/);
+ assert.equal(orphanDay.shared.assignments.length, 0);
+ assert.deepEqual(orphanDay.shared.rows.water_checks.filter(row => row.round_id === 'round-orphan').map(row => row.id), orphanChecks);
+ const fresh = await saveWaterRound(orphanDb, bundle, filled('round-orphan-new', slots[0]), employee, now, context);
+ assert.equal(fresh.ok, true, fresh.error);
+ assert.equal(orphanDay.shared.assignments.filter(item => item.slot_id === 'slot-9' && item.round_id === 'round-orphan-new').length, 1);
+ const moveDay = openSchedule();
+ const moveDb = moveDay.connect(employee.userId);
+ const keptSlot = await saveWaterRound(moveDb, bundle, filled('round-move', slots[0]), employee, now, context);
+ assert.equal(keptSlot.ok, true, keptSlot.error);
+ const otherSlot = await saveWaterRound(moveDb, bundle, filled('round-move', slots[1]), employee, now, context);
+ assert.equal(otherSlot.ok, false);
+ assert.match(otherSlot.error, /diesem Termin nicht zugeordnet/);
+ assert.deepEqual(moveDay.shared.assignments.map(item => [item.round_id, item.slot_id]), [['round-move', 'slot-9']]);
+ assert.equal(moveDay.shared.rows.water_checks.filter(row => row.round_id === 'round-move').length, 2);
+
  const unassigned = await saveWaterRound(extraDb, bundle, {...filled('round-open', null, 'planned')}, employee, now, context);
  assert.equal(unassigned.ok, false);
  assert.match(unassigned.error, /keinem Termin/);
@@ -1939,6 +1986,55 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(schedule.includes('UPDATE public.water_round_drafts'), false);
  assert.match(schedule, /REVOKE ALL ON FUNCTION public\.tageswerk_claim_water_round_slot\(uuid, uuid, uuid\) FROM PUBLIC, anon/);
  assert.match(schedule, /GRANT EXECUTE ON FUNCTION public\.tageswerk_claim_water_round_slot\(uuid, uuid, uuid\) TO authenticated/);
+ const scheduledBeforeRecord = scheduled.slice(0, scheduled.indexOf('tageswerk_record_water_round'));
+ assert.equal(scheduledBeforeRecord.includes('already_stored'), false);
+ assert.match(scheduled, /bereits gespeichert und kann diesem Termin nicht zugeordnet/);
+ assert.match(schedule, /tageswerk_water_round_covers_active_pools\(round_id, facility_id\)/);
+ assert.match(schedule, /nicht alle aktiven Becken/);
+ const savePlan = schedule.slice(schedule.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_save_water_facility_slots'), schedule.lastIndexOf('REVOKE ALL ON FUNCTION'));
+ assert.equal(savePlan.indexOf('tageswerk_lock_water_facility_plan') >= 0 && savePlan.indexOf('tageswerk_lock_water_facility_plan') < savePlan.indexOf('UPDATE public.water_facility_slots'), true);
+ assert.match(schedule, /pg_advisory_xact_lock/);
+ assert.match(savePlan, /retired_on <= today/);
+ const nextDay = day => {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+ };
+ const applyTimes = (rows, times, today) => {
+  const tomorrow = nextDay(today);
+  let next = rows.map(row => ({...row}));
+  next = next.map(row => row.active && row.retiredOn && row.retiredOn <= today ? {...row, active: false} : row);
+  next = next.map(row => row.active && row.effectiveOn <= today && (!row.retiredOn || row.retiredOn > today) && !times.includes(row.time) ? {...row, retiredOn: tomorrow} : row);
+  next = next.map(row => row.active && row.effectiveOn <= today && row.retiredOn > today && times.includes(row.time) ? {...row, retiredOn: ''} : row);
+  next = next.map(row => row.active && row.effectiveOn > today && !times.includes(row.time) ? {...row, active: false} : row);
+  for (const time of times) {
+   if (next.some(row => row.active && row.time === time && row.effectiveOn <= tomorrow && (!row.retiredOn || row.retiredOn > tomorrow))) continue;
+   const pending = next.find(row => row.active && row.time === time && row.effectiveOn > today);
+   if (pending) {
+    next = next.map(row => row.id === pending.id ? {...row, active: true, effectiveOn: tomorrow, retiredOn: ''} : row);
+    continue;
+   }
+   next = next.map(row => row.active && row.time === time && row.effectiveOn <= today && row.retiredOn && row.retiredOn <= today ? {...row, active: false} : row);
+   next.push({id: `slot-${time}-${tomorrow}`, time, active: true, effectiveOn: tomorrow, retiredOn: ''});
+  }
+  return next;
+ };
+ const links = [{id: 'link-1', roundId: 'round-9', slotId: 'slot-09:00-2026-11-10', slotTime: '09:00', serviceDay: '2026-11-10'}];
+ let plan = applyTimes([], ['09:00', '14:00'], '2026-11-09');
+ assert.deepEqual(plan.map(row => [row.time, row.effectiveOn]), [['09:00', '2026-11-10'], ['14:00', '2026-11-10']]);
+ plan = applyTimes(plan, ['14:00'], '2026-11-10');
+ assert.equal(plan.find(row => row.time === '09:00').retiredOn, '2026-11-11');
+ assert.equal(plan.find(row => row.time === '09:00').active, true);
+ assert.deepEqual(links, [{id: 'link-1', roundId: 'round-9', slotId: 'slot-09:00-2026-11-10', slotTime: '09:00', serviceDay: '2026-11-10'}]);
+ plan = applyTimes(plan, ['09:00', '14:00'], '2026-11-11');
+ assert.equal(plan.filter(row => row.time === '09:00' && row.active).length, 1);
+ assert.equal(plan.find(row => row.id === 'slot-09:00-2026-11-10').active, false);
+ assert.equal(plan.find(row => row.time === '09:00' && row.active).effectiveOn, '2026-11-12');
+ assert.equal(links[0].slotId, 'slot-09:00-2026-11-10');
+ let pending = applyTimes([], ['16:00'], '2026-11-09');
+ pending = applyTimes(pending, [], '2026-11-09');
+ pending = applyTimes(pending, ['16:00'], '2026-11-09');
+ assert.equal(pending.filter(row => row.time === '16:00' && row.active).length, 1);
+ assert.equal(pending.find(row => row.time === '16:00' && row.active).id, 'slot-16:00-2026-11-10');
  const closeSql = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close.sql', import.meta.url), 'utf8');
  assert.equal(closeSql.includes('water_round_slots'), false);
  assert.equal(closeSql.includes('tageswerk_record_scheduled_water_round'), false);
