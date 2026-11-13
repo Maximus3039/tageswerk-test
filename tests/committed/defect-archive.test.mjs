@@ -126,7 +126,48 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(check, /INSERT INTO public\.defect_events/);
  assert.match(check, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
  assert.match(check, /defect\.status = ''resolved''/);
- assert.doesNotMatch(check, /NOT has_column_privilege\('authenticated', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+ assert.match(check, /NOT has_column_privilege\('authenticated', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+ assert.match(check, /tageswerk_private\.defect_archive_permit/);
+ assert.equal(sql.includes('set_config'), false);
+ assert.equal(sql.includes('current_setting'), false);
+ assert.equal(sql.includes('tageswerk.defect_archive'), false);
+ assert.equal(sql.includes('DROP POLICY'), false);
+ assert.equal(sql.includes('CREATE POLICY'), false);
+});
+
+function archiveChangeAllowed(attempt) {
+ return attempt.permitActor === attempt.actor && attempt.permitOperation === (attempt.archived ? 'restore' : 'archive');
+}
+
+test('Eine direkt gesetzte Archiv-Einstellung ermöglicht keine Archivänderung', () => {
+ const sql = readFileSync(new URL('../../tageswerk_3_5_1_defect_archive.sql', import.meta.url), 'utf8');
+ const guard = sql.slice(sql.indexOf('FUNCTION public.tageswerk_defect_archive_guard'), sql.indexOf('$guard$;'));
+ assert.equal(guard.includes('current_setting'), false);
+ assert.equal(guard.includes('set_config'), false);
+ assert.equal(guard.includes('tageswerk.defect_archive'), false);
+ assert.match(guard, /tageswerk_private\.defect_archive_permit/);
+ assert.match(guard, /permit\.actor_id = auth\.uid\(\)/);
+ assert.equal(archiveChangeAllowed({guc: 'archive', permitActor: null, actor: 'manager', permitOperation: null, archived: false}), false);
+ assert.equal(archiveChangeAllowed({guc: 'restore', permitActor: null, actor: 'manager', permitOperation: null, archived: true}), false);
+ assert.equal(archiveChangeAllowed({guc: 'archive', permitActor: 'fremd', actor: 'manager', permitOperation: 'archive', archived: false}), false);
+ assert.equal(archiveChangeAllowed({guc: 'restore', permitActor: 'manager', actor: 'manager', permitOperation: 'archive', archived: true}), false);
+ assert.equal(archiveChangeAllowed({guc: null, permitActor: 'manager', actor: 'manager', permitOperation: 'archive', archived: false}), true);
+ assert.equal(archiveChangeAllowed({guc: null, permitActor: 'manager', actor: 'manager', permitOperation: 'restore', archived: true}), true);
+});
+
+function resolvedAtAfter(previous, next) {
+ if (next.status === 'resolved' && previous.status !== 'resolved') return 'server-now';
+ if (next.resolved_at !== previous.resolved_at) throw new Error('zeitpunkt');
+ return previous.resolved_at;
+}
+
+test('Ein erneuter Abschluss setzt den Zeitpunkt neu, eine normale Änderung nicht', () => {
+ const closed = {status: 'resolved', resolved_at: 't1'};
+ assert.equal(resolvedAtAfter(closed, {status: 'resolved', resolved_at: 't1'}), 't1');
+ assert.throws(() => resolvedAtAfter(closed, {status: 'resolved', resolved_at: 't2'}));
+ const reopened = {status: 'in_progress', resolved_at: resolvedAtAfter(closed, {status: 'in_progress', resolved_at: 't1'})};
+ assert.equal(reopened.resolved_at, 't1');
+ assert.equal(resolvedAtAfter(reopened, {status: 'resolved', resolved_at: 'gefälscht'}), 'server-now');
 });
 
 function applyStoredChange(previous, next, flag) {

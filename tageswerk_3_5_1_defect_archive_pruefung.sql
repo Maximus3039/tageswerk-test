@@ -51,18 +51,36 @@ FROM (
        AND guard.tgtype & 8 = 8
        AND guard.tgtype & 16 = 16
        AND guard.tgfoid = guard_fn.oid
-       AND guard_fn.prosecdef IS FALSE
+       AND guard_fn.prosecdef IS TRUE
+       AND position('tageswerk.defect_archive' IN pg_get_functiondef(guard_fn.oid)) = 0
+       AND position('current_setting' IN pg_get_functiondef(guard_fn.oid)) = 0
+       AND position('set_config' IN pg_get_functiondef(guard_fn.oid)) = 0
+       AND position('tageswerk_private.defect_archive_permit' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('permit.actor_id = auth.uid()' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('permit_operation IS DISTINCT FROM ''restore''' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('permit_operation IS DISTINCT FROM ''archive''' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierte Mängel können nicht verändert werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierte Mängel können nicht gelöscht werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierung ist nur über die vorgesehene Funktion möglich.' IN pg_get_functiondef(guard_fn.oid)) > 0
-       AND position('flag IS DISTINCT FROM ''restore''' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Die Wiederherstellung verändert keine gespeicherten Angaben.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('NEW.change_note IS DISTINCT FROM OLD.change_note' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND has_column_privilege('authenticated', 'public.defects', 'archived_at', 'SELECT')
+       AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_at', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_by', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', 'public.defects', 'resolved_at', 'UPDATE')
        AND has_column_privilege('authenticated', 'public.defects', 'status', 'UPDATE')
+       AND has_column_privilege('authenticated', 'public.defects', 'change_note', 'UPDATE')
+       AND has_column_privilege('authenticated', 'public.defects', 'assigned_to', 'UPDATE')
+       AND has_table_privilege('authenticated', 'public.defects', 'SELECT')
+       AND has_table_privilege('authenticated', 'public.defect_events', 'SELECT')
+       AND EXISTS (
+         SELECT 1 FROM pg_policy
+         WHERE polrelid = 'public.defects'::regclass
+           AND polcmd IN ('*', 'w')
+       )
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Ein Trigger vor Einfügen, Änderung und Löschung sperrt archivierte Mängel. Die Wiederherstellung läuft nur mit dem internen Kennzeichen. Lesen und die bisherige Statusbearbeitung bleiben möglich.'
+    'Der Trigger ignoriert eine frei gesetzte Einstellung und verlangt einen Eintrag der Archivfunktion. Archivspalten und der Abschlusszeitpunkt sind nicht direkt schreibbar. Status, Zuweisung, Vermerk, Lesen und die vorhandenen Richtlinien bleiben nutzbar.'
   FROM (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
   LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
   LEFT JOIN pg_trigger AS guard ON guard.tgrelid = 'public.defects'::regclass
@@ -90,6 +108,15 @@ FROM (
        AND position('defect.organization_id = facility_org' IN pg_get_functiondef(archive_many.oid)) > 0
        AND position('defect.status = ''resolved''' IN pg_get_functiondef(archive_many.oid)) > 0
        AND position('defect.archived_at IS NULL' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('tageswerk.defect_archive' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('tageswerk.defect_archive' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('tageswerk.defect_archive' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('set_config' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('set_config' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('set_config' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('INSERT INTO tageswerk_private.defect_archive_permit' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('INSERT INTO tageswerk_private.defect_archive_permit' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('INSERT INTO tageswerk_private.defect_archive_permit' IN pg_get_functiondef(restore_one.oid)) > 0
        AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(archive_one.oid)) > 0
        AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(archive_many.oid)) > 0
        AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(restore_one.oid)) > 0
@@ -157,8 +184,23 @@ FROM (
        AND position('SET resolved_at = created_at' IN pg_get_functiondef(guard_fn.oid)) = 0
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'resolved_at setzt der Trigger beim Übergang auf abgeschlossen. Ein direkter Zeitpunkt wird abgewiesen. Bestehende Zeilen bekommen dadurch keinen nachträglichen Wert.'
+    'resolved_at setzt der Trigger nur, wenn der Status neu auf abgeschlossen wechselt. Eine normale Änderung und ein bereits abgeschlossener Mangel behalten den Zeitpunkt. Ein erneuter Abschluss nach dem Wiederöffnen setzt ihn neu. Bestehende Zeilen bleiben leer.'
   FROM (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
   LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
+  UNION ALL
+  SELECT 80, 'Archivrecht ist nicht über eine Einstellung erreichbar',
+    CASE
+      WHEN to_regclass('tageswerk_private.defect_archive_permit') IS NOT NULL
+       AND NOT has_table_privilege('authenticated', 'tageswerk_private.defect_archive_permit', 'SELECT')
+       AND NOT has_table_privilege('authenticated', 'tageswerk_private.defect_archive_permit', 'INSERT')
+       AND NOT has_table_privilege('authenticated', 'tageswerk_private.defect_archive_permit', 'UPDATE')
+       AND NOT has_table_privilege('authenticated', 'tageswerk_private.defect_archive_permit', 'DELETE')
+       AND NOT has_table_privilege('anon', 'tageswerk_private.defect_archive_permit', 'SELECT')
+       AND NOT has_table_privilege('anon', 'tageswerk_private.defect_archive_permit', 'INSERT')
+       AND NOT has_schema_privilege('authenticated', 'tageswerk_private', 'USAGE')
+       AND NOT has_schema_privilege('anon', 'tageswerk_private', 'USAGE')
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Die Freigabe für Archivspalten liegt in einer privaten Tabelle ohne Rechte für angemeldete oder anonyme Benutzer. Eine gesetzte Einstellung tageswerk.defect_archive erzeugt diesen Eintrag nicht.'
 ) AS checks
 ORDER BY sortierung;

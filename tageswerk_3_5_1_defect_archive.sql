@@ -5,7 +5,8 @@
 -- Bestehende RLS-Richtlinien werden nicht ersetzt. Der Trigger schützt archivierte Zeilen zusätzlich.
 -- company_admin gilt nur mit facility_id IS NULL für die ganze Organisation, wie memberships_role_scope_check.
 -- facility_manager gilt nur für die eigene facility_id. Mitarbeiter und Techniker archivieren nicht.
--- Ein Tabellenrecht UPDATE bleibt absichtlich bestehen. Der Entzug einzelner Spalten hebt es in PostgreSQL nicht auf.
+-- Eine frei gesetzte Einstellung reicht nicht. Nur ein Eintrag in tageswerk_private.defect_archive_permit erlaubt die Archivspalten.
+-- Das Tabellenrecht UPDATE wird entzogen und für alle übrigen Spalten wieder erteilt, wenn es vorher bestand.
 
 BEGIN;
 
@@ -140,6 +141,26 @@ COMMENT ON COLUMN public.defects.archived_at IS 'Zeitpunkt der Archivierung. NUL
 COMMENT ON COLUMN public.defects.archived_by IS 'Person, die den abgeschlossenen Mangel archiviert hat.';
 COMMENT ON COLUMN public.defects.resolved_at IS 'Zeitpunkt des Übergangs auf abgeschlossen. Bestehende Zeilen bleiben leer.';
 
+CREATE SCHEMA IF NOT EXISTS tageswerk_private;
+REVOKE ALL ON SCHEMA tageswerk_private FROM PUBLIC, anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS tageswerk_private.defect_archive_permit (
+  defect_id uuid PRIMARY KEY,
+  operation text NOT NULL,
+  actor_id uuid NOT NULL,
+  CONSTRAINT defect_archive_permit_operation CHECK (operation IN ('archive', 'restore'))
+);
+
+REVOKE ALL ON TABLE tageswerk_private.defect_archive_permit FROM PUBLIC, anon, authenticated;
+
+DO $permit_roles$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    REVOKE ALL ON TABLE tageswerk_private.defect_archive_permit FROM service_role;
+  END IF;
+END;
+$permit_roles$;
+
 CREATE OR REPLACE FUNCTION public.tageswerk_defect_archive_allowed(p_organization_id uuid, p_facility_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -163,10 +184,11 @@ $allowed$;
 CREATE OR REPLACE FUNCTION public.tageswerk_defect_archive_guard()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = ''
 AS $guard$
 DECLARE
-  flag text := pg_catalog.current_setting('tageswerk.defect_archive', true);
+  permit_operation text;
   old_body jsonb;
   new_body jsonb;
 BEGIN
@@ -189,40 +211,49 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  SELECT permit.operation
+    INTO permit_operation
+  FROM tageswerk_private.defect_archive_permit AS permit
+  WHERE permit.defect_id = NEW.id
+    AND permit.actor_id = auth.uid();
+
   old_body := pg_catalog.to_jsonb(OLD) - 'archived_at' - 'archived_by' - 'resolved_at';
   new_body := pg_catalog.to_jsonb(NEW) - 'archived_at' - 'archived_by' - 'resolved_at';
 
-  IF OLD.archived_at IS NOT NULL THEN
-    IF flag IS DISTINCT FROM 'restore' THEN
-      RAISE EXCEPTION 'Archivierte Mängel können nicht verändert werden.';
-    END IF;
-    IF NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL THEN
-      RAISE EXCEPTION 'Die Wiederherstellung entfernt nur die Archivierung.';
-    END IF;
-    IF NEW.change_note IS DISTINCT FROM OLD.change_note
-       OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
-       OR old_body IS DISTINCT FROM new_body THEN
-      RAISE EXCEPTION 'Die Wiederherstellung verändert keine gespeicherten Angaben.';
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  IF NEW.archived_at IS DISTINCT FROM OLD.archived_at
+  IF OLD.archived_at IS NOT NULL
+     OR NEW.archived_at IS DISTINCT FROM OLD.archived_at
      OR NEW.archived_by IS DISTINCT FROM OLD.archived_by THEN
-    IF flag IS DISTINCT FROM 'archive' THEN
-      RAISE EXCEPTION 'Archivierung ist nur über die vorgesehene Funktion möglich.';
+    IF OLD.archived_at IS NOT NULL THEN
+      IF permit_operation IS DISTINCT FROM 'restore' THEN
+        RAISE EXCEPTION 'Archivierte Mängel können nicht verändert werden.';
+      END IF;
+      IF NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL THEN
+        RAISE EXCEPTION 'Die Wiederherstellung entfernt nur die Archivierung.';
+      END IF;
+      IF NEW.change_note IS DISTINCT FROM OLD.change_note
+         OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
+         OR old_body IS DISTINCT FROM new_body THEN
+        RAISE EXCEPTION 'Die Wiederherstellung verändert keine gespeicherten Angaben.';
+      END IF;
+    ELSE
+      IF permit_operation IS DISTINCT FROM 'archive' THEN
+        RAISE EXCEPTION 'Archivierung ist nur über die vorgesehene Funktion möglich.';
+      END IF;
+      IF OLD.status IS DISTINCT FROM 'resolved' OR NEW.status IS DISTINCT FROM 'resolved' THEN
+        RAISE EXCEPTION 'Nur abgeschlossene Mängel können archiviert werden.';
+      END IF;
+      IF NEW.archived_at IS NULL OR NEW.archived_by IS DISTINCT FROM auth.uid() THEN
+        RAISE EXCEPTION 'Die Archivierung braucht Zeitpunkt und die angemeldete Person.';
+      END IF;
+      IF NEW.change_note IS DISTINCT FROM OLD.change_note
+         OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
+         OR old_body IS DISTINCT FROM new_body THEN
+        RAISE EXCEPTION 'Die Archivierung verändert keine gespeicherten Angaben.';
+      END IF;
     END IF;
-    IF OLD.status IS DISTINCT FROM 'resolved' OR NEW.status IS DISTINCT FROM 'resolved' THEN
-      RAISE EXCEPTION 'Nur abgeschlossene Mängel können archiviert werden.';
-    END IF;
-    IF NEW.archived_at IS NULL OR NEW.archived_by IS DISTINCT FROM auth.uid() THEN
-      RAISE EXCEPTION 'Die Archivierung braucht Zeitpunkt und die angemeldete Person.';
-    END IF;
-    IF NEW.change_note IS DISTINCT FROM OLD.change_note
-       OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
-       OR old_body IS DISTINCT FROM new_body THEN
-      RAISE EXCEPTION 'Die Archivierung verändert keine gespeicherten Angaben.';
-    END IF;
+    DELETE FROM tageswerk_private.defect_archive_permit AS permit
+    WHERE permit.defect_id = NEW.id
+      AND permit.actor_id = auth.uid();
     RETURN NEW;
   END IF;
 
@@ -277,7 +308,8 @@ BEGIN
   IF current_row.archived_at IS NOT NULL THEN
     RETURN;
   END IF;
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', 'archive', true);
+  INSERT INTO tageswerk_private.defect_archive_permit (defect_id, operation, actor_id)
+  VALUES (p_defect_id, 'archive', auth.uid());
   UPDATE public.defects
   SET archived_at = pg_catalog.now(),
       archived_by = auth.uid()
@@ -291,11 +323,9 @@ BEGIN
   END IF;
   INSERT INTO public.defect_events (defect_id, action, note, actor_id)
   VALUES (p_defect_id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid());
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
-EXCEPTION
-  WHEN OTHERS THEN
-    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
-    RAISE;
+  DELETE FROM tageswerk_private.defect_archive_permit AS permit
+  WHERE permit.defect_id = p_defect_id
+    AND permit.actor_id = auth.uid();
 END;
 $archive$;
 
@@ -324,7 +354,13 @@ BEGIN
   IF NOT public.tageswerk_defect_archive_allowed(facility_org, p_facility_id) THEN
     RAISE EXCEPTION 'Nur Betriebsleitung und Geschäftsführung dürfen archivieren.';
   END IF;
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', 'archive', true);
+  INSERT INTO tageswerk_private.defect_archive_permit (defect_id, operation, actor_id)
+  SELECT defect.id, 'archive', auth.uid()
+  FROM public.defects AS defect
+  WHERE defect.facility_id = p_facility_id
+    AND defect.organization_id = facility_org
+    AND defect.status = 'resolved'
+    AND defect.archived_at IS NULL;
   WITH marked AS (
     UPDATE public.defects AS defect
     SET archived_at = pg_catalog.now(),
@@ -341,12 +377,10 @@ BEGIN
     RETURNING defect_id
   )
   SELECT count(*)::integer INTO archived_count FROM logged;
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+  DELETE FROM tageswerk_private.defect_archive_permit AS permit
+  WHERE permit.actor_id = auth.uid()
+    AND permit.operation = 'archive';
   RETURN archived_count;
-EXCEPTION
-  WHEN OTHERS THEN
-    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
-    RAISE;
 END;
 $bulk$;
 
@@ -383,7 +417,8 @@ BEGIN
   IF current_row.archived_at IS NULL THEN
     RAISE EXCEPTION 'Dieser Mangel liegt nicht im Archiv.';
   END IF;
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', 'restore', true);
+  INSERT INTO tageswerk_private.defect_archive_permit (defect_id, operation, actor_id)
+  VALUES (p_defect_id, 'restore', auth.uid());
   UPDATE public.defects
   SET archived_at = NULL,
       archived_by = NULL
@@ -396,13 +431,31 @@ BEGIN
   END IF;
   INSERT INTO public.defect_events (defect_id, action, note, actor_id)
   VALUES (p_defect_id, 'Aus Archiv zurückgeholt', 'Aus Archiv zurückgeholt.', auth.uid());
-  PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
-EXCEPTION
-  WHEN OTHERS THEN
-    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
-    RAISE;
+  DELETE FROM tageswerk_private.defect_archive_permit AS permit
+  WHERE permit.defect_id = p_defect_id
+    AND permit.actor_id = auth.uid();
 END;
 $restore$;
+
+DO $column_rights$
+DECLARE
+  editable text;
+  keep_update boolean;
+BEGIN
+  keep_update := pg_catalog.has_table_privilege('authenticated', 'public.defects', 'UPDATE')
+    OR pg_catalog.has_column_privilege('authenticated', 'public.defects', 'status', 'UPDATE');
+  SELECT string_agg(pg_catalog.quote_ident(column_name), ', ' ORDER BY ordinal_position)
+    INTO editable
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'defects'
+    AND column_name NOT IN ('archived_at', 'archived_by', 'resolved_at');
+  REVOKE UPDATE ON TABLE public.defects FROM PUBLIC, anon, authenticated;
+  IF keep_update AND editable IS NOT NULL THEN
+    EXECUTE format('GRANT UPDATE (%s) ON TABLE public.defects TO authenticated', editable);
+  END IF;
+END;
+$column_rights$;
 
 REVOKE ALL ON FUNCTION public.tageswerk_defect_archive_allowed(uuid, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_defect_archive_guard() FROM PUBLIC, anon;
