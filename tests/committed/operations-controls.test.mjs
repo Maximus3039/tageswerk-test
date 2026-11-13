@@ -1617,6 +1617,7 @@ test('Kontrollrunde abschließen bleibt je Rolle bestätigt und übersteht einen
  assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_uuid\.sql/);
  assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_rls\.sql/);
  assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_schedule\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_schedule_pruefung\.sql/);
  assert.doesNotMatch(record, /\b(min|max|sum|avg)\s*\(/i);
  const rlsFix = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_rls.sql', import.meta.url), 'utf8');
  const rlsBody = rlsFix.slice(rlsFix.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_finish_own_water_round_draft'), rlsFix.lastIndexOf('COMMIT'));
@@ -2027,6 +2028,26 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.equal(savePlan.indexOf('tageswerk_lock_water_facility_plan') >= 0 && savePlan.indexOf('tageswerk_lock_water_facility_plan') < savePlan.indexOf('UPDATE public.water_facility_slots'), true);
  assert.match(schedule, /pg_advisory_xact_lock/);
  assert.match(savePlan, /retired_on <= today/);
+ const scheduleCheck = readFileSync(new URL('../../tageswerk_3_4_2_water_round_schedule_pruefung.sql', import.meta.url), 'utf8');
+ assert.match(scheduleCheck, /SELECT pruefung, status, details/);
+ assert.match(scheduleCheck, /to_regclass\('public\.water_facility_slots'\)/);
+ assert.match(scheduleCheck, /to_regclass\('public\.water_round_slots'\)/);
+ assert.match(scheduleCheck, /relrowsecurity/);
+ assert.match(scheduleCheck, /relforcerowsecurity/);
+ assert.match(scheduleCheck, /tageswerk_record_scheduled_water_round\(uuid,jsonb,uuid\)/);
+ assert.match(scheduleCheck, /tageswerk_water_round_covers_active_pools\(uuid,uuid\)/);
+ assert.match(scheduleCheck, /tageswerk_claim_water_round_slot\(uuid,uuid,uuid\)/);
+ assert.match(scheduleCheck, /employee/);
+ assert.match(scheduleCheck, /technician/);
+ assert.match(scheduleCheck, /facility_manager/);
+ assert.match(scheduleCheck, /company_admin/);
+ assert.match(scheduleCheck, /water_round_slots_one_planned/);
+ assert.match(scheduleCheck, /p_slot_id IS NOT NULL AND public\.tageswerk_water_round_covers_active_pools/);
+ assert.match(scheduleCheck, /tageswerk_record_water_round\(uuid,jsonb\)/);
+ assert.match(scheduleCheck, /position\('water_round_slots' IN pg_get_functiondef\(recorder\.oid\)\) = 0/);
+ assert.doesNotMatch(scheduleCheck, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
+ assert.doesNotMatch(scheduleCheck, /SELECT\s+public\.tageswerk_record_water_round/i);
+ assert.doesNotMatch(scheduleCheck, /SELECT\s+public\.tageswerk_record_scheduled_water_round/i);
  const nextDay = day => {
   const [year, month, date] = day.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
