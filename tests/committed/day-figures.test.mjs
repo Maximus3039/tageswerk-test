@@ -168,6 +168,11 @@ test('Die Migration schützt Beträge und lässt die Textberichte stehen', () =>
  assert.match(sql, /Dieselbe Rundung wie figurePercent/);
  assert.match(sql, /remainder \* 2 >= denominator/);
  assert.doesNotMatch(sql, /pg_catalog\.round\(/);
+ assert.match(sql, /pg_catalog\.date_part\('isodow', day\)/);
+ assert.match(sql, /pg_catalog\.date_part\('month', prior_anchor\)/);
+ assert.match(sql, /pg_catalog\.date_part\('day', prior_anchor\)/);
+ assert.doesNotMatch(sql, /pg_catalog\.extract\(/);
+ assert.doesNotMatch(sql, /ISODOW FROM/);
  assert.match(sql, /CREATE SCHEMA IF NOT EXISTS tageswerk_private/);
  assert.match(sql, /REVOKE ALL ON SCHEMA tageswerk_private FROM PUBLIC, anon, authenticated/);
  assert.match(sql, /FUNCTION tageswerk_private\.figure_measure/);
