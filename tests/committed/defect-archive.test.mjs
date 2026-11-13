@@ -133,6 +133,19 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(check, /tageswerk_private\.defect_archive_permit/);
  assert.match(check, /permit\.relowner = defects\.relowner/);
  assert.match(check, /Diese Abfrage ruft die Archivfunktionen nicht auf/);
+ assert.match(sql, /INSERT INTO public\.defect_events \(defect_id, organization_id, facility_id, action, note, actor_id\)/);
+ assert.match(sql, /marked\.organization_id, marked\.facility_id/);
+ assert.match(sql, /NEW\.status IS DISTINCT FROM OLD\.status/);
+ assert.match(sql, /NEW\.resolution_due_at IS DISTINCT FROM OLD\.resolution_due_at/);
+ assert.match(sql, /'defect_events', 'organization_id'/);
+ assert.match(sql, /'defect_events', 'facility_id'/);
+ assert.equal(sql.includes('CREATE OR REPLACE FUNCTION private.audit_defect_change'), false);
+ assert.equal(sql.includes('CREATE OR REPLACE FUNCTION private.require_defect_review_note'), false);
+ assert.equal(sql.includes('DROP TRIGGER IF EXISTS audit_defect_change'), false);
+ assert.equal(sql.includes('DROP TRIGGER IF EXISTS require_defect_review_note'), false);
+ assert.doesNotMatch(check, /pg_get_functiondef\([^)]*audit_defect_change/);
+ assert.doesNotMatch(check, /pg_get_functiondef\([^)]*require_defect_review_note/);
+ assert.match(check, /Diese Abfrage liest den Funktionstext der beiden vorhandenen Trigger nicht/);
  assert.equal(sql.includes('set_config'), false);
  assert.equal(sql.includes('current_setting'), false);
  assert.equal(sql.includes('tageswerk.defect_archive'), false);
@@ -175,15 +188,37 @@ test('Ein erneuter Abschluss setzt den Zeitpunkt neu, eine normale Änderung nic
  assert.equal(resolvedAtAfter(reopened, {status: 'resolved', resolved_at: 'gefälscht'}), 'server-now');
 });
 
+function archiveEvent(defect, actorId) {
+ return {
+  defect_id: defect.id,
+  organization_id: defect.organization_id,
+  facility_id: defect.facility_id,
+  action: 'Gesehen und archiviert',
+  note: 'Gesehen und archiviert.',
+  actor_id: actorId
+ };
+}
+
+function restoreEvent(defect, actorId) {
+ return {
+  defect_id: defect.id,
+  organization_id: defect.organization_id,
+  facility_id: defect.facility_id,
+  action: 'Aus Archiv zurückgeholt',
+  note: 'Aus Archiv zurückgeholt.',
+  actor_id: actorId
+ };
+}
+
 function applyStoredChange(previous, next, flag) {
  if (previous.archived_at) {
   if (flag !== 'restore' || next.archived_at || next.archived_by) throw new Error('geschützt');
-  if (next.change_note !== previous.change_note || next.status !== previous.status || next.resolved_at !== previous.resolved_at || next.title !== previous.title) throw new Error('vermerk');
+  if (next.change_note !== previous.change_note || next.status !== previous.status || next.resolution_due_at !== previous.resolution_due_at || next.resolved_at !== previous.resolved_at || next.title !== previous.title) throw new Error('vermerk');
   return {...previous, archived_at: null, archived_by: null};
  }
  if ((next.archived_at || next.archived_by) && flag !== 'archive') throw new Error('nur funktion');
  if (flag === 'archive') {
-  if (previous.status !== 'resolved' || next.status !== 'resolved' || next.change_note !== previous.change_note || next.resolved_at !== previous.resolved_at) throw new Error('archiv');
+  if (previous.status !== 'resolved' || next.status !== 'resolved' || next.change_note !== previous.change_note || next.resolution_due_at !== previous.resolution_due_at || next.resolved_at !== previous.resolved_at) throw new Error('archiv');
   return {...previous, archived_at: 'server', archived_by: 'leitung'};
  }
  if (next.status === 'resolved' && previous.status !== 'resolved') return {...next, resolved_at: 'server'};
@@ -192,7 +227,7 @@ function applyStoredChange(previous, next, flag) {
 }
 
 test('Archivschutz, Verlauf und Abschlusszeitpunkt folgen den Datenbankregeln', () => {
- const historical = {status: 'resolved', resolved_at: null, change_note: 'Pumpe geprüft', title: 'Pumpe', archived_at: null, archived_by: null};
+ const historical = {status: 'resolved', resolved_at: null, change_note: 'Pumpe geprüft', resolution_due_at: '2026-11-20T08:00:00.000Z', title: 'Pumpe', archived_at: null, archived_by: null, organization_id: 'org-a', facility_id: 'fac-a', id: 'mangel-1'};
  const noted = applyStoredChange(historical, {...historical, change_note: 'Pumpe geprüft', assigned_to: 'person'}, null);
  assert.equal(noted.resolved_at, null);
  assert.equal(noted.change_note, 'Pumpe geprüft');
@@ -201,12 +236,32 @@ test('Archivschutz, Verlauf und Abschlusszeitpunkt folgen den Datenbankregeln', 
  assert.throws(() => applyStoredChange(historical, {...historical, resolved_at: 'nachgetragen'}, null));
  const archived = applyStoredChange(historical, historical, 'archive');
  assert.equal(archived.change_note, 'Pumpe geprüft');
+ assert.equal(archived.resolution_due_at, '2026-11-20T08:00:00.000Z');
+ assert.equal(archived.status, 'resolved');
  assert.equal(archived.resolved_at, null);
+ assert.deepEqual(archiveEvent(historical, 'user-1'), {
+  defect_id: 'mangel-1',
+  organization_id: 'org-a',
+  facility_id: 'fac-a',
+  action: 'Gesehen und archiviert',
+  note: 'Gesehen und archiviert.',
+  actor_id: 'user-1'
+ });
  assert.throws(() => applyStoredChange(archived, {...archived, title: 'geändert'}, null));
  assert.throws(() => applyStoredChange(archived, {...archived, archived_at: null, archived_by: null}, null));
  const restored = applyStoredChange(archived, {...archived, archived_at: null, archived_by: null}, 'restore');
  assert.equal(restored.change_note, 'Pumpe geprüft');
  assert.equal(restored.status, 'resolved');
+ assert.equal(restored.resolution_due_at, '2026-11-20T08:00:00.000Z');
+ assert.deepEqual(restoreEvent(historical, 'user-1'), {
+  defect_id: 'mangel-1',
+  organization_id: 'org-a',
+  facility_id: 'fac-a',
+  action: 'Aus Archiv zurückgeholt',
+  note: 'Aus Archiv zurückgeholt.',
+  actor_id: 'user-1'
+ });
+ assert.throws(() => applyStoredChange(historical, {...historical, resolution_due_at: '2026-12-01T08:00:00.000Z', archived_at: 'server', archived_by: 'leitung'}, 'archive'));
  const defects = [
   {id: 'a', facility_id: 'fac-a', organization_id: 'org-a', status: 'resolved'},
   {id: 'b', facility_id: 'fac-a', organization_id: 'org-a', status: 'open'},

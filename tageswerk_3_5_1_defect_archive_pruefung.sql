@@ -255,5 +255,50 @@ FROM (
   LEFT JOIN pg_proc AS allowed ON allowed.oid = allowed_lookup.oid
   LEFT JOIN pg_roles AS authenticated_role ON authenticated_role.rolname = 'authenticated'
   LEFT JOIN pg_roles AS anon_role ON anon_role.rolname = 'anon'
+  UNION ALL
+  SELECT 100, 'Verlauf nennt den Betrieb, vorhandene Trigger bleiben',
+    CASE
+      WHEN position('INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)' IN pg_get_functiondef(restore_one.oid)) > 0
+       AND position('current_row.organization_id, current_row.facility_id' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('marked.organization_id, marked.facility_id' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('current_row.organization_id, current_row.facility_id' IN pg_get_functiondef(restore_one.oid)) > 0
+       AND position('SET status' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('SET status' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('SET status' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('SET change_note' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('SET change_note' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('SET change_note' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('SET resolution_due_at' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('SET resolution_due_at' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('SET resolution_due_at' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('NEW.status IS DISTINCT FROM OLD.status' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('NEW.resolution_due_at IS DISTINCT FROM OLD.resolution_due_at' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND audit_trigger.tgname IS NOT NULL
+       AND review_trigger.tgname IS NOT NULL
+       AND (audit_trigger.tgtype & 16) <> 0
+       AND (audit_trigger.tgtype & 2) = 0
+       AND (review_trigger.tgtype & 2) <> 0
+       AND (review_trigger.tgtype & 16) <> 0
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Die Archivfunktionen schreiben organization_id und facility_id in den Verlauf und setzen Status, Arbeitsvermerk und Frist nicht. audit_defect_change bleibt ein AFTER-UPDATE-Trigger, require_defect_review_note ein BEFORE-UPDATE-Trigger. Diese Abfrage liest den Funktionstext der beiden vorhandenen Trigger nicht.'
+  FROM (SELECT to_regprocedure('public.tageswerk_archive_defect(uuid)') AS oid) AS one_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_archive_closed_defects(uuid)') AS oid) AS many_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_restore_archived_defect(uuid)') AS oid) AS restore_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
+  LEFT JOIN pg_proc AS archive_one ON archive_one.oid = one_lookup.oid
+  LEFT JOIN pg_proc AS archive_many ON archive_many.oid = many_lookup.oid
+  LEFT JOIN pg_proc AS restore_one ON restore_one.oid = restore_lookup.oid
+  LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
+  LEFT JOIN pg_trigger AS audit_trigger
+    ON audit_trigger.tgrelid = to_regclass('public.defects')
+   AND audit_trigger.tgname = 'audit_defect_change'
+   AND NOT audit_trigger.tgisinternal
+  LEFT JOIN pg_trigger AS review_trigger
+    ON review_trigger.tgrelid = to_regclass('public.defects')
+   AND review_trigger.tgname = 'require_defect_review_note'
+   AND NOT review_trigger.tgisinternal
 ) AS checks
 ORDER BY sortierung;

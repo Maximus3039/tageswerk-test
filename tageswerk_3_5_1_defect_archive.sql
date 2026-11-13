@@ -6,8 +6,12 @@
 -- company_admin gilt nur mit facility_id IS NULL für die ganze Organisation, wie memberships_role_scope_check.
 -- facility_manager gilt nur für die eigene facility_id. Mitarbeiter und Techniker archivieren nicht.
 -- Eine frei gesetzte Einstellung reicht nicht. Nur ein Eintrag in tageswerk_private.defect_archive_permit erlaubt die Archivspalten.
+-- authenticated hat Änderungsrechte für status, assigned_to und change_note und kein Tabellenrecht UPDATE.
 -- Das Tabellenrecht UPDATE wird entzogen und nur für Spalten wieder erteilt, die vorher schon geändert werden durften.
 -- Neue Objekte gehören danach dem Eigentümer von public.defects. Die Freigabezeile wird im Trigger gelöscht.
+-- defect_events.organization_id und defect_events.facility_id sind Pflichtfelder ohne Vorgabewert.
+-- private.audit_defect_change und private.require_defect_review_note bleiben unverändert.
+-- Der Funktionstext dieser beiden Trigger liegt hier nicht vor und wird nicht nachgebildet.
 
 BEGIN;
 
@@ -33,6 +37,8 @@ BEGIN
       ('defects', 'resolution_due_at'),
       ('defects', 'change_note'),
       ('defect_events', 'defect_id'),
+      ('defect_events', 'organization_id'),
+      ('defect_events', 'facility_id'),
       ('defect_events', 'action'),
       ('defect_events', 'note'),
       ('defect_events', 'actor_id'),
@@ -63,7 +69,7 @@ BEGIN
     AND table_name = 'defect_events'
     AND is_nullable = 'NO'
     AND column_default IS NULL
-    AND column_name NOT IN ('defect_id', 'action', 'note', 'actor_id');
+    AND column_name NOT IN ('defect_id', 'action', 'note', 'actor_id', 'organization_id', 'facility_id');
   IF event_gap IS NOT NULL THEN
     RAISE EXCEPTION 'defect_events braucht weitere Pflichtspalten ohne Vorgabewert: %', event_gap;
   END IF;
@@ -78,10 +84,16 @@ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'defect_events'
-      AND column_name = 'actor_id'
+      AND column_name IN ('actor_id', 'organization_id', 'facility_id')
       AND data_type <> 'uuid'
+  ) OR EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'defect_events'
+      AND column_name IN ('organization_id', 'facility_id')
+      AND is_nullable <> 'NO'
   ) THEN
-    RAISE EXCEPTION 'defect_events.action, note oder actor_id hat nicht den vom Verlauf erwarteten Typ.';
+    RAISE EXCEPTION 'defect_events.action, note, actor_id, organization_id oder facility_id hat nicht den vom Verlauf erwarteten Typ.';
   END IF;
 
   IF NOT EXISTS (
@@ -232,9 +244,11 @@ BEGIN
         RAISE EXCEPTION 'Die Wiederherstellung entfernt nur die Archivierung.';
       END IF;
       IF NEW.change_note IS DISTINCT FROM OLD.change_note
+         OR NEW.status IS DISTINCT FROM OLD.status
+         OR NEW.resolution_due_at IS DISTINCT FROM OLD.resolution_due_at
          OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
          OR old_body IS DISTINCT FROM new_body THEN
-        RAISE EXCEPTION 'Die Wiederherstellung verändert keine gespeicherten Angaben.';
+        RAISE EXCEPTION 'Die Wiederherstellung verändert keine Arbeitsvermerke, Fristen oder den Status.';
       END IF;
     ELSE
       IF permit_operation IS DISTINCT FROM 'archive' THEN
@@ -247,9 +261,11 @@ BEGIN
         RAISE EXCEPTION 'Die Archivierung braucht Zeitpunkt und die angemeldete Person.';
       END IF;
       IF NEW.change_note IS DISTINCT FROM OLD.change_note
+         OR NEW.status IS DISTINCT FROM OLD.status
+         OR NEW.resolution_due_at IS DISTINCT FROM OLD.resolution_due_at
          OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
          OR old_body IS DISTINCT FROM new_body THEN
-        RAISE EXCEPTION 'Die Archivierung verändert keine gespeicherten Angaben.';
+        RAISE EXCEPTION 'Die Archivierung verändert keine Arbeitsvermerke, Fristen oder den Status.';
       END IF;
     END IF;
     DELETE FROM tageswerk_private.defect_archive_permit AS permit
@@ -267,6 +283,9 @@ BEGIN
 END;
 $guard$;
 
+-- Die vorhandenen Trigger audit_defect_change, require_defect_review_note,
+-- trg_protect_resolution_deadlines, trg_set_default_resolution_due und
+-- validate_defect_assignment werden nicht ersetzt. Ihr Funktionstext ist hier nicht vorhanden.
 DROP TRIGGER IF EXISTS aa_defects_archive_guard ON public.defects;
 CREATE TRIGGER aa_defects_archive_guard
   BEFORE INSERT OR UPDATE OR DELETE ON public.defects
@@ -322,8 +341,8 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Der Mangel konnte nicht archiviert werden.';
   END IF;
-  INSERT INTO public.defect_events (defect_id, action, note, actor_id)
-  VALUES (p_defect_id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid());
+  INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)
+  VALUES (p_defect_id, current_row.organization_id, current_row.facility_id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid());
   DELETE FROM tageswerk_private.defect_archive_permit AS permit
   WHERE permit.defect_id = p_defect_id
     AND permit.actor_id = auth.uid();
@@ -370,10 +389,10 @@ BEGIN
       AND defect.organization_id = facility_org
       AND defect.status = 'resolved'
       AND defect.archived_at IS NULL
-    RETURNING defect.id
+    RETURNING defect.id, defect.organization_id, defect.facility_id
   ), logged AS (
-    INSERT INTO public.defect_events (defect_id, action, note, actor_id)
-    SELECT marked.id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid()
+    INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)
+    SELECT marked.id, marked.organization_id, marked.facility_id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid()
     FROM marked
     RETURNING defect_id
   )
@@ -436,8 +455,8 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Der Mangel konnte nicht aus dem Archiv geholt werden.';
   END IF;
-  INSERT INTO public.defect_events (defect_id, action, note, actor_id)
-  VALUES (p_defect_id, 'Aus Archiv zurückgeholt', 'Aus Archiv zurückgeholt.', auth.uid());
+  INSERT INTO public.defect_events (defect_id, organization_id, facility_id, action, note, actor_id)
+  VALUES (p_defect_id, current_row.organization_id, current_row.facility_id, 'Aus Archiv zurückgeholt', 'Aus Archiv zurückgeholt.', auth.uid());
   DELETE FROM tageswerk_private.defect_archive_permit AS permit
   WHERE permit.defect_id = p_defect_id
     AND permit.actor_id = auth.uid();
