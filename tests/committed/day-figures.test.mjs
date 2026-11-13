@@ -20,11 +20,19 @@ import {
 import {saveDayFigures} from '../../js/operations-store.js';
 
 const facility = {id: 'fac-a', organization_id: 'org-a', name: 'Bad'};
-const membership = (role, facilityId = facility.id) => ({organization_id: facility.organization_id, facility_id: role === 'company_admin' ? null : facilityId, role, is_active: true});
+const otherFacility = {id: 'fac-b', organization_id: 'org-a', name: 'Zweites Bad'};
+const foreignFacility = {id: 'fac-x', organization_id: 'org-x', name: 'Fremd'};
+const membership = (role, target = facility) => ({
+ organization_id: target.organization_id,
+ facility_id: role === 'company_admin' ? null : target.id,
+ role,
+ is_active: true
+});
 const employee = {userId: 'employee-1', name: 'Mia', memberships: [membership('employee')]};
 const manager = {userId: 'manager-1', name: 'Lea', memberships: [membership('facility_manager')]};
 const admin = {userId: 'admin-1', name: 'Kim', memberships: [membership('company_admin')]};
 const technician = {userId: 'tech-1', name: 'Tim', memberships: [membership('technician')]};
+const sql = readFileSync(new URL('../../tageswerk_3_5_4_day_figures.sql', import.meta.url), 'utf8');
 
 test('Tageskennzahlen rechnen Vergleich, Prozent und getrennte Zeiträume', () => {
  assert.equal(compareCalendarDay('2026-11-14'), '2025-11-15');
@@ -76,6 +84,8 @@ test('Tageskennzahlen rechnen Vergleich, Prozent und getrennte Zeiträume', () =
  assert.equal(overview.rows.length, 7);
  assert.equal(Object.hasOwn(overview.rows[0], 'totalCents'), false);
  assert.equal(Object.hasOwn(overview.rows[0], 'priorVisitors'), false);
+ assert.equal(Object.hasOwn(overview.rows[0], 'gateCents'), false);
+ assert.equal(Object.hasOwn(overview.rows[0], 'priorTotalCents'), false);
  const managerRows = dayFigureOverview(records, {access: 'manager', today: '2026-11-02', from: '2026-11-01', to: '2026-11-02', weekday: 'all'});
  assert.equal(managerRows.rows[0].day, '2026-11-02');
  assert.equal(managerRows.rows[0].totalCents, 2000);
@@ -89,6 +99,11 @@ test('Mitarbeiter, Techniker und Leitung bleiben bei den Kennzahlen getrennt', (
  assert.equal(dayFigureAccess(facility, admin.memberships), 'manager');
  assert.equal(dayFigureAccess(facility, technician.memberships), 'none');
  assert.equal(dayFigureAccess(facility, [...technician.memberships, ...employee.memberships]), 'employee');
+ assert.equal(dayFigureAccess(otherFacility, employee.memberships), 'none');
+ assert.equal(dayFigureAccess(foreignFacility, manager.memberships), 'none');
+ assert.equal(dayFigureAccess(foreignFacility, admin.memberships), 'none');
+ assert.equal(dayFigureAccess(otherFacility, manager.memberships), 'none');
+ assert.equal(dayFigureAccess(otherFacility, admin.memberships), 'manager');
  assert.equal(dayFigureEditable('employee', '2026-11-08', '2026-11-14'), true);
  assert.equal(dayFigureEditable('employee', '2026-11-07', '2026-11-14'), false);
  assert.equal(dayFigureEditable('manager', '2024-01-01', '2026-11-14'), true);
@@ -109,6 +124,8 @@ test('Mitarbeiter, Techniker und Leitung bleiben bei den Kennzahlen getrennt', (
  const narrative = createDailyReport(emptyOperations(), {facility, reportDate: '2026-11-14', incidents: 'Ruhiger Tag', handover: ''}, employee, '2026-11-14T10:00:00.000Z');
  assert.equal(narrative.ok, true);
  assert.equal(narrative.report.incidents, 'Ruhiger Tag');
+ const technicianNarrative = createDailyReport(emptyOperations(), {facility, reportDate: '2026-11-14', incidents: 'Technikprüfung', handover: ''}, technician, '2026-11-14T10:00:00.000Z');
+ assert.equal(technicianNarrative.ok, true);
 });
 
 test('Die Speicherung prüft lokal und ruft die Kennzahlenfunktion auf', async () => {
@@ -132,10 +149,10 @@ test('Die Speicherung prüft lokal und ruft die Kennzahlenfunktion auf', async (
 });
 
 test('Die Migration schützt Beträge und lässt die Textberichte stehen', () => {
- const sql = readFileSync(new URL('../../tageswerk_3_5_4_day_figures.sql', import.meta.url), 'utf8');
  assert.match(sql, /Nicht ohne ausdrückliche Freigabe ausführen/);
  assert.match(sql, /UNIQUE \(facility_id, service_day\)/);
  assert.match(sql, /gate_cents \+ bistro_cents/);
+ assert.match(sql, /FOREIGN KEY \(facility_id, organization_id\)\s+REFERENCES public\.facilities \(id, organization_id\)/);
  assert.match(sql, /tageswerk_meter_role\(organization_id, facility_id\) IN \('facility_manager', 'company_admin'\)/);
  assert.match(sql, /role IN \('employee', 'facility_manager', 'company_admin'\)/);
  assert.doesNotMatch(sql, /role IN \('employee', 'technician'/);
@@ -146,10 +163,50 @@ test('Die Migration schützt Beträge und lässt die Textberichte stehen', () =>
  assert.match(sql, /priorVisitors/);
  assert.match(sql, /visitors := visitors - 'current' - 'prior'/);
  assert.match(sql, /total := total - 'current' - 'prior'/);
- assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_figure_measure/);
  assert.doesNotMatch(sql, /ALTER TABLE public\.daily_reports/);
  assert.match(sql, /Bitte den Grund der Änderung mit mindestens 3 Zeichen eintragen/);
  assert.match(sql, /Dieselbe Rundung wie figurePercent/);
  assert.match(sql, /remainder \* 2 >= denominator/);
  assert.doesNotMatch(sql, /pg_catalog\.round\(/);
+ assert.match(sql, /CREATE SCHEMA IF NOT EXISTS tageswerk_private/);
+ assert.match(sql, /REVOKE ALL ON SCHEMA tageswerk_private FROM PUBLIC, anon, authenticated/);
+ assert.match(sql, /FUNCTION tageswerk_private\.figure_measure/);
+ assert.match(sql, /tageswerk_private\.figure_measure\(/);
+ assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION public\.tageswerk_figure_measure/);
+ assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION tageswerk_private\.figure_measure/);
+ assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_figure_measure/);
+});
+
+test('Die Migration sperrt Zuordnung, Herkunft und Revisionsmanipulation', () => {
+ assert.match(sql, /FORCE ROW LEVEL SECURITY/);
+ assert.match(sql, /GRANT UPDATE \(visitors, gate_cents, bistro_cents, total_cents\) ON TABLE public\.facility_day_figures TO authenticated/);
+ assert.doesNotMatch(sql, /GRANT UPDATE ON TABLE public\.facility_day_figures TO authenticated/);
+ assert.match(sql, /REVOKE ALL ON TABLE public\.facility_day_figures FROM PUBLIC, anon, authenticated/);
+ assert.match(sql, /REVOKE ALL ON TABLE public\.facility_day_figure_revisions FROM PUBLIC, anon, authenticated/);
+ assert.match(sql, /GRANT SELECT ON TABLE public\.facility_day_figure_revisions TO authenticated/);
+ assert.doesNotMatch(sql, /GRANT INSERT ON TABLE public\.facility_day_figure_revisions/);
+ assert.doesNotMatch(sql, /GRANT UPDATE ON TABLE public\.facility_day_figure_revisions/);
+ assert.doesNotMatch(sql, /GRANT DELETE ON TABLE public\.facility_day_figure_revisions/);
+ assert.doesNotMatch(sql, /CREATE POLICY facility_day_figure_revisions_insert/);
+ assert.doesNotMatch(sql, /CREATE POLICY facility_day_figure_revisions_update/);
+ assert.doesNotMatch(sql, /CREATE POLICY facility_day_figure_revisions_delete/);
+ assert.match(sql, /CREATE OR REPLACE FUNCTION public\.tageswerk_guard_day_figure/);
+ assert.match(sql, /Betrieb, Organisation und Herkunft eines Kennzahlentages bleiben unveränderlich/);
+ assert.match(sql, /NEW\.facility_id IS DISTINCT FROM OLD\.facility_id/);
+ assert.match(sql, /NEW\.organization_id IS DISTINCT FROM OLD\.organization_id/);
+ assert.match(sql, /NEW\.created_by IS DISTINCT FROM OLD\.created_by/);
+ assert.match(sql, /NEW\.source IS DISTINCT FROM OLD\.source/);
+ assert.match(sql, /NEW\.imported_at IS DISTINCT FROM OLD\.imported_at/);
+ assert.match(sql, /NEW\.imported_by IS DISTINCT FROM OLD\.imported_by/);
+ assert.match(sql, /NEW\.service_day IS DISTINCT FROM OLD\.service_day/);
+ assert.match(sql, /CREATE TRIGGER facility_day_figures_guard/);
+ assert.match(sql, /m\.facility_id = p_facility_id/);
+ assert.match(sql, /m\.organization_id = organization/);
+ assert.match(sql, /company_admin' AND m\.facility_id IS NULL/);
+ assert.match(sql, /WHERE facility_id = p_facility_id AND service_day = day/);
+ assert.match(sql, /UPDATE public\.facility_day_figures\s+SET visitors = next_visitors,\s+gate_cents = next_gate,\s+bistro_cents = next_bistro,\s+total_cents = next_total\s+WHERE id = existing\.id/s);
+ assert.doesNotMatch(sql, /UPDATE public\.facility_day_figures\s+SET[^(]*\b(facility_id|organization_id|created_by|source)\s*=/);
+ assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_audit_day_figure/);
+ assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_guard_day_figure/);
+ assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_figure_role/);
 });

@@ -6,13 +6,19 @@
 -- Techniker behalten diesen Textzugriff und erhalten keinen Zugriff auf Kennzahlen.
 -- Die Funktionen laufen mit Eigentümerrechten, weil Mitarbeiter die Tabelle nicht lesen dürfen.
 -- Sie prüfen die Mitgliedschaft selbst und geben Mitarbeitern keine Umsatzbeträge zurück.
+-- Der zusammengesetzte Fremdschlüssel nutzt die vorhandene Eindeutigkeit
+-- facilities (id, organization_id), wie in den Migrationen 2.9.
+-- Die interne Summenfunktion liegt in tageswerk_private und ist über PostgREST nicht erreichbar.
 
 BEGIN;
+
+CREATE SCHEMA IF NOT EXISTS tageswerk_private;
+REVOKE ALL ON SCHEMA tageswerk_private FROM PUBLIC, anon, authenticated;
 
 CREATE TABLE public.facility_day_figures (
   id uuid PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
   organization_id uuid NOT NULL,
-  facility_id uuid NOT NULL REFERENCES public.facilities (id),
+  facility_id uuid NOT NULL,
   service_day date NOT NULL,
   visitors integer,
   gate_cents bigint,
@@ -24,6 +30,9 @@ CREATE TABLE public.facility_day_figures (
   created_by uuid NOT NULL DEFAULT auth.uid(),
   created_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
   updated_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
+  CONSTRAINT facility_day_figures_facility_org_fk
+    FOREIGN KEY (facility_id, organization_id)
+    REFERENCES public.facilities (id, organization_id),
   CONSTRAINT facility_day_figures_one_per_day UNIQUE (facility_id, service_day),
   CONSTRAINT facility_day_figures_visitors CHECK (visitors IS NULL OR visitors >= 0),
   CONSTRAINT facility_day_figures_gate CHECK (gate_cents IS NULL OR gate_cents >= 0),
@@ -56,8 +65,34 @@ CREATE TABLE public.facility_day_figure_revisions (
   editor_id uuid NOT NULL DEFAULT auth.uid(),
   edited_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
   change_note text NOT NULL,
-  CONSTRAINT facility_day_figure_revisions_note CHECK (pg_catalog.char_length(pg_catalog.btrim(change_note)) >= 3)
+  CONSTRAINT facility_day_figure_revisions_note CHECK (pg_catalog.char_length(pg_catalog.btrim(change_note)) >= 3),
+  CONSTRAINT facility_day_figure_revisions_facility_org_fk
+    FOREIGN KEY (facility_id, organization_id)
+    REFERENCES public.facilities (id, organization_id)
 );
+
+CREATE OR REPLACE FUNCTION public.tageswerk_guard_day_figure()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $tageswerk$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.facility_id IS DISTINCT FROM OLD.facility_id
+       OR NEW.organization_id IS DISTINCT FROM OLD.organization_id
+       OR NEW.created_by IS DISTINCT FROM OLD.created_by
+       OR NEW.source IS DISTINCT FROM OLD.source
+       OR NEW.imported_at IS DISTINCT FROM OLD.imported_at
+       OR NEW.imported_by IS DISTINCT FROM OLD.imported_by
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at
+       OR NEW.service_day IS DISTINCT FROM OLD.service_day
+       OR NEW.id IS DISTINCT FROM OLD.id THEN
+      RAISE EXCEPTION 'Betrieb, Organisation und Herkunft eines Kennzahlentages bleiben unveränderlich.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$tageswerk$;
 
 CREATE OR REPLACE FUNCTION public.tageswerk_audit_day_figure()
 RETURNS trigger
@@ -96,6 +131,10 @@ $tageswerk$;
 CREATE TRIGGER facility_day_figures_bind_facility
   BEFORE INSERT OR UPDATE OF facility_id ON public.facility_day_figures
   FOR EACH ROW EXECUTE FUNCTION public.tageswerk_bind_operation_facility();
+
+CREATE TRIGGER facility_day_figures_guard
+  BEFORE UPDATE ON public.facility_day_figures
+  FOR EACH ROW EXECUTE FUNCTION public.tageswerk_guard_day_figure();
 
 CREATE TRIGGER facility_day_figures_audit
   BEFORE UPDATE OF visitors, gate_cents, bistro_cents, total_cents ON public.facility_day_figures
@@ -351,7 +390,8 @@ BEGIN
 END;
 $tageswerk$;
 
-CREATE OR REPLACE FUNCTION public.tageswerk_figure_measure(
+-- Interne Summenfunktion: nicht in public, damit PostgREST sie nicht anbietet.
+CREATE OR REPLACE FUNCTION tageswerk_private.figure_measure(
   p_facility_id uuid,
   p_start date,
   p_end date,
@@ -442,8 +482,8 @@ BEGIN
   year_start := pg_catalog.date_trunc('year', anchor)::date;
   prior_month_start := CASE WHEN prior_anchor IS NULL THEN NULL ELSE pg_catalog.date_trunc('month', prior_anchor)::date END;
   prior_year_start := CASE WHEN prior_anchor IS NULL THEN NULL ELSE pg_catalog.date_trunc('year', prior_anchor)::date END;
-  visitors := public.tageswerk_figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'visitors');
-  total := public.tageswerk_figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'total');
+  visitors := tageswerk_private.figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'visitors');
+  total := tageswerk_private.figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'total');
   IF NOT manager THEN
     visitors := visitors - 'current' - 'prior';
     total := total - 'current' - 'prior';
@@ -454,37 +494,39 @@ BEGIN
     'month', pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
       'visitors', visitors,
       'total', total,
-      'gate', CASE WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'gate') ELSE NULL END,
-      'bistro', CASE WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'bistro') ELSE NULL END
+      'gate', CASE WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'gate') ELSE NULL END,
+      'bistro', CASE WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, month_start, anchor, prior_month_start, prior_anchor, 'bistro') ELSE NULL END
     )),
     'year', pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
       'visitors', CASE
-        WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'visitors')
-        ELSE public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'visitors') - 'current' - 'prior'
+        WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'visitors')
+        ELSE tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'visitors') - 'current' - 'prior'
       END,
       'total', CASE
-        WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'total')
-        ELSE public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'total') - 'current' - 'prior'
+        WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'total')
+        ELSE tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'total') - 'current' - 'prior'
       END,
-      'gate', CASE WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'gate') ELSE NULL END,
-      'bistro', CASE WHEN manager THEN public.tageswerk_figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'bistro') ELSE NULL END
+      'gate', CASE WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'gate') ELSE NULL END,
+      'bistro', CASE WHEN manager THEN tageswerk_private.figure_measure(p_facility_id, year_start, anchor, prior_year_start, prior_anchor, 'bistro') ELSE NULL END
     ))
   );
 END;
 $tageswerk$;
 
-REVOKE ALL ON TABLE public.facility_day_figures FROM PUBLIC, anon;
-REVOKE ALL ON TABLE public.facility_day_figure_revisions FROM PUBLIC, anon;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.facility_day_figures TO authenticated;
+REVOKE ALL ON TABLE public.facility_day_figures FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.facility_day_figure_revisions FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON TABLE public.facility_day_figures TO authenticated;
+GRANT UPDATE (visitors, gate_cents, bistro_cents, total_cents) ON TABLE public.facility_day_figures TO authenticated;
 GRANT SELECT ON TABLE public.facility_day_figure_revisions TO authenticated;
-REVOKE ALL ON FUNCTION public.tageswerk_audit_day_figure() FROM PUBLIC, anon;
+
+REVOKE ALL ON FUNCTION public.tageswerk_guard_day_figure() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_audit_day_figure() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_figure_role(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_figure_change(numeric, numeric) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_save_day_figures(uuid, date, integer, bigint, bigint, bigint, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_day_figure_overview(uuid, date, date, text) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.tageswerk_figure_measure(uuid, date, date, date, date, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION tageswerk_private.figure_measure(uuid, date, date, date, date, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_day_figure_period(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.tageswerk_audit_day_figure() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_save_day_figures(uuid, date, integer, bigint, bigint, bigint, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_day_figure_overview(uuid, date, date, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_day_figure_period(uuid) TO authenticated;
