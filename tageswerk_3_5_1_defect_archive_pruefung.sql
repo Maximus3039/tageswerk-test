@@ -62,15 +62,23 @@ FROM (
        AND position('Archivierte Mängel können nicht verändert werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierte Mängel können nicht gelöscht werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierung ist nur über die vorgesehene Funktion möglich.' IN pg_get_functiondef(guard_fn.oid)) > 0
-       AND position('Die Wiederherstellung verändert keine gespeicherten Angaben.' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('Die Wiederherstellung verändert keine Arbeitsvermerke, Fristen oder den Status.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('NEW.change_note IS DISTINCT FROM OLD.change_note' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('NEW.status IS DISTINCT FROM OLD.status' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('NEW.resolution_due_at IS DISTINCT FROM OLD.resolution_due_at' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND has_column_privilege('authenticated', 'public.defects', 'archived_at', 'SELECT')
        AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_at', 'UPDATE')
        AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_by', 'UPDATE')
        AND NOT has_column_privilege('authenticated', 'public.defects', 'resolved_at', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'archived_at', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'archived_by', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'resolved_at', 'UPDATE')
        AND has_column_privilege('authenticated', 'public.defects', 'status', 'UPDATE')
        AND has_column_privilege('authenticated', 'public.defects', 'change_note', 'UPDATE')
        AND has_column_privilege('authenticated', 'public.defects', 'assigned_to', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'status', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'change_note', 'UPDATE')
+       AND NOT has_column_privilege('service_role', 'public.defects', 'assigned_to', 'UPDATE')
        AND has_table_privilege('authenticated', 'public.defects', 'SELECT')
        AND has_table_privilege('authenticated', 'public.defect_events', 'SELECT')
        AND EXISTS (
@@ -166,7 +174,7 @@ FROM (
        AND position('archived_at' IN pg_get_functiondef(employee.oid)) = 0
        AND position('archived_by' IN pg_get_functiondef(employee.oid)) = 0
        AND position('tageswerk_archive_defect' IN pg_get_functiondef(employee.oid)) = 0
-       AND position('UPDATE public.defects SET status=p_status, change_note=' IN pg_get_functiondef(employee.oid)) > 0
+       AND position('UPDATE public.defects SET status = p_status, change_note = btrim(p_note) WHERE id = p_defect_id' IN regexp_replace(pg_get_functiondef(employee.oid), '[[:space:]]+', ' ', 'g')) > 0
        AND position('Vorgang ist bereits abgeschlossen oder wartet auf Freigabe' IN pg_get_functiondef(employee.oid)) > 0
       THEN 'bereit' ELSE 'stoppen'
     END,

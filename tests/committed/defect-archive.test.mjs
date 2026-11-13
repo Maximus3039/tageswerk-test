@@ -127,6 +127,13 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(check, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
  assert.match(check, /defect\.status = ''resolved''/);
  assert.match(check, /NOT has_column_privilege\('authenticated', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+ assert.match(check, /Die Wiederherstellung verändert keine Arbeitsvermerke, Fristen oder den Status/);
+ assert.equal(check.includes('Die Wiederherstellung verändert keine gespeicherten Angaben.'), false);
+ assert.match(check, /regexp_replace\(pg_get_functiondef\(employee\.oid\), '\[\[:space:\]\]\+', ' ', 'g'\)/);
+ assert.match(check, /UPDATE public\.defects SET status = p_status, change_note = btrim\(p_note\) WHERE id = p_defect_id/);
+ assert.match(check, /NOT has_column_privilege\('service_role', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+ assert.match(check, /NOT has_column_privilege\('service_role', 'public\.defects', 'status', 'UPDATE'\)/);
+ assert.equal(check.includes('SET status=p_status, change_note='), false);
  assert.match(sql, /ALTER TABLE tageswerk_private\.defect_archive_permit OWNER TO/);
  assert.match(sql, /DELETE FROM tageswerk_private\.defect_archive_permit/);
  assert.match(sql, /has_column_privilege\('authenticated', 'public\.defects', cols\.column_name, 'UPDATE'\)/);
@@ -281,4 +288,9 @@ test('Die Bestandsaufnahme liest die Mängelstruktur und schreibt nichts', () =>
  assert.doesNotMatch(sql, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE|COMMENT|DO)\b/im);
  assert.equal(sql.includes('tageswerk_archive_defect'), false);
  assert.equal(runner.includes('tageswerk_3_5_1_defect_archive_bestandsaufnahme.sql'), false);
+ const diagnosis = readFileSync(new URL('../../tageswerk_3_5_1_defect_archive_pruefung_diagnose.sql', import.meta.url), 'utf8');
+ assert.match(diagnosis, /Alter Meldungstext der Wiederherstellung/);
+ assert.match(diagnosis, /Kompakte UPDATE-Zeile ohne Leerzeichen/);
+ assert.doesNotMatch(diagnosis, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE|COMMENT|DO)\b/im);
+ assert.equal(runner.includes('tageswerk_3_5_1_defect_archive_pruefung_diagnose.sql'), false);
 });
