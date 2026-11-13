@@ -64,6 +64,38 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  expect(await choiceLabel.evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(48);
  await choiceLabel.click();
  await expect(page.locator('.water-pool-choices input').first()).toBeChecked();
+ const archiveLayout = await page.evaluate(() => {
+  const section = document.createElement('section');
+  section.className = 'defect-section';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Archiv (2)';
+  const tools = document.createElement('div');
+  tools.className = 'archive-tools';
+  const label = document.createElement('label');
+  label.textContent = 'Suche in Titel und Beschreibung';
+  const input = document.createElement('input');
+  input.type = 'search';
+  input.value = 'Pumpe im Technikraum mit einem langen Suchbegriff';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'secondary';
+  button.textContent = 'Alle abgeschlossenen Mängel archivieren';
+  tools.append(label, input, button);
+  section.append(heading, tools);
+  document.querySelector('main').append(section);
+  const box = section.getBoundingClientRect();
+  const buttonBox = button.getBoundingClientRect();
+  return {
+   overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+   right: box.right,
+   height: buttonBox.height,
+   fontSize: Number.parseFloat(getComputedStyle(input).fontSize)
+  };
+ });
+ expect(archiveLayout.overflow).toBeLessThanOrEqual(1);
+ expect(archiveLayout.right).toBeLessThanOrEqual(viewport.width + 1);
+ expect(archiveLayout.height).toBeGreaterThanOrEqual(48);
+ expect(archiveLayout.fontSize).toBeGreaterThanOrEqual(16);
  const overflow = await page.evaluate(() => {
   const wrap = document.createElement('div');
   wrap.className = 'water-table-wrap';
