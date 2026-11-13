@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
-import {archiveConfirmation, closedInFacility, completionText, defectSection, matchesArchiveQuery, sectionCounts, sortByCompletion} from '../../js/defects.js';
+import {archiveConfirmation, archiveHeading, closedInFacility, completionText, defectSection, matchesArchiveQuery, sectionCounts, sortByCompletion} from '../../js/defects.js';
 import {isManager} from '../../js/permissions.js';
 import {state} from '../../js/state.js';
 
@@ -39,6 +39,21 @@ test('Offen, abgeschlossen und Archiv bleiben getrennte Bereiche', () => {
  assert.equal(defectSection(defects[4]), 'archive');
  assert.deepEqual(sectionCounts(defects), {open: 3, done: 1, archive: 1});
  assert.equal(defectSection({id: 'old', status: 'resolved', archived_at: null}), 'done');
+});
+
+test('Die Archivüberschrift ist eingeklappt und nennt die Anzahl', () => {
+ assert.equal(archiveHeading(6, false), '▶ Archiv (6)');
+ assert.equal(archiveHeading(1, true), '▼ Archiv (1)');
+ const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
+ assert.match(app, /let archiveOpen=false/);
+ assert.match(app, /button\.type='button'/);
+ assert.match(app, /setAttribute\('aria-expanded',archiveOpen\?'true':'false'\)/);
+ assert.match(app, /setAttribute\('aria-controls','defect-archive-panel'\)/);
+ assert.match(app, /textContent=archiveHeading\(count,archiveOpen\)/);
+ assert.match(app, /if\(!archiveOpen\)continue/);
+ assert.equal(app.includes('archiveOpen=true'), false);
+ const actions = app.slice(app.indexOf('async function archiveClosedDefects'), app.indexOf('async function defectCard'));
+ assert.equal(actions.includes('archiveOpen'), false);
 });
 
 test('Die Archivsuche trifft Titel und Beschreibung und sortiert nach Abschluss', () => {
