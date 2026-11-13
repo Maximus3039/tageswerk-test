@@ -428,6 +428,274 @@ function addCalendarDays(day, count) {
  return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
 }
 
+const weekdayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+const monthNames = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+export function dayFigureAccess(facility, memberships) {
+ const covers = (membership, role) => membership?.is_active === true && membership.organization_id === facility?.organization_id && membership.role === role && (role === 'company_admin' ? membership.facility_id == null : membership.facility_id === facility?.id);
+ const rows = memberships || [];
+ if (rows.some(membership => covers(membership, 'company_admin') || covers(membership, 'facility_manager'))) return 'manager';
+ if (rows.some(membership => covers(membership, 'employee'))) return 'employee';
+ return 'none';
+}
+
+export function figureWeekday(day) {
+ const [year, month, date] = String(day || '').split('-').map(Number);
+ const index = new Date(Date.UTC(year, month - 1, date)).getUTCDay();
+ const weekend = index === 6 ? 'saturday' : index === 0 ? 'sunday' : '';
+ return {index, name: weekdayNames[index] || '', weekend};
+}
+
+export function formatCalendarDay(day) {
+ const [year, month, date] = String(day || '').split('-');
+ if (!year || !month || !date) return '';
+ return `${date}.${month}.${year}`;
+}
+
+export function compareCalendarDay(day) {
+ return addCalendarDays(day, -364);
+}
+
+export function employeeFigureWindow(today) {
+ return {from: addCalendarDays(today, -6), to: today};
+}
+
+export function dayFigureEditable(access, day, today) {
+ if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '') || !/^\d{4}-\d{2}-\d{2}$/.test(today || '')) return false;
+ if (access === 'manager') return true;
+ if (access !== 'employee') return false;
+ return day >= addCalendarDays(today, -6) && day <= today;
+}
+
+export function parseVisitors(raw) {
+ const text = String(raw ?? '').trim();
+ if (!text) return {ok: false, missing: true};
+ if (!/^\d{1,9}$/.test(text)) return {ok: false, error: 'Bitte die Besucherzahl als ganze Zahl ab 0 eintragen.'};
+ return {ok: true, value: Number(text)};
+}
+
+export function euroToCents(raw) {
+ const text = String(raw ?? '').trim().replace(/\s/g, '').replace('€', '');
+ if (!text) return {ok: false, missing: true};
+ const german = text.includes(',');
+ const normalized = german ? text.replace(/\./g, '').replace(',', '.') : text;
+ if (!(german ? /^\d{1,9}(\.\d{3})*(,\d{1,2})?$/ : /^\d{1,9}(\.\d{1,2})?$/).test(text)) {
+  return {ok: false, error: 'Bitte einen Betrag ab 0,00 € mit höchstens zwei Nachkommastellen eintragen.'};
+ }
+ const [whole, fraction = ''] = normalized.split('.');
+ const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+ if (!Number.isSafeInteger(cents)) return {ok: false, error: 'Bitte einen Betrag ab 0,00 € mit höchstens zwei Nachkommastellen eintragen.'};
+ return {ok: true, cents};
+}
+
+export function formatCents(cents) {
+ if (cents == null || cents === '') return '';
+ const negative = cents < 0;
+ const absolute = Math.abs(Number(cents));
+ const whole = Math.floor(absolute / 100);
+ const fraction = String(absolute % 100).padStart(2, '0');
+ return `${negative ? '-' : ''}${new Intl.NumberFormat('de-DE').format(whole)},${fraction} €`;
+}
+
+function percentTenths(current, prior) {
+ const difference = BigInt(current) - BigInt(prior);
+ const negative = difference < 0n;
+ const numerator = (negative ? -difference : difference) * 1000n;
+ const denominator = prior < 0 ? -BigInt(prior) : BigInt(prior);
+ const quotient = numerator / denominator;
+ const remainder = numerator % denominator;
+ const rounded = remainder * 2n >= denominator ? quotient + 1n : quotient;
+ return Number(negative ? -rounded : rounded) / 10;
+}
+
+export function figurePercent(current, prior) {
+ if (current == null || prior == null) return {state: 'missing', label: 'Keine Vergleichsdaten', tone: 'flat'};
+ if (prior === 0) return {state: 'undefined', label: 'Nicht berechenbar', tone: 'flat'};
+ const percent = percentTenths(current, prior);
+ const tone = percent > 0 ? 'up' : percent < 0 ? 'down' : 'flat';
+ const sign = percent > 0 ? '+' : '';
+ return {state: 'value', percent, tone, label: `${sign}${percent.toFixed(1).replace('.', ',')} %`};
+}
+
+function calendarDays(start, end) {
+ if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '') || !/^\d{4}-\d{2}-\d{2}$/.test(end || '') || start > end) return [];
+ const days = [];
+ let cursor = start;
+ while (cursor <= end && days.length < 400) {
+  days.push(cursor);
+  cursor = addCalendarDays(cursor, 1);
+ }
+ return days;
+}
+
+function shiftCalendarYear(day, delta) {
+ const [year, month, date] = day.split('-').map(Number);
+ const target = year + delta;
+ const probe = new Date(Date.UTC(target, month - 1, date));
+ if (probe.getUTCFullYear() !== target || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== date) return '';
+ return probe.toISOString().slice(0, 10);
+}
+
+function figureMap(records) {
+ return new Map((records || []).map(row => [row.day, row]));
+}
+
+function figureRow(day, records, access) {
+ const current = records.get(day) || {};
+ const compareDay = compareCalendarDay(day);
+ const prior = records.get(compareDay) || {};
+ const weekday = figureWeekday(day);
+ const row = {
+  day,
+  weekday: weekday.name,
+  weekend: weekday.weekend,
+  compareDay,
+  visitors: current.visitors ?? null,
+  visitorChange: figurePercent(current.visitors ?? null, prior.visitors ?? null)
+ };
+ if (access !== 'manager') return row;
+ return {
+  ...row,
+  priorVisitors: prior.visitors ?? null,
+  gateCents: current.gateCents ?? null,
+  bistroCents: current.bistroCents ?? null,
+  totalCents: current.totalCents ?? null,
+  priorTotalCents: prior.totalCents ?? null,
+  revenueChange: figurePercent(current.totalCents ?? null, prior.totalCents ?? null)
+ };
+}
+
+export function dayFigureOverview(records, options) {
+ const access = options?.access;
+ const today = options?.today;
+ if (access !== 'employee' && access !== 'manager') return {rows: []};
+ const days = access === 'employee'
+  ? Array.from({length: 7}, (_item, index) => addCalendarDays(today, -index))
+  : calendarDays(options.from || addCalendarDays(today, -30), options.to && options.to < today ? options.to : today);
+ const recordsByDay = figureMap(records);
+ let rows = days.map(day => figureRow(day, recordsByDay, access));
+ if (access === 'manager' && (options.weekday === 'saturday' || options.weekday === 'sunday')) {
+  rows = rows.filter(row => row.weekend === options.weekday);
+ }
+ rows.sort((left, right) => options?.sort === 'asc' ? left.day.localeCompare(right.day) : right.day.localeCompare(left.day));
+ return {rows};
+}
+
+function missingDaysLabel(count) {
+ return count === 1 ? 'Es fehlen Daten für 1 Tag.' : `Es fehlen Daten für ${count} Tage.`;
+}
+
+function measurePeriod(records, start, end, priorStart, priorEnd, key) {
+ if (!start || !end || !priorStart || !priorEnd) return {state: 'missing', label: 'Keine Vergleichsdaten', tone: 'flat'};
+ const recordsByDay = figureMap(records);
+ let missing = 0;
+ let currentSum = 0;
+ let priorSum = 0;
+ for (const day of calendarDays(start, end)) {
+  const value = recordsByDay.get(day)?.[key];
+  if (value == null) missing += 1;
+  else currentSum += value;
+ }
+ for (const day of calendarDays(priorStart, priorEnd)) {
+  const value = recordsByDay.get(day)?.[key];
+  if (value == null) missing += 1;
+  else priorSum += value;
+ }
+ if (missing) return {state: 'incomplete', missing, label: missingDaysLabel(missing)};
+ return {state: 'complete', current: currentSum, prior: priorSum, change: figurePercent(currentSum, priorSum)};
+}
+
+function publishMetric(metric, access) {
+ if (access === 'manager' || metric.state !== 'complete') return metric;
+ return {state: 'complete', change: metric.change};
+}
+
+function periodWindow(anchor, kind) {
+ const [year, month] = anchor.split('-');
+ const start = kind === 'year' ? `${year}-01-01` : `${year}-${month}-01`;
+ const priorEnd = shiftCalendarYear(anchor, -1);
+ const priorStart = priorEnd ? (kind === 'year' ? `${priorEnd.slice(0, 4)}-01-01` : `${priorEnd.slice(0, 7)}-01`) : '';
+ return {start, end: anchor, priorStart, priorEnd};
+}
+
+export function dayFigurePeriods(records, today, access) {
+ const anchor = (records || []).map(row => row.day).filter(day => day <= today).sort().at(-1) || '';
+ const build = (kind, title) => {
+  const window = anchor ? periodWindow(anchor, kind) : {start: '', end: '', priorStart: '', priorEnd: ''};
+  const period = {
+   title,
+   ...window,
+   visitors: publishMetric(measurePeriod(records, window.start, window.end, window.priorStart, window.priorEnd, 'visitors'), access),
+   total: publishMetric(measurePeriod(records, window.start, window.end, window.priorStart, window.priorEnd, 'totalCents'), access)
+  };
+  if (access === 'manager') {
+   period.gate = measurePeriod(records, window.start, window.end, window.priorStart, window.priorEnd, 'gateCents');
+   period.bistro = measurePeriod(records, window.start, window.end, window.priorStart, window.priorEnd, 'bistroCents');
+  }
+  return period;
+ };
+ const [year, month] = (anchor || today || '0000-01-01').split('-');
+ return {
+  anchor,
+  month: build('month', `Monatsentwicklung – ${monthNames[Number(month) - 1] || ''} ${anchor ? year : ''}`.trim()),
+  year: build('year', `Jahresentwicklung – ${anchor ? year : ''}`.trim())
+ };
+}
+
+function noteError(note, required) {
+ if (!required) return '';
+ const text = String(note ?? '').trim();
+ if (text.length < 3) return 'Bitte den Grund der Änderung mit mindestens 3 Zeichen eintragen.';
+ return '';
+}
+
+export function dayFigureEntryError(draft, access, today) {
+ if (access === 'none') return 'Keine Berechtigung für die Tageskennzahlen.';
+ if (!dayFigureEditable(access, draft?.day, today)) return 'Kennzahlen außerhalb der letzten sieben Tage bleiben der Betriebsleitung vorbehalten.';
+ const visitors = parseVisitors(draft?.visitors);
+ const gate = euroToCents(draft?.gate);
+ const bistro = euroToCents(draft?.bistro);
+ if (visitors.error) return visitors.error;
+ if (gate.error) return gate.error;
+ if (bistro.error) return bistro.error;
+ if (visitors.missing || gate.missing || bistro.missing) return 'Bitte Besucherzahl, Kassenumsatz und Bistroumsatz eintragen.';
+ return noteError(draft?.changeNote, draft?.replaces === true);
+}
+
+export function historicalFigureError(draft, access, today) {
+ if (access !== 'manager') return 'Historische Kennzahlen bleiben der Betriebsleitung und Geschäftsführung vorbehalten.';
+ if (!dayFigureEditable(access, draft?.day, today)) return 'Bitte ein Datum wählen.';
+ const visitors = parseVisitors(draft?.visitors);
+ const gate = euroToCents(draft?.gate);
+ const bistro = euroToCents(draft?.bistro);
+ const total = euroToCents(draft?.total);
+ if (visitors.error) return visitors.error;
+ if (gate.error) return gate.error;
+ if (bistro.error) return bistro.error;
+ if (total.error) return total.error;
+ if (gate.missing !== bistro.missing) return 'Ein fehlender Teilumsatz wird nicht ergänzt.';
+ if (!gate.missing && !bistro.missing) return 'Historische Daten übernehmen Besucherzahl und Gesamtumsatz. Teilumsätze werden dabei nicht ergänzt.';
+ if (visitors.missing && total.missing) return 'Bitte mindestens Besucherzahl oder Gesamtumsatz eintragen.';
+ return noteError(draft?.changeNote, draft?.replaces === true);
+}
+
+export function dayFigurePayload(draft, access, today) {
+ const error = dayFigureEntryError(draft, access, today);
+ if (error) return {ok: false, error};
+ const visitors = parseVisitors(draft.visitors);
+ const gate = euroToCents(draft.gate);
+ const bistro = euroToCents(draft.bistro);
+ return {ok: true, visitors: visitors.value, gateCents: gate.cents, bistroCents: bistro.cents, totalCents: gate.cents + bistro.cents, source: 'erfassung'};
+}
+
+export function historicalFigurePayload(draft, access, today) {
+ const error = historicalFigureError(draft, access, today);
+ if (error) return {ok: false, error};
+ const visitors = parseVisitors(draft.visitors);
+ const total = euroToCents(draft.total);
+ return {ok: true, visitors: visitors.missing ? null : visitors.value, gateCents: null, bistroCents: null, totalCents: total.missing ? null : total.cents, source: 'import'};
+}
+
 export function waterCheckInRound(pool, measuredAt, now) {
  const today = berlinDay(now);
  const measured = berlinDay(measuredAt);
