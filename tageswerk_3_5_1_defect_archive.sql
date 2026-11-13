@@ -6,7 +6,8 @@
 -- company_admin gilt nur mit facility_id IS NULL für die ganze Organisation, wie memberships_role_scope_check.
 -- facility_manager gilt nur für die eigene facility_id. Mitarbeiter und Techniker archivieren nicht.
 -- Eine frei gesetzte Einstellung reicht nicht. Nur ein Eintrag in tageswerk_private.defect_archive_permit erlaubt die Archivspalten.
--- Das Tabellenrecht UPDATE wird entzogen und für alle übrigen Spalten wieder erteilt, wenn es vorher bestand.
+-- Das Tabellenrecht UPDATE wird entzogen und nur für Spalten wieder erteilt, die vorher schon geändert werden durften.
+-- Neue Objekte gehören danach dem Eigentümer von public.defects. Die Freigabezeile wird im Trigger gelöscht.
 
 BEGIN;
 
@@ -379,7 +380,13 @@ BEGIN
   SELECT count(*)::integer INTO archived_count FROM logged;
   DELETE FROM tageswerk_private.defect_archive_permit AS permit
   WHERE permit.actor_id = auth.uid()
-    AND permit.operation = 'archive';
+    AND permit.operation = 'archive'
+    AND permit.defect_id IN (
+      SELECT defect.id
+      FROM public.defects AS defect
+      WHERE defect.facility_id = p_facility_id
+        AND defect.organization_id = facility_org
+    );
   RETURN archived_count;
 END;
 $bulk$;
@@ -440,19 +447,37 @@ $restore$;
 DO $column_rights$
 DECLARE
   editable text;
-  keep_update boolean;
+  service_editable text;
 BEGIN
-  keep_update := pg_catalog.has_table_privilege('authenticated', 'public.defects', 'UPDATE')
-    OR pg_catalog.has_column_privilege('authenticated', 'public.defects', 'status', 'UPDATE');
-  SELECT string_agg(pg_catalog.quote_ident(column_name), ', ' ORDER BY ordinal_position)
+  SELECT string_agg(pg_catalog.quote_ident(cols.column_name), ', ' ORDER BY cols.ordinal_position)
     INTO editable
-  FROM information_schema.columns
-  WHERE table_schema = 'public'
-    AND table_name = 'defects'
-    AND column_name NOT IN ('archived_at', 'archived_by', 'resolved_at');
+  FROM information_schema.columns AS cols
+  WHERE cols.table_schema = 'public'
+    AND cols.table_name = 'defects'
+    AND cols.column_name NOT IN ('archived_at', 'archived_by', 'resolved_at')
+    AND (
+      pg_catalog.has_table_privilege('authenticated', 'public.defects', 'UPDATE')
+      OR pg_catalog.has_column_privilege('authenticated', 'public.defects', cols.column_name, 'UPDATE')
+    );
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
+    SELECT string_agg(pg_catalog.quote_ident(cols.column_name), ', ' ORDER BY cols.ordinal_position)
+      INTO service_editable
+    FROM information_schema.columns AS cols
+    WHERE cols.table_schema = 'public'
+      AND cols.table_name = 'defects'
+      AND cols.column_name NOT IN ('archived_at', 'archived_by', 'resolved_at')
+      AND (
+        pg_catalog.has_table_privilege('service_role', 'public.defects', 'UPDATE')
+        OR pg_catalog.has_column_privilege('service_role', 'public.defects', cols.column_name, 'UPDATE')
+      );
+    REVOKE UPDATE ON TABLE public.defects FROM service_role;
+  END IF;
   REVOKE UPDATE ON TABLE public.defects FROM PUBLIC, anon, authenticated;
-  IF keep_update AND editable IS NOT NULL THEN
+  IF editable IS NOT NULL THEN
     EXECUTE format('GRANT UPDATE (%s) ON TABLE public.defects TO authenticated', editable);
+  END IF;
+  IF service_editable IS NOT NULL THEN
+    EXECUTE format('GRANT UPDATE (%s) ON TABLE public.defects TO service_role', service_editable);
   END IF;
 END;
 $column_rights$;
@@ -466,5 +491,26 @@ REVOKE ALL ON FUNCTION public.tageswerk_restore_archived_defect(uuid) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.tageswerk_archive_defect(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_archive_closed_defects(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tageswerk_restore_archived_defect(uuid) TO authenticated;
+
+DO $owners$
+DECLARE
+  defects_owner name;
+BEGIN
+  SELECT pg_catalog.pg_get_userbyid(relation.relowner)
+    INTO defects_owner
+  FROM pg_catalog.pg_class AS relation
+  WHERE relation.oid = 'public.defects'::regclass;
+  EXECUTE format('ALTER SCHEMA tageswerk_private OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER TABLE tageswerk_private.defect_archive_permit OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER FUNCTION public.tageswerk_defect_archive_guard() OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER FUNCTION public.tageswerk_defect_archive_allowed(uuid, uuid) OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER FUNCTION public.tageswerk_archive_defect(uuid) OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER FUNCTION public.tageswerk_archive_closed_defects(uuid) OWNER TO %I', defects_owner);
+  EXECUTE format('ALTER FUNCTION public.tageswerk_restore_archived_defect(uuid) OWNER TO %I', defects_owner);
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.tageswerk_defect_archive_guard() TO service_role';
+  END IF;
+END;
+$owners$;
 
 COMMIT;

@@ -127,7 +127,12 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(check, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
  assert.match(check, /defect\.status = ''resolved''/);
  assert.match(check, /NOT has_column_privilege\('authenticated', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+ assert.match(sql, /ALTER TABLE tageswerk_private\.defect_archive_permit OWNER TO/);
+ assert.match(sql, /DELETE FROM tageswerk_private\.defect_archive_permit/);
+ assert.match(sql, /has_column_privilege\('authenticated', 'public\.defects', cols\.column_name, 'UPDATE'\)/);
  assert.match(check, /tageswerk_private\.defect_archive_permit/);
+ assert.match(check, /permit\.relowner = defects\.relowner/);
+ assert.match(check, /Diese Abfrage ruft die Archivfunktionen nicht auf/);
  assert.equal(sql.includes('set_config'), false);
  assert.equal(sql.includes('current_setting'), false);
  assert.equal(sql.includes('tageswerk.defect_archive'), false);

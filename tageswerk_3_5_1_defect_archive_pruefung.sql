@@ -202,5 +202,58 @@ FROM (
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Die Freigabe für Archivspalten liegt in einer privaten Tabelle ohne Rechte für angemeldete oder anonyme Benutzer. Eine gesetzte Einstellung tageswerk.defect_archive erzeugt diesen Eintrag nicht.'
+  UNION ALL
+  SELECT 90, 'Freigabe gehört dem Eigentümer und wird einmal verwendet',
+    CASE
+      WHEN permit.oid IS NOT NULL
+       AND defects.oid IS NOT NULL
+       AND permit.relowner = defects.relowner
+       AND private_schema.nspowner = defects.relowner
+       AND guard_fn.proowner = defects.relowner
+       AND archive_one.proowner = defects.relowner
+       AND archive_many.proowner = defects.relowner
+       AND restore_one.proowner = defects.relowner
+       AND allowed.proowner = defects.relowner
+       AND guard_fn.proowner <> authenticated_role.oid
+       AND guard_fn.proowner <> anon_role.oid
+       AND has_table_privilege(guard_fn.proowner, permit.oid, 'SELECT')
+       AND has_table_privilege(guard_fn.proowner, permit.oid, 'INSERT')
+       AND has_table_privilege(guard_fn.proowner, permit.oid, 'DELETE')
+       AND has_schema_privilege(guard_fn.proowner, 'tageswerk_private', 'USAGE')
+       AND EXISTS (SELECT 1 FROM unnest(COALESCE(guard_fn.proconfig, ARRAY[]::text[])) AS cfg WHERE cfg IN ('search_path=', 'search_path=""'))
+       AND position('DELETE FROM tageswerk_private.defect_archive_permit' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('DELETE FROM tageswerk_private.defect_archive_permit' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('DELETE FROM tageswerk_private.defect_archive_permit' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('DELETE FROM tageswerk_private.defect_archive_permit' IN pg_get_functiondef(restore_one.oid)) > 0
+       AND (
+         NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role')
+         OR (
+           NOT has_table_privilege('service_role', permit.oid, 'SELECT')
+           AND NOT has_table_privilege('service_role', permit.oid, 'INSERT')
+           AND NOT has_table_privilege('service_role', permit.oid, 'UPDATE')
+           AND NOT has_table_privilege('service_role', permit.oid, 'DELETE')
+           AND has_function_privilege('service_role', 'public.tageswerk_defect_archive_guard()', 'EXECUTE')
+         )
+       )
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Dieselbe Rolle besitzt Mängeltabelle, Freigabetabelle und die definierten Funktionen und kann die Freigabe lesen und löschen. Der Trigger löscht den Eintrag. Diese Abfrage ruft die Archivfunktionen nicht auf.'
+  FROM (SELECT to_regclass('tageswerk_private.defect_archive_permit') AS oid) AS permit_lookup
+  CROSS JOIN (SELECT to_regclass('public.defects') AS oid) AS defects_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_archive_defect(uuid)') AS oid) AS one_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_archive_closed_defects(uuid)') AS oid) AS many_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_restore_archived_defect(uuid)') AS oid) AS restore_lookup
+  CROSS JOIN (SELECT to_regprocedure('public.tageswerk_defect_archive_allowed(uuid,uuid)') AS oid) AS allowed_lookup
+  LEFT JOIN pg_class AS permit ON permit.oid = permit_lookup.oid
+  LEFT JOIN pg_class AS defects ON defects.oid = defects_lookup.oid
+  LEFT JOIN pg_namespace AS private_schema ON private_schema.nspname = 'tageswerk_private'
+  LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
+  LEFT JOIN pg_proc AS archive_one ON archive_one.oid = one_lookup.oid
+  LEFT JOIN pg_proc AS archive_many ON archive_many.oid = many_lookup.oid
+  LEFT JOIN pg_proc AS restore_one ON restore_one.oid = restore_lookup.oid
+  LEFT JOIN pg_proc AS allowed ON allowed.oid = allowed_lookup.oid
+  LEFT JOIN pg_roles AS authenticated_role ON authenticated_role.rolname = 'authenticated'
+  LEFT JOIN pg_roles AS anon_role ON anon_role.rolname = 'anon'
 ) AS checks
 ORDER BY sortierung;
