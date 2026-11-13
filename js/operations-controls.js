@@ -624,7 +624,7 @@ export function acknowledgeWaterAlert(bundle, alertId, note, actor, now) {
  if (!canUse(facilityOf(alert), actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
  if (alert.status !== 'open') return {ok: false, error: 'Diese Warnung wurde bereits quittiert.', bundle};
  const acknowledgementNote = text(note, 2000);
- if (!acknowledgementNote || acknowledgementNote.length < 3) return {ok: false, error: 'Bitte die Quittierung mit mindestens 3 Zeichen begründen.', bundle};
+ if (!acknowledgementNote || acknowledgementNote.length < 3) return {ok: false, error: 'Eine Quittierung wird freiwillig erst ab 3 Zeichen gespeichert. Ohne Quittierung bleibt die Warnung offen.', bundle};
  const updated = {
   ...alert,
   status: 'acknowledged',
@@ -641,7 +641,7 @@ export function recordWaterMeasure(bundle, alertId, measure, actor, now) {
  if (!alert) return {ok: false, error: 'Die Warnung wurde nicht gefunden.', bundle};
  if (!canUse(facilityOf(alert), actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
  const measureText = text(measure, 2000);
- if (!measureText || measureText.length < 3) return {ok: false, error: 'Bitte die Maßnahme mit mindestens 3 Zeichen dokumentieren.', bundle};
+ if (!measureText || measureText.length < 3) return {ok: false, error: 'Eine Maßnahme wird freiwillig erst ab 3 Zeichen gespeichert. Die Messung und die offene Warnung bleiben unverändert.', bundle};
  const entry = {
   id: newId(),
   alertId: alert.id,

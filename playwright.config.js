@@ -2,7 +2,7 @@ import {defineConfig, devices} from '@playwright/test';
 
 export default defineConfig({
  testDir: './tests/ui',
- testMatch: ['smoke.spec.js', 'import-vorschau.spec.js', 'operations.spec.js', 'mobile.spec.js', 'password-reset.spec.js', 'defect-archive.spec.js', 'temperature-settings.spec.js'],
+ testMatch: ['smoke.spec.js', 'import-vorschau.spec.js', 'operations.spec.js', 'mobile.spec.js', 'password-reset.spec.js', 'defect-archive.spec.js', 'temperature-settings.spec.js', 'water-history.spec.js'],
  fullyParallel: false,
  forbidOnly: !!process.env.CI,
  retries: process.env.CI ? 1 : 0,
