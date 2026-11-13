@@ -498,14 +498,18 @@ function renderDayFigures(host, current) {
   const reload = range => paintFigures(range);
   board.append(labeled('Von', from), labeled('Bis', to), labeled('Wochentage', weekday));
   const filters = document.createElement('div');
-  filters.className = 'point-actions';
+  filters.className = 'figure-filters';
+  const presets = document.createElement('div');
+  presets.className = 'figure-presets';
   const preset = (label, shift) => button(label, 'secondary', () => {
    const range = figurePreset(today(), shift);
    from.value = range.from;
    to.value = range.to;
    reload({from: range.from, to: range.to, weekday: weekday.value});
   });
-  filters.append(button('Zeitraum anzeigen', 'secondary', () => reload({from: from.value, to: to.value, weekday: weekday.value})), preset('Aktueller Monat', 'month'), preset('Vorheriger Monat', 'previous-month'), preset('Aktuelles Jahr', 'year'), preset('Vorheriges Jahr', 'previous-year'));
+  filters.append(button('Zeitraum anzeigen', 'secondary', () => reload({from: from.value, to: to.value, weekday: weekday.value})));
+  presets.append(preset('Aktueller Monat', 'month'), preset('Vorheriger Monat', 'previous-month'), preset('Aktuelles Jahr', 'year'), preset('Vorheriges Jahr', 'previous-year'));
+  filters.append(presets);
   board.append(filters, figureSettings(current, access));
  }
  host.append(board);

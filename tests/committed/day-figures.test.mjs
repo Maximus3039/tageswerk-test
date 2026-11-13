@@ -17,7 +17,7 @@ import {
  historicalFigurePayload,
  parseVisitors
 } from '../../js/operations.js';
-import {saveDayFigures} from '../../js/operations-store.js';
+import {figuresMissing, figuresStorageMessage, saveDayFigures} from '../../js/operations-store.js';
 
 const facility = {id: 'fac-a', organization_id: 'org-a', name: 'Bad'};
 const otherFacility = {id: 'fac-b', organization_id: 'org-a', name: 'Zweites Bad'};
@@ -140,12 +140,54 @@ test('Die Speicherung prüft lokal und ruft die Kennzahlenfunktion auf', async (
  const saved = await saveDayFigures(db, {facility, access: 'employee', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, employee, '2026-11-14');
  assert.equal(saved.ok, true, saved.error);
  assert.equal(calls[0][0], 'tageswerk_save_day_figures');
- assert.equal(calls[0][1].p_gate_cents, 250);
- assert.equal(calls[0][1].p_total_cents, 375);
+ assert.equal(calls[0][1].p_facility_id, facility.id);
+ assert.equal(calls[0][1].p_service_day, '2026-11-14');
+ assert.equal(calls[0][1].p_visitors, 4);
+ assert.equal(calls[0][1].p_gate_cents, '250');
+ assert.equal(calls[0][1].p_bistro_cents, '125');
+ assert.equal(calls[0][1].p_total_cents, '375');
+ assert.equal(calls[0][1].p_source, 'erfassung');
+ const missingFacility = await saveDayFigures(db, {facility: {name: 'Ohne Id'}, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.equal(missingFacility.ok, false);
+ assert.match(missingFacility.error, /Betrieb auswählen/);
+ assert.equal(calls.length, 1);
+});
+
+test('Speicherfehler unterscheiden fehlende Migration, Schema-Cache und Berechtigung', async () => {
+ const cacheError = {
+  code: 'PGRST202',
+  message: 'Could not find the function public.tageswerk_save_day_figures(p_facility_id, p_service_day, p_visitors, p_gate_cents, p_bistro_cents, p_total_cents, p_change_note, p_source) in the schema cache',
+  details: 'Searched for the function public.tageswerk_save_day_figures with parameter p_facility_id or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.',
+  hint: null
+ };
+ assert.equal(figuresMissing(cacheError), false);
+ assert.match(figuresStorageMessage(cacheError), /Schema-Cache|API noch nicht freigeschaltet/);
+ assert.doesNotMatch(figuresStorageMessage(cacheError), /noch nicht in der Datenbank installiert/);
+
+ const missingError = {code: '42883', message: 'function public.tageswerk_save_day_figures(uuid, date, integer, bigint, bigint, bigint, text, text) does not exist'};
+ assert.equal(figuresMissing(missingError), true);
+ assert.match(figuresStorageMessage(missingError), /noch nicht in der Datenbank installiert/);
+
+ const permissionError = {code: 'P0001', message: 'Keine Berechtigung für die Tageskennzahlen.'};
+ assert.equal(figuresMissing(permissionError), false);
+ assert.match(figuresStorageMessage(permissionError), /Keine Berechtigung für die Tageskennzahlen/);
+
+ const cache = await saveDayFigures({rpc() {
+  return Promise.resolve({data: null, error: cacheError});
+ }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.equal(cache.ok, false);
+ assert.match(cache.error, /Schema-Cache|API noch nicht freigeschaltet/);
+ assert.doesNotMatch(cache.error, /noch nicht in der Datenbank installiert/);
+
  const missing = await saveDayFigures({rpc() {
-  return Promise.resolve({data: null, error: {code: 'PGRST202', message: 'function does not exist'}});
+  return Promise.resolve({data: null, error: missingError});
  }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
  assert.match(missing.error, /noch nicht in der Datenbank/);
+
+ const denied = await saveDayFigures({rpc() {
+  return Promise.resolve({data: null, error: permissionError});
+ }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.match(denied.error, /Keine Berechtigung/);
 });
 
 test('Die Migration schützt Beträge und lässt die Textberichte stehen', () => {
