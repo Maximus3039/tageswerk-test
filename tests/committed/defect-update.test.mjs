@@ -178,9 +178,9 @@ test('Mitarbeiter und Techniker bearbeiten nur den zugewiesenen Mangel ihres Bet
 
  state.myMemberships = [technician];
  assert.equal(isManager(facility), false);
- const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
- assert.match(app, /!isManager\(facility\) && defect\.assigned_to===state\.currentUser\?\.id/);
- assert.match(app, /rpc\('employee_update_assigned_defect'/);
+ const ui = readFileSync(new URL('../../js/defects-ui.js', import.meta.url), 'utf8');
+ assert.match(ui, /!isManager\(facility\) && defect\.assigned_to===state\.currentUser\?\.id/);
+ assert.match(ui, /rpc\('employee_update_assigned_defect'/);
 
  assert.equal(assignedDefectUpdate({
   userId: technicianId,

@@ -301,7 +301,7 @@ test('Die Annahme übernimmt gespeicherte Rollen je Betrieb und ignoriert eine s
 test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annahme', () => {
  const sql = readFileSync(new URL('../../tageswerk_3_4_invitation_role.sql', import.meta.url), 'utf8');
  const roleSql = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
- const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
+ const staffUi = readFileSync(new URL('../../js/staff-ui.js', import.meta.url), 'utf8');
  const prepared = readFileSync(new URL('../../supabase/functions/invite-staff/index.ts', import.meta.url), 'utf8');
  const roleSqlFile = readFileSync(new URL('../../tageswerk_3_4_invitation_role_parameter.sql', import.meta.url), 'utf8');
  assert.match(sql, /tageswerk_guard_invitation_role/);
@@ -363,9 +363,9 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
   assert.doesNotMatch(query, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT|REVOKE|NOTIFY|DO)\b/im);
  }
  assert.match(prepared, /role/);
- assert.match(app, /role:inviteRole/);
- assert.match(app, /PGRST204/);
- assert.match(app, /roleNames\[r\.role\]/);
+ assert.match(staffUi, /role:inviteRole/);
+ assert.match(staffUi, /PGRST204/);
+ assert.match(staffUi, /roleNames\[r\.role\]/);
 });
 
 test('Mitarbeiter- und Technikereinladungen bleiben je Betrieb getrennt', () => {

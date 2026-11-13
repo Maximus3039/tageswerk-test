@@ -44,15 +44,15 @@ test('Offen, abgeschlossen und Archiv bleiben getrennte Bereiche', () => {
 test('Die Archivüberschrift ist eingeklappt und nennt die Anzahl', () => {
  assert.equal(archiveHeading(6, false), '▶ Archiv (6)');
  assert.equal(archiveHeading(1, true), '▼ Archiv (1)');
- const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
- assert.match(app, /let archiveOpen=false/);
- assert.match(app, /button\.type='button'/);
- assert.match(app, /setAttribute\('aria-expanded',archiveOpen\?'true':'false'\)/);
- assert.match(app, /setAttribute\('aria-controls','defect-archive-panel'\)/);
- assert.match(app, /textContent=archiveHeading\(count,archiveOpen\)/);
- assert.match(app, /if\(!archiveOpen\)continue/);
- assert.equal(app.includes('archiveOpen=true'), false);
- const actions = app.slice(app.indexOf('async function archiveClosedDefects'), app.indexOf('async function defectCard'));
+ const ui = readFileSync(new URL('../../js/defects-ui.js', import.meta.url), 'utf8');
+ assert.match(ui, /let archiveOpen=false/);
+ assert.match(ui, /button\.type='button'/);
+ assert.match(ui, /setAttribute\('aria-expanded',archiveOpen\?'true':'false'\)/);
+ assert.match(ui, /setAttribute\('aria-controls','defect-archive-panel'\)/);
+ assert.match(ui, /textContent=archiveHeading\(count,archiveOpen\)/);
+ assert.match(ui, /if\(!archiveOpen\)continue/);
+ assert.equal(ui.includes('archiveOpen=true'), false);
+ const actions = ui.slice(ui.indexOf('async function archiveClosedDefects'), ui.indexOf('async function defectCard'));
  assert.equal(actions.includes('archiveOpen'), false);
 });
 
@@ -102,7 +102,7 @@ test('Nur Betriebsleitung und Geschäftsführung archivieren, und nur im eigenen
 test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung stehen', () => {
  const sql = readFileSync(new URL('../../tageswerk_3_5_1_defect_archive.sql', import.meta.url), 'utf8');
  const check = readFileSync(new URL('../../tageswerk_3_5_1_defect_archive_pruefung.sql', import.meta.url), 'utf8');
- const app = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
+ const ui = readFileSync(new URL('../../js/defects-ui.js', import.meta.url), 'utf8');
  const runner = readFileSync(new URL('../integration/run.mjs', import.meta.url), 'utf8');
  const beforeFunctions = sql.slice(0, sql.indexOf('CREATE OR REPLACE FUNCTION'));
  assert.equal(beforeFunctions.includes('UPDATE public.defects'), false);
@@ -131,12 +131,12 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_archive_closed_defects/i);
  assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_restore_archived_defect/i);
  assert.equal(runner.includes('tageswerk_3_5_1_defect_archive.sql'), false);
- assert.match(app, /employee_update_assigned_defect/);
- assert.match(app, /update\(\{status:statusSelect\.value,assigned_to:assign\.value\|\|null,change_note:note\.value\.trim\(\)\|\|null\}\)/);
- assert.match(app, /Gesehen & archivieren/);
- assert.match(app, /Alle abgeschlossenen Mängel archivieren/);
- assert.match(app, /Aus Archiv zurückholen/);
- assert.equal(app.includes('archived_at:'), false);
+ assert.match(ui, /employee_update_assigned_defect/);
+ assert.match(ui, /update\(\{status:statusSelect\.value,assigned_to:assign\.value\|\|null,change_note:note\.value\.trim\(\)\|\|null\}\)/);
+ assert.match(ui, /Gesehen & archivieren/);
+ assert.match(ui, /Alle abgeschlossenen Mängel archivieren/);
+ assert.match(ui, /Aus Archiv zurückholen/);
+ assert.equal(ui.includes('archived_at:'), false);
  assert.match(check, /has_function_privilege\('authenticated', 'public\.tageswerk_defect_archive_guard\(\)', 'EXECUTE'\)/);
  assert.match(check, /INSERT INTO public\.defect_events/);
  assert.match(check, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
