@@ -24,7 +24,9 @@ export function emptyOperations() {
   waterChecks: [],
   waterAlerts: [],
   waterMeasures: [],
-  waterRoundDrafts: []
+  waterRoundDrafts: [],
+  waterFacilitySlots: [],
+  waterRoundSlots: []
  };
 }
 
@@ -48,7 +50,9 @@ function copy(bundle) {
   waterChecks: [...(source.waterChecks || [])],
   waterAlerts: [...(source.waterAlerts || [])],
   waterMeasures: [...(source.waterMeasures || [])],
-  waterRoundDrafts: [...(source.waterRoundDrafts || [])]
+  waterRoundDrafts: [...(source.waterRoundDrafts || [])],
+  waterFacilitySlots: [...(source.waterFacilitySlots || [])],
+  waterRoundSlots: [...(source.waterRoundSlots || [])]
  };
 }
 
@@ -771,6 +775,74 @@ export function waterControlState(pool, checks, parameters, now) {
  const current = now || new Date().toISOString();
  if (pool.scheduleMode === 'times') return timesState(pool, checks, current);
  return periodState(pool, checks, current);
+}
+
+function facilitySlotInForce(slot, day) {
+ if (!slot || slot.active === false || !/^\d{2}:\d{2}$/.test(slot.time || '')) return false;
+ if (!slot.effectiveOn) return true;
+ if (!day || slot.effectiveOn > day) return false;
+ if (slot.retiredOn && slot.retiredOn <= day) return false;
+ return true;
+}
+
+function facilitySlotRows(bundle, facilityId, day) {
+ return (bundle?.waterFacilitySlots || [])
+  .filter(slot => slot.facilityId === facilityId && facilitySlotInForce(slot, day))
+  .sort((left, right) => left.time.localeCompare(right.time) || String(left.id).localeCompare(String(right.id)));
+}
+
+export function waterFacilitySlots(bundle, facilityId, now) {
+ return facilitySlotRows(bundle, facilityId, berlinDay(now || new Date().toISOString()));
+}
+
+export function waterFacilityPlan(bundle, facilityId, now) {
+ const today = berlinDay(now || new Date().toISOString());
+ const tomorrow = today ? addCalendarDays(today, 1) : '';
+ const current = facilitySlotRows(bundle, facilityId, today);
+ const upcoming = facilitySlotRows(bundle, facilityId, tomorrow);
+ return {
+  today,
+  tomorrow,
+  current,
+  upcoming,
+  changed: current.map(slot => slot.time).join() !== upcoming.map(slot => slot.time).join()
+ };
+}
+
+export function waterDayRounds(bundle, facilityId, now) {
+ const today = berlinDay(now);
+ const clock = berlinParts(now)?.time || '';
+ const slots = waterFacilitySlots(bundle, facilityId, now);
+ const stored = (bundle?.waterRoundSlots || []).filter(item => item.facilityId === facilityId && item.serviceDay === today);
+ const planned = slots.map((slot, index) => {
+  const assignment = stored.find(item => item.kind === 'planned' && item.slotId === slot.id);
+  let state = 'waiting';
+  let status = 'Noch nicht fällig';
+  if (assignment) {
+   state = 'done';
+   status = 'Abgeschlossen';
+  } else if (clock && clock >= slot.time) {
+   const next = slots[index + 1];
+   if (next && clock >= next.time) {
+    state = 'overdue';
+    status = 'Überfällig';
+   } else {
+    state = 'due';
+    status = 'Fällig';
+   }
+  }
+  return {id: slot.id, time: slot.time, kind: 'planned', state, status, roundId: assignment?.roundId || ''};
+ });
+ const extras = stored.filter(item => item.kind === 'extra').map(item => ({
+  id: item.id,
+  time: '',
+  kind: 'extra',
+  state: 'done',
+  status: 'Abgeschlossen',
+  roundId: item.roundId || '',
+  label: 'Zusatzkontrolle'
+ }));
+ return {today, planned, extras};
 }
 
 export function waterScheduleLabel(pool) {

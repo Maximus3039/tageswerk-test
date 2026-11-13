@@ -37,12 +37,13 @@ import {
  storeWaterRound,
  waterRoundPools,
  waterRoundProgress,
+ waterRoundSelection,
  recordWaterMeasure,
  setWaterPoolActive,
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {emptyOperations, materialStock, operationMetrics, waterControlState, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
+import {berlinDay, berlinInstant, emptyOperations, materialStock, operationMetrics, waterControlState, waterDayRounds, waterFacilityPlan, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
 import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
@@ -58,7 +59,9 @@ import {
  saveWaterCheck,
  saveWaterRound,
  saveWaterRoundDraft,
+ waterRoundFailureMessage,
  discardWaterRound,
+ saveWaterFacilitySlots,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterPool,
@@ -1422,4 +1425,733 @@ test('Dieselbe Person sieht Wasserwerte nur im Betrieb mit Historienrolle', () =
  assert.equal(adminView.checks.length, 2);
  const foreignAdmin = waterRowsForMember(bundle, [membership('company_admin', foreign)], now, 'foreign-admin');
  assert.equal(foreignAdmin.checks.length, 0);
+});
+
+test('Kontrollrunde abschließen bleibt je Rolle bestätigt und übersteht einen Fehler', async () => {
+ const kinder = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const schwimmer = createWaterPool(kinder.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ let bundle = schwimmer.bundle;
+ for (const pool of [kinder.pool, schwimmer.pool]) {
+  bundle = updateWaterParameter(bundle, parameter(bundle, pool.id, 'ph').id, {minValue: '6.50', maxValue: '7.60', required: true, active: true}, manager).bundle;
+ }
+ const technician = {userId: 'technician-1', name: 'Timo', memberships: [membership('technician')]};
+ const ready = emptyWaterRound(facility.id, 'round-close');
+ ready.revision = 2;
+ ready.phase = 'summary';
+ ready.entries[kinder.pool.id] = {values: hygieneValues({ph: '8,20'}), note: 'hoch'};
+ ready.entries[schwimmer.pool.id] = {values: hygieneValues(), note: ''};
+ const incomplete = {...ready, entries: {...ready.entries, [schwimmer.pool.id]: {values: hygieneValues({ph: ''}), note: ''}}};
+ const incompleteDb = withWaterRound(controlDb({userId: employee.userId}), employee.userId);
+ const rejected = await saveWaterRound(incompleteDb, bundle, incomplete, employee, now, context);
+ assert.equal(rejected.ok, false);
+ assert.match(rejected.error, /Schwimmer/);
+ assert.equal(incompleteDb.calls.some(call => call[0] === 'rpc'), false);
+ assert.equal(incomplete.entries[kinder.pool.id].values.ph, '8,20');
+ assert.equal(waterRoundDisplayStatus(bundle, incomplete, employee, now), 'Entwurf gespeichert');
+
+ const employeeDb = withWaterRound(controlDb({userId: employee.userId}), employee.userId);
+ seedWaterLimits(employeeDb, [kinder.pool, schwimmer.pool]);
+ const employeeSaved = await saveWaterRound(employeeDb, bundle, ready, employee, now, context);
+ assert.equal(employeeSaved.ok, true, employeeSaved.error);
+ assert.equal(employeeSaved.id, ready.roundId);
+ assert.equal(employeeDb.rows.water_checks.filter(row => row.round_id === ready.roundId).length, 2);
+ assert.equal(employeeDb.rows.water_alerts.some(item => item.parameter_code === 'ph' && item.value_amount === '8.20'), true);
+ assert.equal(employeeSaved.bundle.waterChecks.some(item => item.roundId === ready.roundId), false);
+
+ const technicianDb = withWaterRound(controlDb({userId: technician.userId}), technician.userId);
+ seedWaterLimits(technicianDb, [kinder.pool, schwimmer.pool]);
+ const technicianReady = {...ready, roundId: 'round-technician'};
+ const technicianSaved = await saveWaterRound(technicianDb, bundle, technicianReady, technician, now, context);
+ assert.equal(technicianSaved.ok, true, technicianSaved.error);
+ assert.equal(technicianSaved.bundle.waterChecks.filter(item => item.roundId === technicianReady.roundId && item.recordedBy === technician.userId).length, 2);
+ assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, technician.memberships), true);
+ assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, employee.memberships), false);
+ for (const actor of [
+  {userId: 'manager-close', name: 'Lea', memberships: [membership('facility_manager')]},
+  {userId: 'admin-close', name: 'Kim', memberships: [membership('company_admin')]}
+ ]) {
+  const roleDb = withWaterRound(controlDb({userId: actor.userId}), actor.userId);
+  seedWaterLimits(roleDb, [kinder.pool, schwimmer.pool]);
+  const roleRound = {...ready, roundId: `round-${actor.userId}`};
+  const roleSaved = await saveWaterRound(roleDb, bundle, roleRound, actor, now, context);
+  assert.equal(roleSaved.ok, true, roleSaved.error);
+  assert.equal(roleSaved.bundle.waterChecks.filter(item => item.roundId === roleRound.roundId && item.recordedBy === actor.userId).length, 2);
+  assert.equal(waterHistoryRole({id: facility.id, organization_id: facility.organization_id}, actor.memberships), true);
+ }
+
+ const deniedDb = controlDb({userId: employee.userId});
+ deniedDb.rpc = async () => ({data: null, error: {code: '42501', message: 'new row violates row-level security policy for table "water_round_drafts"'}});
+ const denied = await saveWaterRound(deniedDb, bundle, {...ready, roundId: 'round-denied'}, employee, now, context);
+ assert.equal(denied.ok, false);
+ assert.equal(denied.error, 'new row violates row-level security policy for table "water_round_drafts"');
+ assert.doesNotMatch(denied.error, /nicht installiert/);
+ assert.equal(deniedDb.rows.water_checks.length, 0);
+ assert.equal(ready.entries[kinder.pool.id].values.ph, '8,20');
+ assert.notEqual(waterRoundDisplayStatus(bundle, ready, employee, now), 'Endgültig abgeschlossen');
+
+ const guardDb = controlDb({userId: technician.userId});
+ guardDb.rpc = async () => ({data: null, error: {code: 'P0001', message: 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.'}});
+ const guarded = await saveWaterRound(guardDb, bundle, technicianReady, technician, now, context);
+ assert.equal(guarded.ok, false);
+ assert.equal(guarded.error, 'Der Entwurf wird nur über die vorgesehene Funktion abgeschlossen oder verworfen.');
+ assert.equal(guardDb.rows.water_checks.length, 0);
+ assert.equal(technicianReady.entries[schwimmer.pool.id].values.temperature, '28.0');
+
+ const retryDb = withWaterRound(controlDb({userId: technician.userId}), technician.userId, 0);
+ seedWaterLimits(retryDb, [kinder.pool, schwimmer.pool]);
+ const retryRound = {...ready, roundId: 'round-retry'};
+ const failed = await saveWaterRound(retryDb, bundle, retryRound, technician, now, context);
+ assert.equal(failed.ok, false);
+ assert.match(failed.error, /unvollständig|bleiben im Entwurf/);
+ assert.equal(retryDb.rows.water_checks.length, 0);
+ assert.equal(retryRound.entries[kinder.pool.id].values.ph, '8,20');
+ withWaterRound(retryDb, technician.userId);
+ const retried = await saveWaterRound(retryDb, bundle, retryRound, technician, now, context);
+ assert.equal(retried.ok, true, retried.error);
+ assert.equal(retryDb.rows.water_checks.filter(row => row.round_id === 'round-retry').length, 2);
+ assert.equal(waterRoundDisplayStatus(bundle, retryRound, technician, now), 'Vollständig ausgefüllt');
+
+ const logged = [];
+ const previousError = console.error;
+ console.error = (...args) => logged.push(args);
+ try {
+  const visibleDb = controlDb({userId: employee.userId});
+  visibleDb.rpc = async () => ({data: null, error: {code: '42883', message: 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist', details: ready.entries}});
+  const visible = await saveWaterRound(visibleDb, bundle, {...ready, roundId: 'round-visible'}, employee, now, context);
+  assert.equal(visible.ok, false);
+  assert.equal(visible.error, 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist');
+  assert.doesNotMatch(visible.error, /Betriebsdatenbank ist noch nicht installiert/);
+  const thrownDb = controlDb({userId: employee.userId});
+  thrownDb.rpc = async () => { throw {code: 'PGRST202', message: 'invalid input syntax for type numeric: "8,20"', details: 'person@example.com'}; };
+  const thrown = await saveWaterRound(thrownDb, bundle, {...ready, roundId: 'round-thrown'}, employee, now, context);
+  assert.equal(thrown.error, 'invalid input syntax for type numeric: "8,20"');
+  const emptyDb = controlDb({userId: employee.userId});
+  emptyDb.rpc = async () => ({data: null, error: {code: 'XX000', message: ''}});
+  const empty = await saveWaterRound(emptyDb, bundle, {...ready, roundId: 'round-empty'}, employee, now, context);
+  assert.equal(empty.error, 'Die Kontrollrunde konnte nicht abgeschlossen werden. Die Eingaben bleiben erhalten.');
+ } finally {
+  console.error = previousError;
+ }
+ assert.deepEqual(logged[0], ['tageswerk_record_water_round', '42883', 'function public.tageswerk_own_water_round_stored(uuid, jsonb) does not exist']);
+ assert.equal(logged[0].length, 3);
+ assert.doesNotMatch(logged.map(entry => entry.join(' ')).join('\n'), /8,20|person@example.com|parameter_code/);
+
+ const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const handler = ui.slice(ui.indexOf("button('Kontrollrunde speichern'"), ui.indexOf('card.append(actions);', ui.indexOf("button('Kontrollrunde speichern'")));
+ const confirmed = handler.slice(handler.indexOf('if (result?.ok)'), handler.indexOf('} else {'));
+ assert.match(confirmed, /clearWaterRound/);
+ assert.match(confirmed, /Endgültig abgeschlossen/);
+ assert.doesNotMatch(handler.slice(0, handler.indexOf('if (result?.ok)')), /Endgültig abgeschlossen/);
+ assert.match(handler, /waterRoundError = result\?\.error/);
+ assert.match(handler, /if \(!result\?\.ok\) renderPanel\(\)/);
+ assert.equal(waterRoundFailureMessage({code: '42501', message: 'permission denied for table water_checks'}), 'Keine Berechtigung für diese Kontrollrunde. Die erfassten Werte bleiben im Entwurf.');
+
+ const installed = readFileSync(new URL('../../tageswerk_3_3_water_hygiene.sql', import.meta.url), 'utf8');
+ const proof = installed.slice(installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_checks_in_transaction'), installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_water_round_discard_in_transaction'));
+ const oldRecord = installed.slice(installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), installed.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_discard_water_round_draft'));
+ assert.match(proof, /check_row\.xmin = pg_current_xact_id\(\)::xid/);
+ assert.match(oldRecord, /INSERT INTO public\.water_checks[\s\S]*^\s*EXCEPTION\b/m);
+ const correction = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close.sql', import.meta.url), 'utf8');
+ const record = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), correction.lastIndexOf('REVOKE ALL ON FUNCTION public.tageswerk_record_water_round'));
+ const helper = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_own_water_round_stored'), correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_finish_own_water_round_draft'));
+ const finish = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_finish_own_water_round_draft'), correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'));
+ assert.doesNotMatch(record, /^\s*EXCEPTION\b/m);
+ assert.doesNotMatch(record, /EXCEPTION WHEN/);
+ assert.doesNotMatch(record, /SECURITY DEFINER/);
+ assert.doesNotMatch(record, /set_config/);
+ assert.doesNotMatch(record, /UPDATE public\.water_round_drafts/);
+ assert.match(record, /tageswerk_finish_own_water_round_draft\(p_round_id, facility\)/);
+ assert.ok(record.indexOf('INSERT INTO public.water_checks') < record.indexOf('tageswerk_finish_own_water_round_draft(p_round_id, facility)'));
+ assert.match(record, /closed_drafts IS DISTINCT FROM 1/);
+ assert.match(finish, /SECURITY DEFINER/);
+ assert.match(finish, /SET search_path = ''/);
+ assert.match(finish, /draft\.user_id = auth\.uid\(\)/);
+ assert.match(finish, /draft\.status = 'open'/);
+ assert.match(finish, /AND status = 'open'/);
+ assert.match(finish, /facility_id = p_facility_id/);
+ assert.match(finish, /public\.tageswerk_meter_role\(organization, p_facility_id\) IS NULL/);
+ assert.match(finish, /tageswerk_water_round_checks_in_transaction\(p_round_id, p_facility_id\) IS NOT TRUE/);
+ assert.match(finish, /SET status = 'completed'/);
+ assert.ok(finish.indexOf('UPDATE public.water_round_drafts') < finish.indexOf('GET DIAGNOSTICS closed_drafts = ROW_COUNT'));
+ assert.doesNotMatch(finish, /EXCEPTION WHEN/);
+ assert.doesNotMatch(finish, /\b(min|max|sum|avg)\s*\(/i);
+ assert.match(helper, /RETURNS boolean/);
+ assert.match(helper, /SECURITY DEFINER/);
+ assert.match(helper, /SET search_path = ''/);
+ assert.match(helper, /check_row\.recorded_by = auth\.uid\(\)/);
+ assert.match(helper, /draft\.user_id = auth\.uid\(\)/);
+ assert.match(helper, /draft\.status = 'completed'/);
+ assert.match(helper, /public\.tageswerk_meter_role/);
+ assert.match(helper, /::numeric/);
+ assert.match(helper, /coalesce\(item->>'note', ''\) IS DISTINCT FROM check_row\.note/);
+ assert.match(helper, /check_row\.recorded_by IS DISTINCT FROM auth\.uid\(\)/);
+ assert.doesNotMatch(helper, /EXCEPTION WHEN/);
+ assert.doesNotMatch(helper, /INSERT|UPDATE|DELETE/);
+ assert.doesNotMatch(helper, /\b(min|max|sum|avg)\s*\(/i);
+ assert.match(helper, /SELECT count\(\*\)::integer/);
+ assert.match(helper, /SELECT draft\.organization_id, draft\.facility_id/);
+ assert.match(helper, /IF draft_count = 1 THEN/);
+ assert.match(record, /tageswerk_own_water_round_stored\(p_round_id, p_checks\)/);
+ assert.doesNotMatch(correction, /DROP POLICY|CREATE POLICY|water_checks_select/);
+ assert.doesNotMatch(correction, /employee/);
+ const runner = readFileSync(new URL('../integration/run.mjs', import.meta.url), 'utf8');
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close\.sql/);
+ const check = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_pruefung.sql', import.meta.url), 'utf8');
+ assert.match(check, /to_regprocedure\('public\.tageswerk_own_water_round_stored\(uuid,jsonb\)'\)/);
+ assert.match(check, /to_regprocedure\('public\.tageswerk_own_water_round_stored\(uuid,uuid\[\]\)'\) IS NULL/);
+ assert.match(check, /check_row\.note/);
+ assert.match(check, /public\.tageswerk_meter_role/);
+ assert.match(check, /::numeric/);
+ assert.match(check, /to_regprocedure\('public\.tageswerk_record_water_round\(uuid,jsonb\)'\)/);
+ assert.match(check, /water_checks_protect/);
+ assert.match(check, /helper\.prosecdef IS TRUE/);
+ assert.match(check, /recorder\.prosecdef IS FALSE/);
+ assert.match(check, /GET DIAGNOSTICS closed_drafts = ROW_COUNT/);
+ assert.match(check, /draft\.status = ''completed''/);
+ assert.match(check, /EXCEPTION WHEN/);
+ assert.match(check, /position\('min\(' IN pg_get_functiondef\(helper\.oid\)\) = 0/);
+ assert.doesNotMatch(check, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
+ assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_record_water_round/i);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_pruefung\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_bereinigung\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_uuid\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_close_rls\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_schedule\.sql/);
+ assert.doesNotMatch(runner, /tageswerk_3_4_2_water_round_schedule_pruefung\.sql/);
+ assert.doesNotMatch(record, /\b(min|max|sum|avg)\s*\(/i);
+ const rlsFix = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_rls.sql', import.meta.url), 'utf8');
+ const rlsBody = rlsFix.slice(rlsFix.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_finish_own_water_round_draft'), rlsFix.lastIndexOf('COMMIT'));
+ const installedBody = correction.slice(correction.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_finish_own_water_round_draft'), correction.lastIndexOf('COMMIT'));
+ assert.equal(rlsBody.replace(/\s+/g, ' ').trim(), installedBody.replace(/\s+/g, ' ').trim());
+ assert.doesNotMatch(rlsFix, /DROP POLICY|CREATE POLICY|ALTER TABLE|TRUNCATE/);
+ assert.match(check, /tageswerk_finish_own_water_round_draft\(uuid,uuid\)/);
+ assert.match(check, /water_round_drafts_update/);
+ assert.match(check, /water_round_drafts_guard/);
+ assert.match(check, /polcmd = 'd'/);
+ const ownDraft = {round_id: 'round-own', facility_id: facility.id, user_id: 'owner', status: 'open', revision: 2};
+ const foreignDraft = {round_id: 'round-foreign', facility_id: facility.id, user_id: 'other', status: 'open', revision: 1};
+ const completedDraft = {round_id: 'round-done', facility_id: facility.id, user_id: 'owner', status: 'completed', revision: 3};
+ const closeOwnOpenDraft = (drafts, userId, roundId, facilityId, proof) => {
+  let updated = 0;
+  const next = drafts.map(draft => {
+   if (draft.user_id !== userId || draft.round_id !== roundId || draft.facility_id !== facilityId || draft.status !== 'open' || proof !== true) return draft;
+   updated += 1;
+   return {...draft, status: 'completed', revision: draft.revision + 1};
+  });
+  return {updated, drafts: next};
+ };
+ for (const userId of ['employee-1', 'technician-1', 'manager-1', 'admin-1']) {
+  const result = closeOwnOpenDraft([{...ownDraft, user_id: userId}, foreignDraft, completedDraft], userId, 'round-own', facility.id, true);
+  assert.equal(result.updated, 1);
+  assert.equal(result.drafts[0].status, 'completed');
+  assert.equal(result.drafts[1].status, 'open');
+  assert.equal(result.drafts[1].user_id, 'other');
+  assert.equal(result.drafts[2].status, 'completed');
+  assert.equal(result.drafts[2].revision, 3);
+ }
+ const blocked = closeOwnOpenDraft([ownDraft, foreignDraft, completedDraft], 'owner', 'round-foreign', facility.id, true);
+ assert.equal(blocked.updated, 0);
+ assert.equal(blocked.drafts[1].status, 'open');
+ const withoutProof = closeOwnOpenDraft([ownDraft], 'owner', 'round-own', facility.id, false);
+ assert.equal(withoutProof.updated, 0);
+ assert.equal(withoutProof.drafts[0].status, 'open');
+ const alreadyClosed = closeOwnOpenDraft([completedDraft], 'owner', 'round-done', facility.id, true);
+ assert.equal(alreadyClosed.updated, 0);
+ assert.equal(alreadyClosed.drafts[0].revision, 3);
+ const uuidFix = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_uuid.sql', import.meta.url), 'utf8');
+ const uuidHelper = uuidFix.slice(uuidFix.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_own_water_round_stored'), uuidFix.indexOf('COMMIT'));
+ assert.equal(uuidHelper.replace(/\s+/g, ' ').trim(), helper.replace(/\s+/g, ' ').trim());
+ assert.doesNotMatch(uuidFix, /tageswerk_record_water_round/);
+ assert.doesNotMatch(uuidFix, /\b(min|max|sum|avg)\s*\(/i);
+ assert.doesNotMatch(uuidFix, /^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/im);
+ const cleanup = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close_bereinigung.sql', import.meta.url), 'utf8');
+ assert.match(cleanup, /DROP FUNCTION IF EXISTS public\.tageswerk_own_water_round_stored\(uuid, uuid\[\]\);/);
+ assert.doesNotMatch(cleanup, /uuid, jsonb/);
+ assert.doesNotMatch(cleanup, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
+});
+
+test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet', async () => {
+ const created = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const secondPool = createWaterPool(created.bundle, {facility, name: 'Schwimmer', scheduleMode: 'times', scheduledTimes: '08:00, 20:00', weekdays: [1, 2, 3, 4, 5, 6, 7]}, manager, now);
+ assert.deepEqual(secondPool.pool.scheduledTimes, ['08:00', '20:00']);
+ const slots = [
+  {id: 'slot-9', facilityId: facility.id, time: '09:00', active: true},
+  {id: 'slot-14', facilityId: facility.id, time: '14:00', active: true},
+  {id: 'slot-19', facilityId: facility.id, time: '19:00', active: true}
+ ];
+ const bundle = {...secondPool.bundle, waterFacilitySlots: slots, waterRoundSlots: []};
+ const pools = waterRoundPools(bundle, facility.id);
+ const filled = (roundId, slot, kind = 'planned') => {
+  let round = emptyWaterRound(facility.id, roundId);
+  for (const pool of pools) round = rememberWaterEntry(round, pool.id, {values: hygieneValues(), note: ''});
+  return {...round, slotId: slot?.id || null, kind, slotTime: slot?.time || '', selectedPoolIds: kind === 'extra' ? pools.map(pool => pool.id) : []};
+ };
+ const openSchedule = () => {
+  const db = controlDb();
+  const shared = {rows: db.rows, assignments: []};
+  shared.rows.water_facility_slots = slots.map(slot => ({
+   id: slot.id,
+   facility_id: facility.id,
+   organization_id: facility.organization_id,
+   slot_time: slot.time,
+   active: true
+  }));
+  shared.rows.water_round_slots = shared.assignments;
+  shared.activePoolIds = [created.pool.id, secondPool.pool.id];
+  shared.rows.water_checks.push({
+   id: 'historic-1', pool_id: created.pool.id, facility_id: facility.id, organization_id: facility.organization_id,
+   measured_at: '2026-11-01T10:00:00.000Z', recorded_by: manager.userId, note: 'alt', round_id: null,
+   readings: [{parameter_code: 'ph', value: '7.10', unit: '', min_limit: '6.50', max_limit: '7.60'}]
+  });
+  const connect = userId => {
+   const connected = withWaterRound(controlDb({userId, rows: shared.rows}), userId);
+   seedWaterLimits(connected, [created.pool, secondPool.pool]);
+   const record = connected.rpc;
+   connected.rpc = async (name, args) => {
+    if (name === 'tageswerk_discard_water_round_draft') return {data: {status: 'discarded', round_id: args.p_round_id}, error: null};
+    if (name !== 'tageswerk_record_scheduled_water_round') return record(name, args);
+    const day = berlinDay(now);
+    const activePoolIds = shared.activePoolIds;
+    const required = ['free_chlorine', 'combined_chlorine', 'ph', 'temperature'];
+    const supplied = [...new Set((args.p_checks || []).map(item => item.pool_id))];
+    if (!supplied.length || supplied.some(id => !activePoolIds.includes(id)) || (args.p_slot_id && supplied.length !== activePoolIds.length)) {
+     return {data: null, error: {code: 'P0001', message: 'Die Kontrollrunde umfasst nicht alle aktiven Becken.'}};
+    }
+    if ((args.p_checks || []).some(item => required.some(code => !(item.readings || []).some(reading => reading.parameter_code === code && String(reading.value ?? '') !== '')))) {
+     return {data: null, error: {code: 'P0001', message: 'Bitte die Messwerte eintragen.'}};
+    }
+    if (args.p_slot_id) {
+     const clash = shared.assignments.find(item => item.slot_id === args.p_slot_id && item.service_day === day && item.kind === 'planned' && item.round_id !== args.p_round_id);
+     if (clash) return {data: null, error: {code: 'P0001', message: 'Dieser Termin wurde bereits abgeschlossen.'}};
+    }
+    const stored = await record('tageswerk_record_water_round', args);
+    if (stored.error) return stored;
+    const link = shared.assignments.find(item => item.round_id === args.p_round_id);
+    if (stored.data?.status === 'already_stored') {
+     if (link && (link.slot_id || null) === (args.p_slot_id || null)) return stored;
+     return {data: null, error: {code: 'P0001', message: 'Diese Kontrollrunde ist bereits gespeichert und kann diesem Termin nicht zugeordnet werden.'}};
+    }
+    if (stored.data?.status !== 'stored') return stored;
+    if (link) return {data: null, error: {code: 'P0001', message: 'Diese Kontrollrunde ist bereits einem Termin zugeordnet.'}};
+    shared.assignments.push({
+     id: `link-${shared.assignments.length + 1}`,
+     facility_id: facility.id,
+     organization_id: facility.organization_id,
+     round_id: args.p_round_id,
+     slot_id: args.p_slot_id,
+     kind: args.p_slot_id ? 'planned' : 'extra',
+     slot_time: args.p_slot_id ? (slots.find(slot => slot.id === args.p_slot_id)?.time || '') : '',
+     service_day: day,
+     user_id: userId
+    });
+    return stored;
+   };
+   return connected;
+  };
+  return {shared, connect};
+ };
+
+ const day = openSchedule();
+ const employeeDb = day.connect(employee.userId);
+ let savedBundle = bundle;
+ const completed = [];
+ for (const slot of slots) {
+  const round = filled(`round-${slot.time}`, slot);
+  const saved = await saveWaterRound(employeeDb, savedBundle, round, employee, now, context);
+  assert.equal(saved.ok, true, saved.error);
+  savedBundle = saved.bundle;
+  completed.push(saved.id);
+ }
+ assert.equal(new Set(completed).size, 3);
+ assert.deepEqual(waterDayRounds(savedBundle, facility.id, '2026-11-09T18:30:00.000Z').planned.map(item => item.status), ['Abgeschlossen', 'Abgeschlossen', 'Abgeschlossen']);
+ const repeated = await saveWaterRound(employeeDb, savedBundle, filled('round-09:00', slots[0]), employee, now, context);
+ assert.equal(repeated.ok, true, repeated.error);
+ assert.equal(day.shared.assignments.filter(item => item.slot_id === 'slot-9').length, 1);
+ assert.equal(day.shared.rows.water_checks.filter(row => row.round_id === 'round-09:00').length, 2);
+ const partial = await employeeDb.rpc('tageswerk_record_scheduled_water_round', {
+  p_round_id: 'round-partial',
+  p_slot_id: 'slot-19',
+  p_checks: [{pool_id: created.pool.id, facility_id: facility.id, note: '', readings: []}]
+ });
+ assert.match(partial.error.message, /nicht alle aktiven Becken/);
+ assert.equal(day.shared.rows.water_checks.some(row => row.round_id === 'round-partial'), false);
+ assert.equal(day.shared.assignments.some(item => item.round_id === 'round-partial'), false);
+ const reloaded = await loadOperations(employeeDb, employee, context);
+ assert.equal(reloaded.ok, true, reloaded.error);
+ assert.equal(reloaded.bundle.waterChecks.find(item => item.id === 'historic-1').readings[0].value, '7.10');
+ assert.equal(reloaded.bundle.waterChecks.filter(item => item.id === 'historic-1').length, 1);
+ const reloadedDay = waterDayRounds(reloaded.bundle, facility.id, '2026-11-09T18:30:00.000Z');
+ assert.deepEqual(reloadedDay.planned.map(item => [item.time, item.status]), [['09:00', 'Abgeschlossen'], ['14:00', 'Abgeschlossen'], ['19:00', 'Abgeschlossen']]);
+
+ const earlyBundle = {
+  ...bundle,
+  waterRoundSlots: [{id: 'early', facilityId: facility.id, roundId: 'round-early', slotId: 'slot-14', kind: 'planned', slotTime: '14:00', serviceDay: '2026-11-09', userId: employee.userId}]
+ };
+ const early = waterDayRounds(earlyBundle, facility.id, '2026-11-09T07:00:00.000Z');
+ assert.equal(early.planned.find(item => item.time === '09:00').status, 'Noch nicht fällig');
+ assert.equal(early.planned.find(item => item.time === '14:00').status, 'Abgeschlossen');
+
+ const missedBundle = {
+  ...bundle,
+  waterRoundSlots: [{id: 'later', facilityId: facility.id, roundId: 'round-later', slotId: 'slot-14', kind: 'planned', slotTime: '14:00', serviceDay: '2026-11-09', userId: employee.userId}]
+ };
+ const missed = waterDayRounds(missedBundle, facility.id, '2026-11-09T15:30:00.000Z');
+ assert.equal(missed.planned.find(item => item.time === '09:00').status, 'Überfällig');
+ assert.equal(missed.planned.find(item => item.time === '14:00').status, 'Abgeschlossen');
+ assert.equal(missed.planned.find(item => item.time === '19:00').status, 'Noch nicht fällig');
+
+ const pair = openSchedule();
+ const first = pair.connect(employee.userId);
+ const colleague = {userId: 'employee-4', name: 'Noah', memberships: [membership('employee')]};
+ const other = pair.connect(colleague.userId);
+ const firstSaved = await saveWaterRound(first, bundle, filled('round-shared', slots[0]), employee, now, context);
+ assert.equal(firstSaved.ok, true, firstSaved.error);
+ const checksBefore = pair.shared.rows.water_checks.length;
+ const competing = filled('round-shared-2', slots[0]);
+ const competingEntries = JSON.stringify(competing.entries);
+ const secondSaved = await saveWaterRound(other, bundle, competing, colleague, now, context);
+ assert.equal(secondSaved.ok, false);
+ assert.equal(secondSaved.conflict, true);
+ assert.equal(secondSaved.error, 'Dieser Termin wurde bereits abgeschlossen. Die eingegebenen Messwerte bleiben erhalten.');
+ assert.equal(JSON.stringify(competing.entries), competingEntries);
+ assert.equal(pair.shared.rows.water_checks.length, checksBefore);
+ assert.equal(pair.shared.assignments.length, 1);
+ assert.equal(waterDayRounds(secondSaved.bundle, facility.id, now).planned.find(item => item.time === '09:00').status, 'Abgeschlossen');
+
+ const discarded = openSchedule();
+ const draftDb = discarded.connect(employee.userId);
+ const draftRound = filled('round-draft', slots[1]);
+ let progress = null;
+ const draftRecord = draftDb.rpc;
+ draftDb.rpc = async (name, args) => {
+  if (name === 'tageswerk_save_water_round_draft') {
+   progress = args.p_progress;
+   return {data: {status: 'stored', round_id: args.p_round_id, revision: 1}, error: null};
+  }
+  return draftRecord(name, args);
+ };
+ const draft = await saveWaterRoundDraft(draftDb, draftRound);
+ assert.equal(draft.ok, true, draft.error);
+ assert.equal(progress.slotId, 'slot-14');
+ assert.equal(progress.kind, 'planned');
+ assert.equal(progress.slotTime, '14:00');
+ assert.equal(discarded.shared.assignments.length, 0);
+ const restored = roundFromWaterDraft({facilityId: facility.id, roundId: 'round-draft', revision: 1, entries: draftRound.entries, progress});
+ assert.equal(restored.slotId, 'slot-14');
+ assert.equal(restored.kind, 'planned');
+ const dropped = await discardWaterRound(draftDb, restored);
+ assert.equal(dropped.ok, true, dropped.error);
+ assert.equal(discarded.shared.assignments.length, 0);
+ const afterDiscard = await saveWaterRound(draftDb, bundle, filled('round-after-discard', slots[1]), employee, now, context);
+ assert.equal(afterDiscard.ok, true, afterDiscard.error);
+ assert.equal(discarded.shared.assignments.filter(item => item.slot_id === 'slot-14').length, 1);
+
+ const extraDay = openSchedule();
+ const extraDb = extraDay.connect(employee.userId);
+ const extra = await saveWaterRound(extraDb, bundle, filled('round-extra', null, 'extra'), employee, now, context);
+ assert.equal(extra.ok, true, extra.error);
+ assert.equal(extraDay.shared.assignments[0].kind, 'extra');
+ assert.equal(extraDay.shared.assignments[0].slot_id, null);
+ const extraView = waterDayRounds(extra.bundle, facility.id, now);
+ assert.equal(extraView.planned.every(item => item.status !== 'Abgeschlossen'), true);
+ assert.equal(extraView.extras[0].label, 'Zusatzkontrolle');
+ assert.equal(extraView.extras[0].status, 'Abgeschlossen');
+ const extraAgain = await saveWaterRound(extraDb, extra.bundle, filled('round-extra', null, 'extra'), employee, now, context);
+ assert.equal(extraAgain.ok, true, extraAgain.error);
+ assert.equal(extraDay.shared.assignments.length, 1);
+ assert.equal(extraDay.shared.rows.water_checks.filter(row => row.round_id === 'round-extra').length, 2);
+ const choice = openSchedule();
+ const sport = createWaterPool(bundle, {facility, name: 'Sport', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ choice.shared.activePoolIds = [created.pool.id, secondPool.pool.id, sport.pool.id];
+ const choiceDb = choice.connect(employee.userId);
+ const readings = Object.entries(hygieneValues()).map(([parameter_code, value]) => ({parameter_code, value}));
+ const payload = poolIds => poolIds.map(poolId => ({pool_id: poolId, facility_id: facility.id, note: '', readings}));
+ const onePool = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-one', p_slot_id: null, p_checks: payload([created.pool.id])});
+ assert.equal(onePool.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-one').length, 1);
+ assert.equal(choice.shared.assignments.filter(item => item.round_id === 'extra-one' && item.kind === 'extra' && item.slot_id === null).length, 1);
+ const severalPools = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-several', p_slot_id: null, p_checks: payload([created.pool.id, secondPool.pool.id])});
+ assert.equal(severalPools.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-several').length, 2);
+ const allPools = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-all', p_slot_id: null, p_checks: payload(choice.shared.activePoolIds)});
+ assert.equal(allPools.error, null);
+ assert.equal(choice.shared.rows.water_checks.filter(row => row.round_id === 'extra-all').length, 3);
+ const incompletePool = await choiceDb.rpc('tageswerk_record_scheduled_water_round', {p_round_id: 'extra-incomplete', p_slot_id: null, p_checks: [{pool_id: created.pool.id, facility_id: facility.id, note: '', readings: [{parameter_code: 'ph', value: '7.20'}]}]});
+ assert.match(incompletePool.error.message, /Messwerte/);
+ assert.equal(choice.shared.rows.water_checks.some(row => row.round_id === 'extra-incomplete'), false);
+ assert.equal(choice.shared.assignments.some(item => item.round_id === 'extra-incomplete'), false);
+ assert.equal(choice.shared.assignments.filter(item => item.kind === 'planned').length, 0);
+ const orphanDay = openSchedule();
+ const orphanDb = orphanDay.connect(employee.userId);
+ const storedWithoutPlan = await saveWaterRound(orphanDb, bundle, {...filled('round-orphan', slots[0]), kind: ''}, employee, now, context);
+ assert.equal(storedWithoutPlan.ok, true, storedWithoutPlan.error);
+ const orphanChecks = orphanDay.shared.rows.water_checks.filter(row => row.round_id === 'round-orphan').map(row => row.id);
+ const orphaned = await saveWaterRound(orphanDb, bundle, filled('round-orphan', slots[0]), employee, now, context);
+ assert.equal(orphaned.ok, false);
+ assert.match(orphaned.error, /bereits gespeichert und kann diesem Termin nicht zugeordnet/);
+ assert.equal(orphanDay.shared.assignments.length, 0);
+ assert.deepEqual(orphanDay.shared.rows.water_checks.filter(row => row.round_id === 'round-orphan').map(row => row.id), orphanChecks);
+ const fresh = await saveWaterRound(orphanDb, bundle, filled('round-orphan-new', slots[0]), employee, now, context);
+ assert.equal(fresh.ok, true, fresh.error);
+ assert.equal(orphanDay.shared.assignments.filter(item => item.slot_id === 'slot-9' && item.round_id === 'round-orphan-new').length, 1);
+ const moveDay = openSchedule();
+ const moveDb = moveDay.connect(employee.userId);
+ const keptSlot = await saveWaterRound(moveDb, bundle, filled('round-move', slots[0]), employee, now, context);
+ assert.equal(keptSlot.ok, true, keptSlot.error);
+ const otherSlot = await saveWaterRound(moveDb, bundle, filled('round-move', slots[1]), employee, now, context);
+ assert.equal(otherSlot.ok, false);
+ assert.match(otherSlot.error, /diesem Termin nicht zugeordnet/);
+ assert.deepEqual(moveDay.shared.assignments.map(item => [item.round_id, item.slot_id]), [['round-move', 'slot-9']]);
+ assert.equal(moveDay.shared.rows.water_checks.filter(row => row.round_id === 'round-move').length, 2);
+
+ const unassigned = await saveWaterRound(extraDb, bundle, {...filled('round-open', null, 'planned')}, employee, now, context);
+ assert.equal(unassigned.ok, false);
+ assert.match(unassigned.error, /keinem Termin/);
+
+ assert.equal(berlinInstant('2026-03-29', '02:30'), '');
+ assert.equal(berlinInstant('2026-03-28', '09:00'), '2026-03-28T08:00:00.000Z');
+ assert.equal(berlinInstant('2026-03-29', '09:00'), '2026-03-29T07:00:00.000Z');
+ assert.equal(berlinInstant('2026-10-24', '09:00'), '2026-10-24T07:00:00.000Z');
+ assert.equal(berlinInstant('2026-10-25', '09:00'), '2026-10-25T08:00:00.000Z');
+ const winterMorning = waterDayRounds(bundle, facility.id, '2026-03-28T07:30:00.000Z');
+ const summerMorning = waterDayRounds(bundle, facility.id, '2026-03-29T07:30:00.000Z');
+ const summerEvening = waterDayRounds(bundle, facility.id, '2026-10-24T07:30:00.000Z');
+ const winterEvening = waterDayRounds(bundle, facility.id, '2026-10-25T07:30:00.000Z');
+ assert.equal(winterMorning.planned[0].status, 'Noch nicht fällig');
+ assert.equal(summerMorning.planned[0].status, 'Fällig');
+ assert.equal(summerEvening.planned[0].status, 'Fällig');
+ assert.equal(winterEvening.planned[0].status, 'Noch nicht fällig');
+
+ const changedPlan = {
+  ...bundle,
+  waterFacilitySlots: [
+   {id: 'slot-9', facilityId: facility.id, time: '09:00', active: true, effectiveOn: '2026-11-09', retiredOn: '2026-11-10'},
+   {id: 'slot-14', facilityId: facility.id, time: '14:00', active: true, effectiveOn: '2026-11-09', retiredOn: ''},
+   {id: 'slot-19', facilityId: facility.id, time: '19:00', active: true, effectiveOn: '2026-11-10', retiredOn: ''}
+  ],
+  waterRoundSlots: [{id: 'done-9', facilityId: facility.id, roundId: 'round-9', slotId: 'slot-9', kind: 'planned', slotTime: '09:00', serviceDay: '2026-11-09', userId: employee.userId}]
+ };
+ const changedToday = waterDayRounds(changedPlan, facility.id, now);
+ assert.deepEqual(changedToday.planned.map(item => [item.time, item.status]), [['09:00', 'Abgeschlossen'], ['14:00', 'Noch nicht fällig']]);
+ const changedTomorrow = waterDayRounds(changedPlan, facility.id, '2026-11-10T12:00:00.000Z');
+ assert.deepEqual(changedTomorrow.planned.map(item => item.time), ['14:00', '19:00']);
+ assert.equal(changedTomorrow.planned.some(item => item.time === '09:00'), false);
+ const firstPlan = waterFacilityPlan({
+  ...bundle,
+  waterFacilitySlots: slots.map(slot => ({...slot, effectiveOn: '2026-11-10', retiredOn: ''}))
+ }, facility.id, now);
+ assert.equal(firstPlan.current.length, 0);
+ assert.deepEqual(firstPlan.upcoming.map(slot => slot.time), ['09:00', '14:00', '19:00']);
+ assert.equal(waterDayRounds(firstPlan.current.length ? {} : {
+  ...bundle,
+  waterFacilitySlots: slots.map(slot => ({...slot, effectiveOn: '2026-11-10', retiredOn: ''})),
+  waterRoundSlots: []
+ }, facility.id, now).planned.length, 0);
+
+ const settingsDb = controlDb({userId: manager.userId});
+ settingsDb.rows.water_facility_slots = [];
+ settingsDb.rows.water_round_slots = [];
+ settingsDb.rows.water_checks.push({
+  id: 'historic-plan', pool_id: created.pool.id, facility_id: facility.id, organization_id: facility.organization_id,
+  measured_at: '2026-11-01T10:00:00.000Z', recorded_by: manager.userId, note: 'alt', round_id: null,
+  readings: [{parameter_code: 'ph', value: '7.10', unit: '', min_limit: null, max_limit: null}]
+ });
+ let settingsCalls = 0;
+ settingsDb.rpc = async (name, args) => {
+  settingsCalls += 1;
+  if (name !== 'tageswerk_save_water_facility_slots') return {data: null, error: {message: 'function does not exist'}};
+  settingsDb.rows.water_facility_slots = args.p_times.map(time => ({
+   id: `saved-${time}`,
+   facility_id: args.p_facility_id,
+   organization_id: facility.organization_id,
+   slot_time: time,
+   active: true,
+   effective_on: '2026-11-10',
+   retired_on: null
+  }));
+  return {data: null, error: null};
+ };
+ const employeeTimes = await saveWaterFacilitySlots(settingsDb, emptyOperations(), facility, '09:00', employee, now, context);
+ assert.equal(employeeTimes.ok, false);
+ assert.equal(settingsCalls, 0);
+ const tooMany = await saveWaterFacilitySlots(settingsDb, emptyOperations(), facility, '08:00, 10:00, 12:00, 14:00, 16:00, 18:00, 20:00', manager, now, context);
+ assert.equal(tooMany.ok, false);
+ assert.equal(settingsCalls, 0);
+ const savedTimes = await saveWaterFacilitySlots(settingsDb, emptyOperations(), facility, '9:00, 14:00, 19:00', manager, now, context);
+ assert.equal(savedTimes.ok, true, savedTimes.error);
+ assert.equal(waterFacilityPlan(savedTimes.bundle, facility.id, now).current.length, 0);
+ assert.deepEqual(waterFacilityPlan(savedTimes.bundle, facility.id, now).upcoming.map(slot => slot.time), ['09:00', '14:00', '19:00']);
+ assert.equal(savedTimes.bundle.waterChecks.find(item => item.id === 'historic-plan').readings[0].value, '7.10');
+ assert.equal(settingsDb.rows.water_checks.length, 1);
+ settingsDb.rows.water_facility_slots = [];
+ const cleared = await saveWaterFacilitySlots(settingsDb, savedTimes.bundle, facility, '', manager, now, context);
+ assert.equal(cleared.ok, true, cleared.error);
+ assert.equal(cleared.bundle.waterFacilitySlots.length, 0);
+ assert.equal(waterDayRounds(cleared.bundle, facility.id, now).planned.length, 0);
+
+ const schedule = readFileSync(new URL('../../tageswerk_3_4_2_water_round_schedule.sql', import.meta.url), 'utf8');
+ const scheduled = schedule.slice(schedule.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_record_scheduled_water_round'), schedule.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_save_water_facility_slots'));
+ assert.equal(scheduled.includes('SECURITY DEFINER'), false);
+ assert.equal(/EXCEPTION\s+WHEN/.test(schedule), false);
+ const claimAt = scheduled.indexOf('tageswerk_claim_water_round_slot');
+ const recordAt = scheduled.indexOf('tageswerk_record_water_round');
+ const insertAt = scheduled.indexOf('INSERT INTO public.water_round_slots');
+ assert.equal(claimAt >= 0 && claimAt < recordAt && recordAt < insertAt, true);
+ assert.equal(schedule.includes('CREATE OR REPLACE FUNCTION public.tageswerk_record_water_round'), false);
+ assert.equal(schedule.includes('DROP POLICY'), false);
+ assert.match(schedule, /tageswerk_water_round_checks_in_transaction\(round_id, facility_id\)/);
+ assert.match(schedule, /water_round_slots_one_planned/);
+ assert.match(schedule, /FOR UPDATE/);
+ assert.match(schedule, /Dieser Termin wurde bereits abgeschlossen/);
+ assert.match(schedule, /Eine neue Kontrollzeit gilt ab dem nächsten Tag/);
+ assert.match(schedule, /Eine laufende Kontrollzeit bleibt bis zum nächsten Tag unverändert/);
+ assert.match(schedule, /effective_on/);
+ assert.match(schedule, /retired_on/);
+ assert.equal(schedule.includes('CREATE POLICY water_round_slots_update'), false);
+ assert.equal(schedule.includes('CREATE POLICY water_round_slots_delete'), false);
+ assert.equal(schedule.includes('FOR DELETE'), false);
+ assert.equal(schedule.includes('UPDATE public.water_checks'), false);
+ assert.equal(schedule.includes('UPDATE public.water_round_drafts'), false);
+ assert.match(schedule, /REVOKE ALL ON FUNCTION public\.tageswerk_claim_water_round_slot\(uuid, uuid, uuid\) FROM PUBLIC, anon/);
+ assert.match(schedule, /GRANT EXECUTE ON FUNCTION public\.tageswerk_claim_water_round_slot\(uuid, uuid, uuid\) TO authenticated/);
+ const scheduledBeforeRecord = scheduled.slice(0, scheduled.indexOf('tageswerk_record_water_round'));
+ assert.equal(scheduledBeforeRecord.includes('already_stored'), false);
+ assert.match(scheduled, /bereits gespeichert und kann diesem Termin nicht zugeordnet/);
+ assert.match(schedule, /tageswerk_water_round_covers_active_pools\(round_id, facility_id\)/);
+ const roundPolicy = schedule.slice(schedule.indexOf('CREATE POLICY water_round_slots_insert'), schedule.indexOf('REVOKE ALL ON TABLE public.water_facility_slots'));
+ const extraPolicy = roundPolicy.slice(roundPolicy.indexOf("kind = 'extra'"), roundPolicy.indexOf("kind = 'planned'"));
+ assert.equal(extraPolicy.includes('tageswerk_water_round_covers_active_pools'), false);
+ assert.match(roundPolicy.slice(roundPolicy.indexOf("kind = 'planned'")), /tageswerk_water_round_covers_active_pools/);
+ assert.match(scheduled, /p_slot_id IS NOT NULL AND public\.tageswerk_water_round_covers_active_pools/);
+ assert.match(schedule, /nicht alle aktiven Becken/);
+ const savePlan = schedule.slice(schedule.indexOf('CREATE OR REPLACE FUNCTION public.tageswerk_save_water_facility_slots'), schedule.lastIndexOf('REVOKE ALL ON FUNCTION'));
+ assert.equal(savePlan.indexOf('tageswerk_lock_water_facility_plan') >= 0 && savePlan.indexOf('tageswerk_lock_water_facility_plan') < savePlan.indexOf('UPDATE public.water_facility_slots'), true);
+ assert.match(schedule, /pg_advisory_xact_lock/);
+ assert.match(savePlan, /retired_on <= today/);
+ const scheduleCheck = readFileSync(new URL('../../tageswerk_3_4_2_water_round_schedule_pruefung.sql', import.meta.url), 'utf8');
+ assert.match(scheduleCheck, /SELECT pruefung, status, details/);
+ assert.match(scheduleCheck, /to_regclass\('public\.water_facility_slots'\)/);
+ assert.match(scheduleCheck, /to_regclass\('public\.water_round_slots'\)/);
+ assert.match(scheduleCheck, /relrowsecurity/);
+ assert.match(scheduleCheck, /relforcerowsecurity/);
+ assert.match(scheduleCheck, /tageswerk_record_scheduled_water_round\(uuid,jsonb,uuid\)/);
+ assert.match(scheduleCheck, /tageswerk_water_round_covers_active_pools\(uuid,uuid\)/);
+ assert.match(scheduleCheck, /tageswerk_claim_water_round_slot\(uuid,uuid,uuid\)/);
+ assert.match(scheduleCheck, /employee/);
+ assert.match(scheduleCheck, /technician/);
+ assert.match(scheduleCheck, /facility_manager/);
+ assert.match(scheduleCheck, /company_admin/);
+ assert.match(scheduleCheck, /water_round_slots_one_planned/);
+ assert.match(scheduleCheck, /p_slot_id IS NOT NULL AND public\.tageswerk_water_round_covers_active_pools/);
+ assert.match(scheduleCheck, /tageswerk_record_water_round\(uuid,jsonb\)/);
+ assert.match(scheduleCheck, /position\('water_round_slots' IN pg_get_functiondef\(recorder\.oid\)\) = 0/);
+ assert.doesNotMatch(scheduleCheck, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
+ assert.doesNotMatch(scheduleCheck, /SELECT\s+public\.tageswerk_record_water_round/i);
+ assert.doesNotMatch(scheduleCheck, /SELECT\s+public\.tageswerk_record_scheduled_water_round/i);
+ const nextDay = day => {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+ };
+ const applyTimes = (rows, times, today) => {
+  const tomorrow = nextDay(today);
+  let next = rows.map(row => ({...row}));
+  next = next.map(row => row.active && row.retiredOn && row.retiredOn <= today ? {...row, active: false} : row);
+  next = next.map(row => row.active && row.effectiveOn <= today && (!row.retiredOn || row.retiredOn > today) && !times.includes(row.time) ? {...row, retiredOn: tomorrow} : row);
+  next = next.map(row => row.active && row.effectiveOn <= today && row.retiredOn > today && times.includes(row.time) ? {...row, retiredOn: ''} : row);
+  next = next.map(row => row.active && row.effectiveOn > today && !times.includes(row.time) ? {...row, active: false} : row);
+  for (const time of times) {
+   if (next.some(row => row.active && row.time === time && row.effectiveOn <= tomorrow && (!row.retiredOn || row.retiredOn > tomorrow))) continue;
+   const pending = next.find(row => row.active && row.time === time && row.effectiveOn > today);
+   if (pending) {
+    next = next.map(row => row.id === pending.id ? {...row, active: true, effectiveOn: tomorrow, retiredOn: ''} : row);
+    continue;
+   }
+   next = next.map(row => row.active && row.time === time && row.effectiveOn <= today && row.retiredOn && row.retiredOn <= today ? {...row, active: false} : row);
+   next.push({id: `slot-${time}-${tomorrow}`, time, active: true, effectiveOn: tomorrow, retiredOn: ''});
+  }
+  return next;
+ };
+ const links = [{id: 'link-1', roundId: 'round-9', slotId: 'slot-09:00-2026-11-10', slotTime: '09:00', serviceDay: '2026-11-10'}];
+ let plan = applyTimes([], ['09:00', '14:00'], '2026-11-09');
+ assert.deepEqual(plan.map(row => [row.time, row.effectiveOn]), [['09:00', '2026-11-10'], ['14:00', '2026-11-10']]);
+ plan = applyTimes(plan, ['14:00'], '2026-11-10');
+ assert.equal(plan.find(row => row.time === '09:00').retiredOn, '2026-11-11');
+ assert.equal(plan.find(row => row.time === '09:00').active, true);
+ assert.deepEqual(links, [{id: 'link-1', roundId: 'round-9', slotId: 'slot-09:00-2026-11-10', slotTime: '09:00', serviceDay: '2026-11-10'}]);
+ plan = applyTimes(plan, ['09:00', '14:00'], '2026-11-11');
+ assert.equal(plan.filter(row => row.time === '09:00' && row.active).length, 1);
+ assert.equal(plan.find(row => row.id === 'slot-09:00-2026-11-10').active, false);
+ assert.equal(plan.find(row => row.time === '09:00' && row.active).effectiveOn, '2026-11-12');
+ assert.equal(links[0].slotId, 'slot-09:00-2026-11-10');
+ let pending = applyTimes([], ['16:00'], '2026-11-09');
+ pending = applyTimes(pending, [], '2026-11-09');
+ pending = applyTimes(pending, ['16:00'], '2026-11-09');
+ assert.equal(pending.filter(row => row.time === '16:00' && row.active).length, 1);
+ assert.equal(pending.find(row => row.time === '16:00' && row.active).id, 'slot-16:00-2026-11-10');
+ const closeSql = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close.sql', import.meta.url), 'utf8');
+ assert.equal(closeSql.includes('water_round_slots'), false);
+ assert.equal(closeSql.includes('tageswerk_record_scheduled_water_round'), false);
+ const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ assert.match(screen, /Kontrollrunden heute/);
+ assert.match(screen, /Zusatzkontrolle starten/);
+ assert.match(screen, /Kontrollzeiten speichern/);
+ assert.match(screen, /Eine versäumte Runde bleibt überfällig/);
+ assert.match(screen, /gilt ab dem nächsten Kalendertag/);
+ assert.match(screen, /nachträglich als fehlend/);
+ assert.match(screen, /Als Zusatzkontrolle speichern/);
+ assert.match(screen, /result\?\.conflict && result\.bundle/);
+ const storeSource = readFileSync(new URL('../../js/operations-store.js', import.meta.url), 'utf8');
+ assert.match(storeSource, /Die eingegebenen Messwerte bleiben erhalten/);
+});
+
+test('Eine Zusatzkontrolle wählt Becken aus und behält eingegebene Werte', async () => {
+ const first = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const secondPool = createWaterPool(first.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const third = createWaterPool(secondPool.bundle, {facility, name: 'Sport', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const bundle = third.bundle;
+ const entries = Object.fromEntries([first, secondPool, third].map(item => [item.pool.id, {values: hygieneValues(), note: item.pool.id === first.pool.id ? 'bleibt' : ''}]));
+ const base = {...emptyWaterRound(facility.id, 'round-choice'), kind: 'extra', entries, selectedPoolIds: []};
+ assert.equal(reviewWaterRound(bundle, base, employee, now).error, 'Bitte mindestens ein Becken auswählen.');
+ const one = reviewWaterRound(bundle, {...base, selectedPoolIds: [secondPool.pool.id]}, employee, now);
+ assert.equal(one.ok, true, one.error);
+ assert.deepEqual(one.checks.map(check => check.poolId), [secondPool.pool.id]);
+ const several = reviewWaterRound(bundle, {...base, selectedPoolIds: [first.pool.id, third.pool.id]}, employee, now);
+ assert.equal(several.ok, true, several.error);
+ assert.deepEqual(several.pools.map(pool => pool.name), ['Kinder', 'Sport']);
+ const all = reviewWaterRound(bundle, {...base, selectedPoolIds: [first.pool.id, secondPool.pool.id, third.pool.id]}, employee, now);
+ assert.equal(all.checks.length, 3);
+ const planned = reviewWaterRound(bundle, {...base, kind: 'planned', selectedPoolIds: [first.pool.id], entries: {[first.pool.id]: entries[first.pool.id]}}, employee, now);
+ assert.equal(planned.ok, false);
+ assert.match(planned.error, /^Schwimmer:/);
+ const narrowed = {...base, selectedPoolIds: [secondPool.pool.id]};
+ assert.equal(narrowed.entries[first.pool.id].note, 'bleibt');
+ assert.equal(narrowed.entries[first.pool.id].values.ph, '7.20');
+ const restored = roundFromWaterDraft({
+  facilityId: facility.id,
+  roundId: 'round-choice',
+  status: 'open',
+  revision: 2,
+  entries,
+  progress: {kind: 'extra', selectedPoolIds: [first.pool.id], phase: 'edit'}
+ });
+ assert.deepEqual(restored.selectedPoolIds, [first.pool.id]);
+ assert.equal(restored.entries[first.pool.id].note, 'bleibt');
+ const inactive = setWaterPoolActive(bundle, third.pool.id, false, manager);
+ const visible = waterRoundSelection(inactive.bundle, {...base, selectedPoolIds: [third.pool.id, first.pool.id]});
+ assert.deepEqual(visible.map(pool => pool.id), [first.pool.id]);
+ let progress;
+ const draft = await saveWaterRoundDraft({rpc: async (_name, args) => {
+  progress = args.p_progress;
+  return {data: {status: 'stored', round_id: 'round-choice', revision: 3}, error: null};
+ }}, {...base, selectedPoolIds: [first.pool.id, secondPool.pool.id]});
+ assert.equal(draft.ok, true, draft.error);
+ assert.deepEqual(progress.selectedPoolIds, [first.pool.id, secondPool.pool.id]);
+ const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ assert.match(screen, /type = 'checkbox'/);
+ assert.match(screen, /Becken für die Zusatzkontrolle/);
+ assert.match(screen, /Diese Becken werden kontrolliert/);
+ assert.match(screen, /Bitte mindestens ein Becken auswählen/);
+ assert.match(screen, /round\.kind === 'extra' \? waterPoolChoices/);
+ const styles = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
+ assert.match(styles, /\.water-pool-choices/);
 });

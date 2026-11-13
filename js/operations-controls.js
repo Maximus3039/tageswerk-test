@@ -370,6 +370,20 @@ function optionalLimit(definition, value) {
  return {ok: true, value: amount};
 }
 
+export function parseFacilityRoundTimes(value) {
+ if (String(value ?? '').trim() === '') return [];
+ const times = parseWaterTimes(value);
+ if (!times || times.length > 6) return null;
+ return times;
+}
+
+export function facilityRoundScheduleError(facility, times, actor) {
+ if (!facility?.id) return 'Bitte einen Betrieb auswählen.';
+ if (!canManage(facility, actor)) return 'Kontrollzeiten legt die Betriebsleitung oder Geschäftsführung fest.';
+ if (parseFacilityRoundTimes(times) === null) return 'Bitte bis zu sechs Uhrzeiten eintragen, zum Beispiel 09:00, 14:00, 19:00.';
+ return '';
+}
+
 export function parseWaterTimes(value) {
  const tokens = String(value ?? '').split(/[,;\s]+/).map(item => item.trim()).filter(Boolean);
  const times = [];
@@ -646,6 +660,13 @@ export function waterRoundPools(bundle, facilityId) {
  return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && pool.active !== false).sort((left, right) => left.name.localeCompare(right.name, 'de'));
 }
 
+export function waterRoundSelection(bundle, round) {
+ const pools = waterRoundPools(bundle, round?.facilityId);
+ if (round?.kind !== 'extra') return pools;
+ const selected = new Set(Array.isArray(round?.selectedPoolIds) ? round.selectedPoolIds : []);
+ return pools.filter(pool => selected.has(pool.id));
+}
+
 export const waterDraftSaveDelay = 700;
 export const waterDraftStatusText = {
  saving: 'Wird gespeichert …',
@@ -720,7 +741,11 @@ export function roundFromWaterDraft(draft) {
   phase: (draft.phase || progress.phase) === 'summary' ? 'summary' : 'edit',
   entries: draft.entries && typeof draft.entries === 'object' ? draft.entries : {},
   revision: Number(draft.revision) || 0,
-  saved: false
+  saved: false,
+  slotId: progress.slotId || null,
+  kind: progress.kind === 'planned' || progress.kind === 'extra' ? progress.kind : '',
+  slotTime: progress.slotTime || '',
+  selectedPoolIds: Array.isArray(progress.selectedPoolIds) ? progress.selectedPoolIds.filter(id => typeof id === 'string' && id) : []
  };
 }
 
@@ -746,8 +771,10 @@ export function waterRoundProgress(bundle, round, pools, actor, now) {
 
 export function reviewWaterRound(bundle, round, actor, now) {
  if (round?.saved) return {ok: false, error: 'Diese Kontrollrunde wurde bereits gespeichert.', bundle};
- const pools = waterRoundPools(bundle, round?.facilityId);
- if (!pools.length) return {ok: false, error: 'Für diesen Betrieb ist kein aktives Becken angelegt.', bundle};
+ const available = waterRoundPools(bundle, round?.facilityId);
+ if (!available.length) return {ok: false, error: 'Für diesen Betrieb ist kein aktives Becken angelegt.', bundle};
+ const pools = waterRoundSelection(bundle, round);
+ if (round?.kind === 'extra' && !pools.length) return {ok: false, error: 'Bitte mindestens ein Becken auswählen.', bundle};
  let next = bundle;
  const checks = [];
  for (const pool of pools) {

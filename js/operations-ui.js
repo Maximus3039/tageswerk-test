@@ -27,7 +27,8 @@ import {
  waterRoundDisplayStatus,
  waterRoundTableRows,
  waterRoundPools,
- waterRoundProgress
+ waterRoundProgress,
+ waterRoundSelection
 } from './operations-controls.js';
 import {
  assetNextDue,
@@ -39,6 +40,9 @@ import {
  operationMetrics,
  waterCatalog,
  waterControlState,
+ waterDayRounds,
+ waterFacilityPlan,
+ waterFacilitySlots,
  waterHistoryCsv,
  waterHistoryRows,
  waterOverviewRows,
@@ -72,6 +76,7 @@ import {
  saveWaterRoundDraft,
  discardWaterRound,
  saveWaterMeasure,
+ saveWaterFacilitySlots,
  saveWaterParameter,
  saveWaterParameterAdd,
  saveWaterPool,
@@ -89,6 +94,7 @@ let waterInstalled = false;
 let selectedWaterPoolId = '';
 let waterSettingsOpen = false;
 let waterRoundNotice = '';
+let waterRoundError = '';
 let followUpAlertId = '';
 let waterDraftTimer = 0;
 let waterDraftStatus = '';
@@ -673,7 +679,7 @@ async function flushWaterDraftSave(userId, facilityId) {
  const round = loadWaterRound(userId, facilityId);
  if (!round || round.saved) return;
  const baseRevision = Number(round.revision) || 0;
- const sent = `${JSON.stringify(round.entries)}|${round.index}|${round.phase}`;
+ const sent = `${JSON.stringify(round.entries)}|${round.index}|${round.phase}|${JSON.stringify(round.selectedPoolIds || [])}`;
  let result;
  try {
   result = await saveWaterRoundDraft(database(), round);
@@ -689,7 +695,7 @@ async function flushWaterDraftSave(userId, facilityId) {
  }
  if ((Number(current.revision) || 0) === baseRevision) storeWaterRound(userId, {...current, revision: result.revision});
  const latest = loadWaterRound(userId, facilityId);
- const nowSent = `${JSON.stringify(latest.entries)}|${latest.index}|${latest.phase}`;
+ const nowSent = `${JSON.stringify(latest.entries)}|${latest.index}|${latest.phase}|${JSON.stringify(latest.selectedPoolIds || [])}`;
  if (nowSent !== sent) scheduleWaterDraftSave(userId, facilityId);
  else showDraftStatus(waterDraftStatusText.saved);
 }
@@ -729,6 +735,7 @@ function discardButton(person, facilityId, round) {
    return;
   }
   clearWaterRound(person.userId, facilityId);
+  waterRoundError = '';
   const preview = bundle();
   state.operationPreview = {
    ...preview,
@@ -767,12 +774,110 @@ function waterTable(headers, rows) {
  return wrap;
 }
 
+function roundLabel(round) {
+ if (round?.kind === 'extra') return 'Zusatzkontrolle';
+ if (round?.slotTime) return `Kontrollrunde ${round.slotTime}`;
+ return 'Kontrollrunde';
+}
+
+function startPlannedRound(person, facilityId, plan) {
+ if (loadWaterRound(person.userId, facilityId) || ownOpenWaterDraft(bundle(), facilityId, person.userId)) {
+  say('error', 'Die geöffnete Kontrollrunde zuerst abschließen oder verwerfen.');
+  return;
+ }
+ const created = beginWaterRound(person.userId, facilityId);
+ storeWaterRound(person.userId, {...created, slotId: plan.slotId || null, kind: plan.kind, slotTime: plan.slotTime || '', selectedPoolIds: []});
+ renderPanel('');
+}
+
+function renderWaterDay(host, current, data, nowIso) {
+ const plan = waterFacilityPlan(data, current.id, nowIso);
+ if (!plan.current.length) {
+  if (!plan.upcoming.length) return;
+  const waiting = document.createElement('p');
+  waiting.className = 'help';
+  waiting.textContent = 'Der Kontrollplan gilt ab morgen. Für heute wird keine Kontrollrunde nachträglich als fehlend geführt.';
+  host.append(waiting);
+  return;
+ }
+ const day = waterDayRounds(data, current.id, nowIso);
+ const person = actor();
+ const section = document.createElement('section');
+ const title = document.createElement('h3');
+ title.textContent = 'Kontrollrunden heute';
+ section.append(title);
+ const rows = day.planned.map(item => [item.time, item.status]);
+ for (const extra of day.extras) rows.push(['Zusatzkontrolle', extra.status]);
+ section.append(waterTable(['Uhrzeit', 'Status'], rows.length ? rows : [['—', 'Keine Kontrollzeit']]));
+ const actions = document.createElement('div');
+ actions.className = 'point-actions';
+ for (const item of day.planned) {
+  if (item.state === 'done') continue;
+  actions.append(button(`${item.time} starten`, '', () => startPlannedRound(person, current.id, {slotId: item.id, kind: 'planned', slotTime: item.time})));
+ }
+ actions.append(button('Zusatzkontrolle starten', 'secondary', () => startPlannedRound(person, current.id, {kind: 'extra'})));
+ section.append(actions);
+ const note = document.createElement('p');
+ note.className = 'help';
+ note.textContent = plan.changed
+  ? `Ab morgen gelten andere Kontrollzeiten: ${plan.upcoming.map(slot => slot.time).join(', ') || 'kein eigener Kontrollplan'}. Heutige Kontrollrunden bleiben unverändert.`
+  : 'Eine Kontrollrunde kann vor ihrer Uhrzeit begonnen werden. Eine versäumte Runde bleibt überfällig, auch wenn eine spätere Runde bereits abgeschlossen ist.';
+ section.append(note);
+ host.append(section);
+}
+
+function waterPoolChoices(pools, selectedIds) {
+ const selected = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+ const group = document.createElement('fieldset');
+ group.className = 'water-pool-choices';
+ const legend = document.createElement('legend');
+ legend.textContent = 'Becken für die Zusatzkontrolle';
+ group.append(legend);
+ const boxes = new Map();
+ for (const pool of pools) {
+  const label = document.createElement('label');
+  label.className = 'choice';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = selected.has(pool.id);
+  const text = document.createElement('span');
+  text.textContent = pool.name;
+  label.append(box, text);
+  group.append(label);
+  boxes.set(pool.id, box);
+ }
+ return {group, boxes};
+}
+
+function applyPoolChoice(person, facilityId, round, poolId, checked, currentValues, currentPoolId) {
+ const latest = loadWaterRound(person.userId, facilityId) || round;
+ const remembered = currentPoolId && typeof currentValues === 'function' ? rememberWaterEntry(latest, currentPoolId, currentValues()) : latest;
+ const ids = new Set(Array.isArray(remembered.selectedPoolIds) ? remembered.selectedPoolIds : []);
+ if (checked) ids.add(poolId);
+ else ids.delete(poolId);
+ const selected = waterRoundPools(bundle(), facilityId).filter(pool => ids.has(pool.id));
+ const index = Math.max(selected.findIndex(pool => pool.id === currentPoolId), 0);
+ rememberDraft(person.userId, {...remembered, selectedPoolIds: selected.map(pool => pool.id), index, phase: 'edit'}).then(() => renderPanel(''));
+}
+
 function renderWaterRound(host, current, data) {
  const pools = waterRoundPools(data, current.id);
  const person = actor();
+ const remote = ownOpenWaterDraft(data, current.id, person.userId);
+ let round = loadWaterRound(person.userId, current.id);
+ if (!round && !remote && waterFacilitySlots(data, current.id, new Date().toISOString()).length) {
+  if (waterRoundNotice) {
+   const done = document.createElement('p');
+   done.className = 'water-round-status';
+   done.textContent = waterRoundNotice;
+   host.append(done);
+   waterRoundNotice = '';
+  }
+  return;
+ }
  const card = document.createElement('section');
  const title = document.createElement('h3');
- title.textContent = 'Kontrollrunde';
+ title.textContent = roundLabel(round || (remote ? roundFromWaterDraft(remote) : null));
  card.append(title);
  if (waterRoundNotice) {
   const done = document.createElement('p');
@@ -789,8 +894,6 @@ function renderWaterRound(host, current, data) {
   host.append(card);
   return;
  }
- const remote = ownOpenWaterDraft(data, current.id, person.userId);
- let round = loadWaterRound(person.userId, current.id);
  if (!round && remote) {
   const pendingPool = selectedWaterPoolId;
   selectedWaterPoolId = '';
@@ -814,16 +917,20 @@ function renderWaterRound(host, current, data) {
   return;
  }
  if (!round) round = beginWaterRound(person.userId, current.id);
+ title.textContent = roundLabel(round);
+ const roundPools = waterRoundSelection(data, round);
  if (selectedWaterPoolId) {
-  const index = pools.findIndex(pool => pool.id === selectedWaterPoolId);
+  const index = roundPools.findIndex(pool => pool.id === selectedWaterPoolId);
   if (index >= 0) round = storeWaterRound(person.userId, {...round, index, phase: 'edit'});
   selectedWaterPoolId = '';
  }
- if (round.index >= pools.length) round = storeWaterRound(person.userId, {...round, index: 0});
- const progress = waterRoundProgress(data, round, pools, person, new Date().toISOString());
+ if (roundPools.length && round.index >= roundPools.length) round = storeWaterRound(person.userId, {...round, index: 0});
+ const progress = waterRoundProgress(data, round, roundPools, person, new Date().toISOString());
  const progressLine = document.createElement('p');
  progressLine.className = 'water-progress';
- progressLine.textContent = `${progress.label} · ${progress.filled} von ${progress.total} vollständig`;
+ progressLine.textContent = round.kind === 'extra' && !roundPools.length
+  ? 'Keine Becken ausgewählt'
+  : `${progress.label} · ${progress.filled} von ${progress.total} vollständig`;
  card.append(progressLine);
  const roundState = waterRoundDisplayStatus(data, round, person, new Date().toISOString());
  if (roundState) {
@@ -836,10 +943,16 @@ function renderWaterRound(host, current, data) {
  draftStatus.className = 'water-draft-status';
  draftStatus.textContent = waterDraftStatus;
  card.append(draftStatus);
+ if (waterRoundError) {
+  const failure = document.createElement('p');
+  failure.className = 'error';
+  failure.textContent = waterRoundError;
+  card.append(failure);
+ }
  if (round.phase === 'summary') {
   const review = reviewWaterRound(data, round, person, new Date().toISOString());
   if (!review.ok) {
-   const failed = pools.findIndex(pool => pool.id === review.poolId);
+   const failed = roundPools.findIndex(pool => pool.id === review.poolId);
    round = storeWaterRound(person.userId, {...round, index: failed >= 0 ? failed : round.index, phase: 'edit'});
    const message = document.createElement('p');
    message.className = 'error';
@@ -847,7 +960,10 @@ function renderWaterRound(host, current, data) {
    card.append(message);
   } else {
    const summaryRows = waterRoundTableRows(data, review).map(item => [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.status]);
-   card.append(waterTable(['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Status'], summaryRows));
+   const chosen = document.createElement('p');
+   chosen.className = 'help';
+   chosen.textContent = `Diese Becken werden kontrolliert: ${review.pools.map(pool => pool.name).join(', ')}.`;
+   card.append(chosen, waterTable(['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Status'], summaryRows));
    const actions = document.createElement('div');
    actions.className = 'point-actions';
    actions.append(button('Zurück zur Eingabe', 'secondary', async () => {
@@ -856,22 +972,62 @@ function renderWaterRound(host, current, data) {
     renderPanel('');
    }));
    actions.append(discardButton(person, current.id, loadWaterRound(person.userId, current.id) || round));
-   actions.append(button('Kontrollrunde speichern', '', () => commit(async () => {
-    window.clearTimeout(waterDraftTimer);
-    const result = await saveWaterRound(database(), bundle(), loadWaterRound(person.userId, current.id) || round, person, new Date().toISOString(), context());
-    if (result?.ok) {
-     clearWaterRound(person.userId, current.id);
-     showDraftStatus('');
-     waterRoundNotice = 'Endgültig abgeschlossen';
-    }
-    return result;
-   })));
+   const occupied = round.kind === 'planned'
+    ? waterDayRounds(data, current.id, new Date().toISOString()).planned.find(item => item.id === round.slotId && item.state === 'done' && item.roundId !== round.roundId)
+    : null;
+   if (occupied) {
+    const kept = document.createElement('p');
+    kept.className = 'help';
+    kept.textContent = 'Dieser Termin ist abgeschlossen. Die eingegebenen Messwerte bleiben erhalten und können als Zusatzkontrolle gespeichert werden.';
+    card.append(kept);
+    actions.append(button('Als Zusatzkontrolle speichern', 'secondary', () => {
+     const latest = loadWaterRound(person.userId, current.id) || round;
+     storeWaterRound(person.userId, {...latest, kind: 'extra', slotId: null, slotTime: '', phase: 'summary', selectedPoolIds: pools.map(pool => pool.id)});
+     waterRoundError = '';
+     renderPanel('');
+    }));
+   }
+   actions.append(button('Kontrollrunde speichern', '', () => {
+    const pending = commit(async () => {
+     window.clearTimeout(waterDraftTimer);
+     const result = await saveWaterRound(database(), bundle(), loadWaterRound(person.userId, current.id) || round, person, new Date().toISOString(), context());
+     if (result?.ok) {
+      clearWaterRound(person.userId, current.id);
+      showDraftStatus('');
+      waterRoundError = '';
+      waterRoundNotice = 'Endgültig abgeschlossen';
+     } else {
+      waterRoundError = result?.error || 'Die Kontrollrunde wurde nicht abgeschlossen. Die erfassten Werte bleiben im Entwurf.';
+      if (result?.conflict && result.bundle) state.operationPreview = result.bundle;
+     }
+     return result;
+    });
+    if (!pending?.then) return pending;
+    return pending.then(result => {
+     if (!result?.ok) renderPanel();
+     return result;
+    });
+   }));
    card.append(actions);
    host.append(card);
    return;
   }
  }
- const pool = pools[round.index] || pools[0];
+ const choices = round.kind === 'extra' ? waterPoolChoices(pools, round.selectedPoolIds) : null;
+ if (choices) card.append(choices.group);
+ if (!roundPools.length) {
+  const hint = document.createElement('p');
+  hint.className = 'help';
+  hint.textContent = 'Bitte mindestens ein Becken auswählen. Bereits eingegebene Werte bleiben erhalten.';
+  const actions = document.createElement('div');
+  actions.className = 'point-actions';
+  actions.append(discardButton(person, current.id, loadWaterRound(person.userId, current.id) || round));
+  choices?.boxes.forEach((box, poolId) => box.addEventListener('change', () => applyPoolChoice(person, current.id, round, poolId, box.checked, null)));
+  card.append(hint, actions);
+  host.append(card);
+  return;
+ }
+ const pool = roundPools[round.index] || roundPools[0];
  const savedEntry = round.entries[pool.id] || {values: {}, note: ''};
  const parameters = data.waterPoolParameters.filter(item => item.poolId === pool.id && item.active !== false).sort((left, right) => waterCatalog(data).findIndex(item => item.code === left.parameterCode) - waterCatalog(data).findIndex(item => item.code === right.parameterCode));
  const name = document.createElement('strong');
@@ -896,6 +1052,7 @@ function renderWaterRound(host, current, data) {
   const latest = loadWaterRound(person.userId, current.id) || round;
   rememberDraft(person.userId, rememberWaterEntry(latest, pool.id, waterEntryValues(fields, note)));
  };
+ choices?.boxes.forEach((box, poolId) => box.addEventListener('change', () => applyPoolChoice(person, current.id, round, poolId, box.checked, () => waterEntryValues(fields, note), pool.id)));
  for (const field of fields.values()) field.addEventListener('input', keep);
  note.addEventListener('input', keep);
  card.append(labeled('Kommentar', note));
@@ -903,13 +1060,13 @@ function renderWaterRound(host, current, data) {
  actions.className = 'point-actions';
  actions.append(button('Zurück', 'secondary', async () => {
   const latest = loadWaterRound(person.userId, current.id) || round;
-  await rememberDraft(person.userId, moveWaterRound(latest, pools, -1, waterEntryValues(fields, note)), true);
+  await rememberDraft(person.userId, moveWaterRound(latest, roundPools, -1, waterEntryValues(fields, note)), true);
   renderPanel('');
  }));
- if (round.index < pools.length - 1) {
+ if (round.index < roundPools.length - 1) {
   actions.append(button('Weiter', '', async () => {
    const latest = loadWaterRound(person.userId, current.id) || round;
-   await rememberDraft(person.userId, moveWaterRound(latest, pools, 1, waterEntryValues(fields, note)), true);
+   await rememberDraft(person.userId, moveWaterRound(latest, roundPools, 1, waterEntryValues(fields, note)), true);
    renderPanel('');
   }));
  } else {
@@ -1014,6 +1171,14 @@ function renderWater(host, current) {
   hint.className = 'help';
   hint.textContent = 'Sollbereiche werden nicht automatisch gesetzt. Ohne hinterlegten Bereich entsteht keine Grenzwertwarnung.';
   settings.append(hint);
+  const savedTimes = waterFacilityPlan(data, current.id, new Date().toISOString()).upcoming.map(slot => slot.time).join(', ');
+  const roundTimes = input(savedTimes);
+  settings.append(labeled('Tägliche Kontrollzeiten', roundTimes));
+  settings.append(button('Kontrollzeiten speichern', 'secondary', () => commit(() => saveWaterFacilitySlots(database(), bundle(), current, roundTimes.value, actor(), new Date().toISOString(), context()))));
+  const roundHint = document.createElement('p');
+  roundHint.className = 'help';
+  roundHint.textContent = 'Bis zu sechs Uhrzeiten gelten für den ganzen Betrieb in der Zeitzone Europe/Berlin. Eine Änderung gilt ab dem nächsten Kalendertag. Heutige Kontrollrunden bleiben unverändert. Die bestehenden Beckenpläne bleiben erhalten.';
+  settings.append(roundHint);
   paintSchedule();
   host.append(settings);
  }
@@ -1035,12 +1200,21 @@ function renderWater(host, current) {
   hiddenValues.textContent = 'Gespeicherte Messwerte werden für Mitarbeiter nicht angezeigt. Die noch nicht bestätigte Eingabe steht in der Kontrollrunde.';
   host.append(hiddenValues);
  }
+ const day = waterDayRounds(data, current.id, nowIso);
+ const urgent = day.planned.find(item => item.state === 'overdue') || day.planned.find(item => item.state === 'due') || day.planned.find(item => item.state === 'waiting');
+ const facilityStatus = day.planned.length
+  ? (urgent ? `${urgent.time}: ${urgent.status}` : 'Alle geplanten Kontrollrunden sind abgeschlossen.')
+  : '';
  host.append(waterTable(
   ['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Letzte Messung', 'Status'],
-  overview.map(item => history
-   ? [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.measuredLabel, item.status]
-   : [item.poolName, 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', item.status])
+  overview.map(item => {
+   const status = facilityStatus && !String(item.status).startsWith('Grenzwert') ? facilityStatus : item.status;
+   return history
+    ? [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.measuredLabel, status]
+    : [item.poolName, 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', status];
+  })
  ));
+ renderWaterDay(host, current, data, nowIso);
  const duePool = pools.find(pool => waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso).due);
  const initialPool = pools.some(pool => pool.id === selectedWaterPoolId) ? selectedWaterPoolId : (duePool || pools[0]).id;
  const pool = pools.find(item => item.id === initialPool) || pools[0];
