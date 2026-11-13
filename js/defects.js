@@ -18,6 +18,10 @@ export function sectionCounts(defects) {
  };
 }
 
+export function archiveHeading(count, open) {
+ return `${open ? '▼' : '▶'} Archiv (${count})`;
+}
+
 export function matchesArchiveQuery(defect, query) {
  const text = String(query || '').trim().toLocaleLowerCase('de');
  if (!text) return true;

@@ -4,7 +4,7 @@ import {priorityNames,roleNames,invitationStatus,statusNames} from './labels.js'
 import {el,show,status} from './utils.js';
 import {state} from './state.js';
 import {isManager,loadPermissionData,mayAppointManager} from './permissions.js';
-import {archiveConfirmation,closedInFacility,completionText,matchesArchiveQuery,sectionCounts,sectionDefects,sortByCompletion} from './defects.js';
+import {archiveConfirmation,archiveHeading,closedInFacility,completionText,matchesArchiveQuery,sectionCounts,sectionDefects,sortByCompletion} from './defects.js';
 import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation,resetPasswordForEmail} from './auth.js';
 import {PASSWORD_RESET_REDIRECT,PASSWORD_SAVED_MESSAGE,EMAIL_INVALID_MESSAGE,callbackNotice,passwordChoice,passwordResetEmail,readAuthCallback,recoveryAllowsSave,recoveryFailure,resetRequestOutcome,screenForAuth} from './password-reset.js';
 import {clearFacilityMeters,loadFacilityMeters,resetMeterEditor} from './meters.js';
@@ -108,6 +108,7 @@ async function loadPermissions(){
 }
 let archiveQuery='';
 let archiveFacilityId='';
+let archiveOpen=false;
 let defectPaint=0;
 const defectEvents=new Map();
 function chosenArchiveFacility(){
@@ -144,11 +145,21 @@ async function paintDefectSections(box,token){
  for(const [key,label,count] of sections){
   if(token!==defectPaint)return;
   const section=document.createElement('section');section.className='defect-section';
+  if(key==='archive'){
+   section.append(archiveToggle(count));
+   box.append(section);
+   if(!archiveOpen)continue;
+   const panel=document.createElement('div');panel.id='defect-archive-panel';section.append(panel);
+   panel.append(archiveSearchControl());
+   const rows=sortByCompletion(sectionDefects(state.cachedDefects,'archive').filter(defect=>matchesArchiveQuery(defect,archiveQuery)));
+   if(!rows.length){const empty=document.createElement('p');empty.className='muted';empty.textContent=archiveQuery.trim()?'Kein Archivtreffer.':'Keine Einträge unter Archiv.';panel.append(empty);continue}
+   for(const defect of rows){if(token!==defectPaint)return;panel.append(await defectCard(defect))}
+   continue;
+  }
   const heading=document.createElement('h3');heading.textContent=`${label} (${count})`;section.append(heading);
   if(key==='done'){const tools=archiveAllControl();if(tools)section.append(tools)}
-  if(key==='archive')section.append(archiveSearchControl());
-  const rows=key==='archive'?sortByCompletion(sectionDefects(state.cachedDefects,'archive').filter(defect=>matchesArchiveQuery(defect,archiveQuery))):sectionDefects(state.cachedDefects,key);
-  if(!rows.length){const empty=document.createElement('p');empty.className='muted';empty.textContent=key==='archive'&&archiveQuery.trim()?'Kein Archivtreffer.':`Keine Einträge unter ${label}.`;section.append(empty)}
+  const rows=sectionDefects(state.cachedDefects,key);
+  if(!rows.length){const empty=document.createElement('p');empty.className='muted';empty.textContent=`Keine Einträge unter ${label}.`;section.append(empty)}
   box.append(section);
   for(const defect of rows){if(token!==defectPaint)return;section.append(await defectCard(defect))}
  }
@@ -166,6 +177,19 @@ function archiveAllControl(){
  const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent='Alle abgeschlossenen Mängel archivieren';
  button.onclick=()=>archiveClosedDefects(select.value,button);
  wrap.append(label,select,button);return wrap;
+}
+function archiveToggle(count){
+ const heading=document.createElement('h3');
+ const button=document.createElement('button');
+ button.id='defect-archive-toggle';
+ button.type='button';
+ button.className='archive-toggle';
+ button.setAttribute('aria-expanded',archiveOpen?'true':'false');
+ button.setAttribute('aria-controls','defect-archive-panel');
+ button.textContent=archiveHeading(count,archiveOpen);
+ button.addEventListener('click',()=>{const open=!archiveOpen;archiveOpen=open;paintDefects().then(()=>{const next=el('defect-archive-toggle');if(next&&next.getAttribute('aria-expanded')===(open?'true':'false'))next.focus()})});
+ heading.append(button);
+ return heading;
 }
 function archiveSearchControl(){
  const wrap=document.createElement('div');wrap.className='archive-tools';
