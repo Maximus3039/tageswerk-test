@@ -93,6 +93,7 @@ let materialsInstalled = false;
 let waterInstalled = false;
 let selectedWaterPoolId = '';
 let waterSettingsOpen = false;
+let temperatureSettingsOpen = false;
 let waterRoundNotice = '';
 let waterRoundError = '';
 let followUpAlertId = '';
@@ -537,7 +538,18 @@ function intervalLabel(point) {
 function renderTemperature(host, current) {
  missingNote(host, temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
+ let settings = null;
  if (isManager(current)) {
+  settings = document.createElement('div');
+  settings.id = 'temperature-settings';
+  settings.className = temperatureSettingsOpen ? 'water-settings' : 'water-settings hidden';
+  const toggle = button('⚙ Einstellungen', 'secondary', () => {
+   temperatureSettingsOpen = settings.classList.toggle('hidden') === false;
+   toggle.setAttribute('aria-expanded', temperatureSettingsOpen ? 'true' : 'false');
+  });
+  toggle.setAttribute('aria-expanded', temperatureSettingsOpen ? 'true' : 'false');
+  toggle.setAttribute('aria-controls', 'temperature-settings');
+  host.append(toggle);
   const name = input();
   const location = input();
   const minimum = configureTemperatureInput(input());
@@ -545,8 +557,9 @@ function renderTemperature(host, current) {
   const unit = select(Object.entries(intervalNames).map(([value, label]) => ({value, label})), 'day');
   const count = input('1');
   count.inputMode = 'numeric';
-  host.append(labeled('Messstelle', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
-  host.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
+  settings.append(labeled('Messstelle', name), labeled('Bereich', location), labeled('Mindestens °C', minimum), labeled('Höchstens °C', maximum), labeled('Kontrollintervall', unit), labeled('Intervallanzahl', count));
+  settings.append(button('Messstelle speichern', '', () => commit(() => saveTemperaturePoint(database(), bundle(), {facility: current, name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
+  host.append(settings);
  }
  const missing = new Set(missingTemperaturePoints(data, current.id, new Date().toISOString()).map(point => point.id));
  const points = data.temperaturePoints.filter(item => item.facilityId === current.id).sort((left, right) => Number(left.active === false) - Number(right.active === false) || left.name.localeCompare(right.name, 'de'));
@@ -554,7 +567,11 @@ function renderTemperature(host, current) {
   const readings = data.temperatureReadings.filter(item => item.pointId === point.id);
   const status = point.active === false ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : missing.has(point.id) ? 'Die Kontrolle ist fällig.' : 'Die nächste Kontrolle ist noch nicht fällig.';
   const row = item(`${point.name}${point.active === false ? ' · deaktiviert' : ''}`, [`${point.location} · zulässig ${amountLabel(point.minC)} bis ${amountLabel(point.maxC)} °C · ${intervalLabel(point)}`, status], missing.has(point.id));
-  if (isManager(current)) {
+  if (isManager(current) && settings) {
+   const managed = document.createElement('div');
+   managed.className = 'water-parameter';
+   const title = document.createElement('strong');
+   title.textContent = point.name;
    const actions = document.createElement('div');
    actions.className = 'point-actions';
    const editor = document.createElement('div');
@@ -570,7 +587,8 @@ function renderTemperature(host, current) {
    editor.append(button('Änderungen speichern', '', () => commit(() => saveTemperaturePointChange(database(), bundle(), point.id, {name: name.value, location: location.value, minimum: minimum.value, maximum: maximum.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
    actions.append(button('Bearbeiten', 'secondary', () => { editor.classList.toggle('hidden'); }));
    actions.append(button(point.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveTemperaturePointActive(database(), bundle(), point.id, point.active === false, actor(), new Date().toISOString(), context()))));
-   row.append(actions, editor);
+   managed.append(title, actions, editor);
+   settings.append(managed);
   }
   if (point.active !== false) {
    const value = configureTemperatureInput(input());
@@ -1477,6 +1495,7 @@ export function syncOperationFacility(facilityId) {
 }
 
 export async function showOperationSection(name, facilityId) {
+ if (name === 'temperature') temperatureSettingsOpen = false;
  const card = el('operations-card');
  show('operations-card', true);
  el('open-operations')?.classList.add('active');
@@ -1508,12 +1527,14 @@ export function mountOperations() {
   show('operations-card', opening);
   opener.classList.toggle('active', opening);
   if (!opening) return;
+  temperatureSettingsOpen = false;
   await openOperations();
   card.scrollIntoView({behavior: 'smooth', block: 'start'});
  });
  el('operations-facility')?.addEventListener('change', () => renderPanel(''));
  for (const tab of document.querySelectorAll('[data-operation]')) {
   tab.addEventListener('click', () => {
+   if (tab.dataset.operation === 'temperature') temperatureSettingsOpen = false;
    section = tab.dataset.operation;
    for (const other of document.querySelectorAll('[data-operation]')) other.classList.toggle('active', other === tab);
    renderPanel('');

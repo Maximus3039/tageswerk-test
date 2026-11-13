@@ -134,6 +134,15 @@ test('Negative Temperaturgrenzen und Messwerte bleiben zulässig', () => {
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.minC\)\)/);
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.maxC\)\)/);
  assert.doesNotMatch(temperatureUi, /inputMode = 'decimal'/);
+ assert.match(ui, /let temperatureSettingsOpen = false/);
+ assert.ok(temperatureUi.indexOf('⚙ Einstellungen') > temperatureUi.indexOf('if (isManager(current))'));
+ assert.match(temperatureUi, /setAttribute\('aria-expanded', temperatureSettingsOpen \? 'true' : 'false'\)/);
+ assert.match(temperatureUi, /setAttribute\('aria-controls', 'temperature-settings'\)/);
+ assert.match(temperatureUi, /settings\.append\(button\('Messstelle speichern'/);
+ assert.match(temperatureUi, /row\.append\(labeled\('Gemessener Wert °C', value\)/);
+ assert.match(temperatureUi, /saveTemperaturePointActive/);
+ assert.match(ui, /if \(name === 'temperature'\) temperatureSettingsOpen = false/);
+ assert.match(ui, /if \(tab\.dataset\.operation === 'temperature'\) temperatureSettingsOpen = false/);
 });
 
 test('Die Wasserübersicht trennt gespeicherte Werte, fehlende Werte und den Rundenstatus', () => {
