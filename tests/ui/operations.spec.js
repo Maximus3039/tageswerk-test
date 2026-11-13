@@ -29,6 +29,41 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await expect(page.locator('[data-operation="temperature"]')).toHaveClass(/active/);
  await page.locator('[data-operation="water"]').click();
  await expect(page.locator('[data-operation="water"]')).toHaveClass(/active/);
+ const poolChoice = await page.evaluate(() => {
+  const group = document.createElement('fieldset');
+  group.className = 'water-pool-choices';
+  const legend = document.createElement('legend');
+  legend.textContent = 'Becken für die Zusatzkontrolle';
+  group.append(legend);
+  for (const name of ['Kinderbecken', 'Schwimmerbecken mit einem langen Namen', 'Lehrschwimmbecken']) {
+   const label = document.createElement('label');
+   label.className = 'choice';
+   const box = document.createElement('input');
+   box.type = 'checkbox';
+   const text = document.createElement('span');
+   text.textContent = name;
+   label.append(box, text);
+   group.append(label);
+  }
+  document.querySelector('main').append(group);
+  const box = group.querySelector('input').getBoundingClientRect();
+  const groupBox = group.getBoundingClientRect();
+  return {
+   overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+   width: groupBox.width,
+   right: groupBox.right,
+   box: box.width,
+   height: box.height
+  };
+ });
+ expect(poolChoice.overflow).toBeLessThanOrEqual(1);
+ expect(poolChoice.right).toBeLessThanOrEqual(viewport.width + 1);
+ expect(poolChoice.box).toBeGreaterThanOrEqual(24);
+ expect(poolChoice.height).toBeGreaterThanOrEqual(24);
+ const choiceLabel = page.locator('.water-pool-choices label').first();
+ expect(await choiceLabel.evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(48);
+ await choiceLabel.click();
+ await expect(page.locator('.water-pool-choices input').first()).toBeChecked();
  const overflow = await page.evaluate(() => {
   const wrap = document.createElement('div');
   wrap.className = 'water-table-wrap';

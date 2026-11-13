@@ -660,6 +660,13 @@ export function waterRoundPools(bundle, facilityId) {
  return (bundle?.waterPools || []).filter(pool => pool.facilityId === facilityId && pool.active !== false).sort((left, right) => left.name.localeCompare(right.name, 'de'));
 }
 
+export function waterRoundSelection(bundle, round) {
+ const pools = waterRoundPools(bundle, round?.facilityId);
+ if (round?.kind !== 'extra') return pools;
+ const selected = new Set(Array.isArray(round?.selectedPoolIds) ? round.selectedPoolIds : []);
+ return pools.filter(pool => selected.has(pool.id));
+}
+
 export const waterDraftSaveDelay = 700;
 export const waterDraftStatusText = {
  saving: 'Wird gespeichert …',
@@ -737,7 +744,8 @@ export function roundFromWaterDraft(draft) {
   saved: false,
   slotId: progress.slotId || null,
   kind: progress.kind === 'planned' || progress.kind === 'extra' ? progress.kind : '',
-  slotTime: progress.slotTime || ''
+  slotTime: progress.slotTime || '',
+  selectedPoolIds: Array.isArray(progress.selectedPoolIds) ? progress.selectedPoolIds.filter(id => typeof id === 'string' && id) : []
  };
 }
 
@@ -763,8 +771,10 @@ export function waterRoundProgress(bundle, round, pools, actor, now) {
 
 export function reviewWaterRound(bundle, round, actor, now) {
  if (round?.saved) return {ok: false, error: 'Diese Kontrollrunde wurde bereits gespeichert.', bundle};
- const pools = waterRoundPools(bundle, round?.facilityId);
- if (!pools.length) return {ok: false, error: 'Für diesen Betrieb ist kein aktives Becken angelegt.', bundle};
+ const available = waterRoundPools(bundle, round?.facilityId);
+ if (!available.length) return {ok: false, error: 'Für diesen Betrieb ist kein aktives Becken angelegt.', bundle};
+ const pools = waterRoundSelection(bundle, round);
+ if (round?.kind === 'extra' && !pools.length) return {ok: false, error: 'Bitte mindestens ein Becken auswählen.', bundle};
  let next = bundle;
  const checks = [];
  for (const pool of pools) {

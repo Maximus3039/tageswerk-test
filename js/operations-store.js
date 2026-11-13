@@ -1172,7 +1172,8 @@ export async function saveWaterRoundDraft(db, round) {
     phase: round.phase === 'summary' ? 'summary' : 'edit',
     slotId: round.slotId || null,
     kind: round.kind === 'planned' || round.kind === 'extra' ? round.kind : '',
-    slotTime: round.slotTime || ''
+    slotTime: round.slotTime || '',
+    selectedPoolIds: Array.isArray(round.selectedPoolIds) ? round.selectedPoolIds : []
    },
    p_revision: Number(round.revision) || 0
   });

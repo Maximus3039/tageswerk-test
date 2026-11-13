@@ -37,6 +37,7 @@ import {
  storeWaterRound,
  waterRoundPools,
  waterRoundProgress,
+ waterRoundSelection,
  recordWaterMeasure,
  setWaterPoolActive,
  updateWaterParameter,
@@ -1682,7 +1683,7 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  const filled = (roundId, slot, kind = 'planned') => {
   let round = emptyWaterRound(facility.id, roundId);
   for (const pool of pools) round = rememberWaterEntry(round, pool.id, {values: hygieneValues(), note: ''});
-  return {...round, slotId: slot?.id || null, kind, slotTime: slot?.time || ''};
+  return {...round, slotId: slot?.id || null, kind, slotTime: slot?.time || '', selectedPoolIds: kind === 'extra' ? pools.map(pool => pool.id) : []};
  };
  const openSchedule = () => {
   const db = controlDb();
@@ -2080,4 +2081,56 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  assert.match(screen, /result\?\.conflict && result\.bundle/);
  const storeSource = readFileSync(new URL('../../js/operations-store.js', import.meta.url), 'utf8');
  assert.match(storeSource, /Die eingegebenen Messwerte bleiben erhalten/);
+});
+
+test('Eine Zusatzkontrolle wählt Becken aus und behält eingegebene Werte', async () => {
+ const first = createWaterPool(emptyOperations(), {facility, name: 'Kinder', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const secondPool = createWaterPool(first.bundle, {facility, name: 'Schwimmer', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const third = createWaterPool(secondPool.bundle, {facility, name: 'Sport', scheduleMode: 'daily', intervalCount: 1}, manager, now);
+ const bundle = third.bundle;
+ const entries = Object.fromEntries([first, secondPool, third].map(item => [item.pool.id, {values: hygieneValues(), note: item.pool.id === first.pool.id ? 'bleibt' : ''}]));
+ const base = {...emptyWaterRound(facility.id, 'round-choice'), kind: 'extra', entries, selectedPoolIds: []};
+ assert.equal(reviewWaterRound(bundle, base, employee, now).error, 'Bitte mindestens ein Becken auswählen.');
+ const one = reviewWaterRound(bundle, {...base, selectedPoolIds: [secondPool.pool.id]}, employee, now);
+ assert.equal(one.ok, true, one.error);
+ assert.deepEqual(one.checks.map(check => check.poolId), [secondPool.pool.id]);
+ const several = reviewWaterRound(bundle, {...base, selectedPoolIds: [first.pool.id, third.pool.id]}, employee, now);
+ assert.equal(several.ok, true, several.error);
+ assert.deepEqual(several.pools.map(pool => pool.name), ['Kinder', 'Sport']);
+ const all = reviewWaterRound(bundle, {...base, selectedPoolIds: [first.pool.id, secondPool.pool.id, third.pool.id]}, employee, now);
+ assert.equal(all.checks.length, 3);
+ const planned = reviewWaterRound(bundle, {...base, kind: 'planned', selectedPoolIds: [first.pool.id], entries: {[first.pool.id]: entries[first.pool.id]}}, employee, now);
+ assert.equal(planned.ok, false);
+ assert.match(planned.error, /^Schwimmer:/);
+ const narrowed = {...base, selectedPoolIds: [secondPool.pool.id]};
+ assert.equal(narrowed.entries[first.pool.id].note, 'bleibt');
+ assert.equal(narrowed.entries[first.pool.id].values.ph, '7.20');
+ const restored = roundFromWaterDraft({
+  facilityId: facility.id,
+  roundId: 'round-choice',
+  status: 'open',
+  revision: 2,
+  entries,
+  progress: {kind: 'extra', selectedPoolIds: [first.pool.id], phase: 'edit'}
+ });
+ assert.deepEqual(restored.selectedPoolIds, [first.pool.id]);
+ assert.equal(restored.entries[first.pool.id].note, 'bleibt');
+ const inactive = setWaterPoolActive(bundle, third.pool.id, false, manager);
+ const visible = waterRoundSelection(inactive.bundle, {...base, selectedPoolIds: [third.pool.id, first.pool.id]});
+ assert.deepEqual(visible.map(pool => pool.id), [first.pool.id]);
+ let progress;
+ const draft = await saveWaterRoundDraft({rpc: async (_name, args) => {
+  progress = args.p_progress;
+  return {data: {status: 'stored', round_id: 'round-choice', revision: 3}, error: null};
+ }}, {...base, selectedPoolIds: [first.pool.id, secondPool.pool.id]});
+ assert.equal(draft.ok, true, draft.error);
+ assert.deepEqual(progress.selectedPoolIds, [first.pool.id, secondPool.pool.id]);
+ const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ assert.match(screen, /type = 'checkbox'/);
+ assert.match(screen, /Becken für die Zusatzkontrolle/);
+ assert.match(screen, /Diese Becken werden kontrolliert/);
+ assert.match(screen, /Bitte mindestens ein Becken auswählen/);
+ assert.match(screen, /round\.kind === 'extra' \? waterPoolChoices/);
+ const styles = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
+ assert.match(styles, /\.water-pool-choices/);
 });
