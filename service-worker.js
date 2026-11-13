@@ -1,6 +1,6 @@
 // Sicherheitsbewusst: keine API-Antworten, Sitzungsdaten oder fremde Seiten zwischenspeichern.
 // Eine neue Version ersetzt den alten Cache und bittet geöffnete Fenster um eine Aktualisierung.
-const SHELL_CACHE = 'tageswerk-shell-3.5.3';
+const SHELL_CACHE = 'tageswerk-shell-3.5.4';
 
 self.addEventListener('install', event => {
  event.waitUntil(self.skipWaiting());
