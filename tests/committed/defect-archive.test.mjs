@@ -215,3 +215,15 @@ test('Archivschutz, Verlauf und Abschlusszeitpunkt folgen den Datenbankregeln', 
  ];
  assert.deepEqual(defects.filter(defect => defect.facility_id === 'fac-a' && defect.organization_id === 'org-a' && defect.status === 'resolved' && !defect.archived_at).map(defect => defect.id), ['a']);
 });
+
+test('Die Bestandsaufnahme liest die Mängelstruktur und schreibt nichts', () => {
+ const sql = readFileSync(new URL('../../tageswerk_3_5_1_defect_archive_bestandsaufnahme.sql', import.meta.url), 'utf8');
+ const runner = readFileSync(new URL('../integration/run.mjs', import.meta.url), 'utf8');
+ assert.match(sql, /information_schema\.columns/);
+ assert.match(sql, /pg_policy/);
+ assert.match(sql, /employee_update_assigned_defect/);
+ assert.match(sql, /has_column_privilege/);
+ assert.doesNotMatch(sql, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE|COMMENT|DO)\b/im);
+ assert.equal(sql.includes('tageswerk_archive_defect'), false);
+ assert.equal(runner.includes('tageswerk_3_5_1_defect_archive_bestandsaufnahme.sql'), false);
+});
