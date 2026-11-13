@@ -43,9 +43,11 @@ import {
  waterDayRounds,
  waterFacilityPlan,
  waterFacilitySlots,
+ waterHistoryByPool,
  waterHistoryCsv,
  waterHistoryRows,
  waterOverviewRows,
+ waterReadingOutside,
  waterRowsForMember,
  waterScheduleLabel
 } from './operations.js';
@@ -782,14 +784,30 @@ function waterTable(headers, rows) {
   const line = document.createElement('tr');
   for (const value of values) {
    const cell = document.createElement('td');
-   cell.textContent = value;
-   if (value === 'fehlt') cell.className = 'is-missing';
+   writeWaterCell(cell, value);
    line.append(cell);
   }
   table.append(line);
  }
  wrap.append(table);
  return wrap;
+}
+
+function writeWaterCell(cell, value) {
+ if (value && typeof value === 'object') {
+  if (value.breach) {
+   cell.className = 'is-breach';
+   cell.title = 'Grenzwertabweichung';
+   const mark = document.createElement('span');
+   mark.setAttribute('aria-hidden', 'true');
+   mark.textContent = '⚠ ';
+   cell.append(mark);
+  }
+  cell.append(document.createTextNode(value.text ?? ''));
+  return;
+ }
+ cell.textContent = value ?? '';
+ if (value === 'fehlt') cell.className = 'is-missing';
 }
 
 function roundLabel(round) {
@@ -1101,8 +1119,71 @@ function renderWaterRound(host, current, data) {
  host.append(card);
 }
 
+const waterHistoryViewKey = 'tageswerk-water-history-view';
+const waterHistoryHeaders = ['Datum', 'Uhrzeit', 'Becken', 'Freies Chlor', 'Gebundenes Chlor', 'pH-Wert', 'Wassertemperatur', 'Mitarbeiter', 'Grenzwertstatus'];
+
+function waterHistoryView() {
+ try {
+  return localStorage.getItem(waterHistoryViewKey) === 'time' ? 'time' : 'pool';
+ } catch (error) {
+  return 'pool';
+ }
+}
+
+function storeWaterHistoryView(view) {
+ try {
+  localStorage.setItem(waterHistoryViewKey, view === 'time' ? 'time' : 'pool');
+ } catch (error) {
+  return;
+ }
+}
+
+function historyReadingText(reading) {
+ return reading && String(reading.value ?? '') !== '' ? `${reading.value}${reading.unit ? ` ${reading.unit}` : ''}` : '';
+}
+
+function historyTable(rows) {
+ const table = document.createElement('table');
+ table.className = 'water-table';
+ const head = document.createElement('tr');
+ for (const label of waterHistoryHeaders) {
+  const cell = document.createElement('th');
+  cell.scope = 'col';
+  cell.textContent = label;
+  head.append(cell);
+ }
+ table.append(head);
+ for (const row of rows) {
+  const line = document.createElement('tr');
+  const plain = value => {
+   const cell = document.createElement('td');
+   cell.textContent = value ?? '';
+   return cell;
+  };
+  const readingCell = reading => {
+   const cell = document.createElement('td');
+   writeWaterCell(cell, waterReadingOutside(reading) ? {text: historyReadingText(reading), breach: true} : historyReadingText(reading));
+   return cell;
+  };
+  line.append(
+   plain(row.date),
+   plain(row.time),
+   plain(row.poolName),
+   readingCell(row.values?.free_chlorine),
+   readingCell(row.values?.combined_chlorine),
+   readingCell(row.values?.ph),
+   readingCell(row.values?.temperature),
+   plain(row.recordedName),
+   plain(row.limitStatus)
+  );
+  table.append(line);
+ }
+ return table;
+}
+
 function renderWaterHistory(host, current, data, visible) {
  const wrap = document.createElement('section');
+ wrap.id = 'water-history';
  wrap.className = 'water-history';
  const heading = document.createElement('h3');
  heading.textContent = 'Messwertübersicht';
@@ -1115,6 +1196,22 @@ function renderWaterHistory(host, current, data, visible) {
  const personOptions = [{value: '', label: 'Alle Mitarbeiter'}].concat(people.map(([id, name]) => ({value: id, label: name})));
  const poolFilter = select(poolOptions, '');
  const personFilter = select(personOptions, '');
+ const viewBar = document.createElement('div');
+ viewBar.className = 'water-view-toggle';
+ viewBar.setAttribute('role', 'group');
+ viewBar.setAttribute('aria-label', 'Darstellung der Messwerte');
+ const poolButton = document.createElement('button');
+ const timeButton = document.createElement('button');
+ for (const [control, view, label] of [[poolButton, 'pool', 'Nach Becken'], [timeButton, 'time', 'Nach Uhrzeit']]) {
+  control.type = 'button';
+  control.className = 'secondary';
+  control.textContent = label;
+  control.addEventListener('click', () => {
+   storeWaterHistoryView(view);
+   paint();
+  });
+  viewBar.append(control);
+ }
  const tableHost = document.createElement('div');
  const exportButton = document.createElement('button');
  exportButton.type = 'button';
@@ -1122,6 +1219,9 @@ function renderWaterHistory(host, current, data, visible) {
  exportButton.textContent = 'Messwerte als CSV exportieren';
  const paint = () => {
   const rows = waterHistoryRows({...data, waterChecks: visible.checks}, current.id, {from: from.value, to: to.value, poolId: poolFilter.value, recordedBy: personFilter.value});
+  const view = waterHistoryView();
+  poolButton.setAttribute('aria-pressed', view === 'pool' ? 'true' : 'false');
+  timeButton.setAttribute('aria-pressed', view === 'time' ? 'true' : 'false');
   exportButton.disabled = !rows.length;
   exportButton.onclick = () => downloadWaterCsv(waterHistoryCsv(rows), 'Wasserhygiene.csv');
   tableHost.replaceChildren();
@@ -1132,28 +1232,18 @@ function renderWaterHistory(host, current, data, visible) {
    tableHost.append(empty);
    return;
   }
-  const table = document.createElement('table');
-  const head = document.createElement('tr');
-  for (const label of ['Datum', 'Uhrzeit', 'Becken', 'Freies Chlor', 'Gebundenes Chlor', 'pH-Wert', 'Wassertemperatur', 'Mitarbeiter', 'Grenzwertstatus']) {
-   const cell = document.createElement('th');
-   cell.textContent = label;
-   head.append(cell);
+  if (view === 'time') {
+   tableHost.append(historyTable(rows));
+   return;
   }
-  table.append(head);
-  for (const row of rows) {
-   const line = document.createElement('tr');
-   const amount = reading => reading?.value ? `${reading.value}${reading.unit ? ` ${reading.unit}` : ''}` : '';
-   for (const value of [row.date, row.time, row.poolName, amount(row.values.free_chlorine), amount(row.values.combined_chlorine), amount(row.values.ph), amount(row.values.temperature), row.recordedName, row.limitStatus]) {
-    const cell = document.createElement('td');
-    cell.textContent = value;
-    line.append(cell);
-   }
-   table.append(line);
+  for (const group of waterHistoryByPool(rows)) {
+   const title = document.createElement('h4');
+   title.textContent = group.poolName;
+   tableHost.append(title, historyTable(group.rows));
   }
-  tableHost.append(table);
  };
  for (const control of [from, to, poolFilter, personFilter]) control.addEventListener('change', paint);
- wrap.append(heading, labeled('Von', from), labeled('Bis', to), labeled('Becken', poolFilter), labeled('Mitarbeiter', personFilter), exportButton, tableHost);
+ wrap.append(heading, labeled('Von', from), labeled('Bis', to), labeled('Becken', poolFilter), labeled('Mitarbeiter', personFilter), exportButton, viewBar, tableHost);
  paint();
  host.append(wrap);
 }
@@ -1227,9 +1317,11 @@ function renderWater(host, current) {
   ['Becken', 'Temperatur', 'pH-Wert', 'Freies Chlor', 'Gebundenes Chlor', 'Letzte Messung', 'Status'],
   overview.map(item => {
    const status = facilityStatus && !String(item.status).startsWith('Grenzwert') ? facilityStatus : item.status;
-   return history
-    ? [item.poolName, item.values.temperature, item.values.ph, item.values.free_chlorine, item.values.combined_chlorine, item.measuredLabel, status]
-    : [item.poolName, 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', 'nicht sichtbar', status];
+   const shown = code => {
+    const text = history ? item.values[code] : 'nicht sichtbar';
+    return history && item.breached?.includes(code) && text !== 'fehlt' ? {text, breach: true} : text;
+   };
+   return [item.poolName, shown('temperature'), shown('ph'), shown('free_chlorine'), shown('combined_chlorine'), history ? item.measuredLabel : 'nicht sichtbar', status];
   })
  ));
  renderWaterDay(host, current, data, nowIso);
@@ -1346,6 +1438,10 @@ function renderWater(host, current) {
    ? `Offene Warnung: ${name} ${alert.value}${unit}. Quittierung ist keine Behebung.`
    : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.acknowledgementNote}. Die Abweichung gilt damit nicht als behoben.`;
   row.append(line);
+  const optional = document.createElement('p');
+  optional.className = 'help';
+  optional.textContent = 'Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.';
+  row.append(optional);
   for (const measure of visible.measures.filter(item => item.alertId === alert.id)) {
    const measureLine = document.createElement('p');
    measureLine.className = 'help';
@@ -1354,7 +1450,7 @@ function renderWater(host, current) {
   }
   const measure = input();
   measure.placeholder = 'Durchgeführte Maßnahme';
-  row.append(labeled('Maßnahme', measure));
+  row.append(labeled('Maßnahme (freiwillig)', measure));
   row.append(button('Maßnahme speichern', 'secondary', () => commit(() => saveWaterMeasure(database(), bundle(), alert.id, measure.value, actor(), new Date().toISOString(), context()))));
   row.append(button('Wiederholungsmessung', 'secondary', () => {
    followUpAlertId = alert.id;
@@ -1364,7 +1460,7 @@ function renderWater(host, current) {
   if (alert.status !== 'open') continue;
   const acknowledgement = input();
   acknowledgement.placeholder = 'Kenntnisnahme, keine Behebung';
-  row.append(labeled('Quittierung', acknowledgement));
+  row.append(labeled('Quittierung (freiwillig)', acknowledgement));
   row.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
  }
  host.append(row);

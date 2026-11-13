@@ -503,12 +503,32 @@ export function waterMeasurementCsv(bundle, facilityId) {
  return lines.join('\r\n');
 }
 
-function readingOutside(reading) {
+export function waterReadingOutside(reading) {
  const value = Number(reading?.value);
  if (!Number.isFinite(value)) return false;
  const below = reading?.minLimit != null && reading.minLimit !== '' && value < Number(reading.minLimit);
  const above = reading?.maxLimit != null && reading.maxLimit !== '' && value > Number(reading.maxLimit);
  return below || above;
+}
+
+function readingOutside(reading) {
+ return waterReadingOutside(reading);
+}
+
+export function waterHistoryByPool(rows) {
+ const groups = [];
+ const index = new Map();
+ for (const row of rows || []) {
+  const key = row.poolId || row.poolName || '';
+  let group = index.get(key);
+  if (!group) {
+   group = {poolId: row.poolId || '', poolName: row.poolName || 'Becken', rows: []};
+   index.set(key, group);
+   groups.push(group);
+  }
+  group.rows.push(row);
+ }
+ return groups.sort((left, right) => String(left.poolName).localeCompare(String(right.poolName), 'de'));
 }
 
 export function waterHistoryRows(bundle, facilityId, filters = {}) {

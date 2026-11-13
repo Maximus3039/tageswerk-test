@@ -43,7 +43,7 @@ import {
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {berlinDay, berlinInstant, emptyOperations, materialStock, operationMetrics, waterControlState, waterDayRounds, waterFacilityPlan, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterRowsForMember} from '../../js/operations.js';
+import {berlinDay, berlinInstant, emptyOperations, materialStock, operationMetrics, waterControlState, waterDayRounds, waterFacilityPlan, waterHistoryByPool, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterReadingOutside, waterRowsForMember} from '../../js/operations.js';
 import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
@@ -2163,4 +2163,39 @@ test('Eine Zusatzkontrolle wählt Becken aus und behält eingegebene Werte', asy
  assert.match(screen, /round\.kind === 'extra' \? waterPoolChoices/);
  const styles = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
  assert.match(styles, /\.water-pool-choices/);
+});
+
+test('Messwerte lassen sich nach Becken gruppieren und nur mit gespeicherten Grenzen markieren', () => {
+ assert.equal(waterReadingOutside({value: '8.20', minLimit: '6.50', maxLimit: '7.60'}), true);
+ assert.equal(waterReadingOutside({value: '0.10', minLimit: '0.30', maxLimit: '0.60'}), true);
+ assert.equal(waterReadingOutside({value: '7.20', minLimit: '6.50', maxLimit: '7.60'}), false);
+ assert.equal(waterReadingOutside({value: '40', minLimit: null, maxLimit: null}), false);
+ assert.equal(waterReadingOutside({value: '40', minLimit: '', maxLimit: ''}), false);
+ assert.equal(waterReadingOutside({value: '5', minLimit: null, maxLimit: '4'}), true);
+ assert.equal(waterReadingOutside(null), false);
+ const rows = [
+  {poolId: 'b', poolName: 'Schwimmerbecken', measuredAt: '2', values: {ph: {value: '7.20'}}},
+  {poolId: 'a', poolName: 'Kinderbecken', measuredAt: '1', values: {ph: {value: '8.20'}}},
+  {poolId: 'b', poolName: 'Schwimmerbecken', measuredAt: '0', values: {ph: {value: '7.10'}}}
+ ];
+ const groups = waterHistoryByPool(rows);
+ assert.deepEqual(groups.map(group => group.poolName), ['Kinderbecken', 'Schwimmerbecken']);
+ assert.deepEqual(groups[1].rows.map(row => row.measuredAt), ['2', '0']);
+ assert.equal(rows[0].values.ph.value, '7.20');
+ const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ assert.match(screen, /Nach Becken/);
+ assert.match(screen, /Nach Uhrzeit/);
+ assert.match(screen, /tageswerk-water-history-view/);
+ assert.match(screen, /localStorage.getItem\(waterHistoryViewKey\) === 'time' \? 'time' : 'pool'/);
+ assert.match(screen, /waterReadingOutside\(reading\)/);
+ assert.match(screen, /Maßnahme \(freiwillig\)/);
+ assert.match(screen, /Quittierung \(freiwillig\)/);
+ assert.match(screen, /Die Messung ist gespeichert/);
+ assert.match(screen, /Offene Warnung:/);
+ const controls = readFileSync(new URL('../../js/operations-controls.js', import.meta.url), 'utf8');
+ assert.match(controls, /status: 'open'/);
+ assert.match(controls, /Ohne Quittierung bleibt die Warnung offen/);
+ assert.doesNotMatch(controls, /status: 'acknowledged',\s*acknowledgedBy: null/);
+ const styles = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
+ assert.match(styles, /td\.is-breach\{background:#e07a1f;color:#1a1208/);
 });
