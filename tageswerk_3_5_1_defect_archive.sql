@@ -3,6 +3,9 @@
 -- Dieses Skript ändert keine bestehenden Mängel, Arbeitsvermerke oder Messdaten.
 -- Die Strukturprüfung liest die vorhandene Tabelle und stoppt, wenn eine erwartete Spalte fehlt.
 -- Bestehende RLS-Richtlinien werden nicht ersetzt. Der Trigger schützt archivierte Zeilen zusätzlich.
+-- company_admin gilt nur mit facility_id IS NULL für die ganze Organisation, wie memberships_role_scope_check.
+-- facility_manager gilt nur für die eigene facility_id. Mitarbeiter und Techniker archivieren nicht.
+-- Ein Tabellenrecht UPDATE bleibt absichtlich bestehen. Der Entzug einzelner Spalten hebt es in PostgreSQL nicht auf.
 
 BEGIN;
 
@@ -174,8 +177,20 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  old_body := pg_catalog.to_jsonb(OLD) - 'archived_at' - 'archived_by';
-  new_body := pg_catalog.to_jsonb(NEW) - 'archived_at' - 'archived_by';
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL THEN
+      RAISE EXCEPTION 'Archivierung ist nur über die vorgesehene Funktion möglich.';
+    END IF;
+    IF NEW.status = 'resolved' THEN
+      NEW.resolved_at := pg_catalog.now();
+    ELSIF NEW.resolved_at IS NOT NULL THEN
+      NEW.resolved_at := NULL;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  old_body := pg_catalog.to_jsonb(OLD) - 'archived_at' - 'archived_by' - 'resolved_at';
+  new_body := pg_catalog.to_jsonb(NEW) - 'archived_at' - 'archived_by' - 'resolved_at';
 
   IF OLD.archived_at IS NOT NULL THEN
     IF flag IS DISTINCT FROM 'restore' THEN
@@ -184,7 +199,9 @@ BEGIN
     IF NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL THEN
       RAISE EXCEPTION 'Die Wiederherstellung entfernt nur die Archivierung.';
     END IF;
-    IF old_body IS DISTINCT FROM new_body THEN
+    IF NEW.change_note IS DISTINCT FROM OLD.change_note
+       OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
+       OR old_body IS DISTINCT FROM new_body THEN
       RAISE EXCEPTION 'Die Wiederherstellung verändert keine gespeicherten Angaben.';
     END IF;
     RETURN NEW;
@@ -201,13 +218,18 @@ BEGIN
     IF NEW.archived_at IS NULL OR NEW.archived_by IS DISTINCT FROM auth.uid() THEN
       RAISE EXCEPTION 'Die Archivierung braucht Zeitpunkt und die angemeldete Person.';
     END IF;
-    IF old_body IS DISTINCT FROM new_body THEN
+    IF NEW.change_note IS DISTINCT FROM OLD.change_note
+       OR NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
+       OR old_body IS DISTINCT FROM new_body THEN
       RAISE EXCEPTION 'Die Archivierung verändert keine gespeicherten Angaben.';
     END IF;
-  ELSIF NEW.status = 'resolved'
-    AND OLD.status IS DISTINCT FROM 'resolved'
-    AND NEW.resolved_at IS NOT DISTINCT FROM OLD.resolved_at THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.status = 'resolved' AND OLD.status IS DISTINCT FROM 'resolved' THEN
     NEW.resolved_at := pg_catalog.now();
+  ELSIF NEW.resolved_at IS DISTINCT FROM OLD.resolved_at THEN
+    RAISE EXCEPTION 'Der Abschlusszeitpunkt kann nicht direkt geändert werden.';
   END IF;
   RETURN NEW;
 END;
@@ -215,7 +237,7 @@ $guard$;
 
 DROP TRIGGER IF EXISTS aa_defects_archive_guard ON public.defects;
 CREATE TRIGGER aa_defects_archive_guard
-  BEFORE UPDATE OR DELETE ON public.defects
+  BEFORE INSERT OR UPDATE OR DELETE ON public.defects
   FOR EACH ROW
   EXECUTE FUNCTION public.tageswerk_defect_archive_guard();
 
@@ -236,6 +258,14 @@ BEGIN
   WHERE id = p_defect_id
   FOR UPDATE;
   IF NOT FOUND THEN
+    RAISE EXCEPTION 'Mangel nicht gefunden.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.facilities AS facility
+    WHERE facility.id = current_row.facility_id
+      AND facility.organization_id = current_row.organization_id
+  ) THEN
     RAISE EXCEPTION 'Mangel nicht gefunden.';
   END IF;
   IF NOT public.tageswerk_defect_archive_allowed(current_row.organization_id, current_row.facility_id) THEN
@@ -262,6 +292,10 @@ BEGIN
   INSERT INTO public.defect_events (defect_id, action, note, actor_id)
   VALUES (p_defect_id, 'Gesehen und archiviert', 'Gesehen und archiviert.', auth.uid());
   PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+EXCEPTION
+  WHEN OTHERS THEN
+    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+    RAISE;
 END;
 $archive$;
 
@@ -309,6 +343,10 @@ BEGIN
   SELECT count(*)::integer INTO archived_count FROM logged;
   PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
   RETURN archived_count;
+EXCEPTION
+  WHEN OTHERS THEN
+    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+    RAISE;
 END;
 $bulk$;
 
@@ -331,6 +369,14 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Mangel nicht gefunden.';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.facilities AS facility
+    WHERE facility.id = current_row.facility_id
+      AND facility.organization_id = current_row.organization_id
+  ) THEN
+    RAISE EXCEPTION 'Mangel nicht gefunden.';
+  END IF;
   IF NOT public.tageswerk_defect_archive_allowed(current_row.organization_id, current_row.facility_id) THEN
     RAISE EXCEPTION 'Nur Betriebsleitung und Geschäftsführung dürfen archivierte Mängel zurückholen.';
   END IF;
@@ -351,13 +397,16 @@ BEGIN
   INSERT INTO public.defect_events (defect_id, action, note, actor_id)
   VALUES (p_defect_id, 'Aus Archiv zurückgeholt', 'Aus Archiv zurückgeholt.', auth.uid());
   PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+EXCEPTION
+  WHEN OTHERS THEN
+    PERFORM pg_catalog.set_config('tageswerk.defect_archive', '', true);
+    RAISE;
 END;
 $restore$;
 
-REVOKE UPDATE (archived_at, archived_by) ON public.defects FROM PUBLIC, anon, authenticated;
-
 REVOKE ALL ON FUNCTION public.tageswerk_defect_archive_allowed(uuid, uuid) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.tageswerk_defect_archive_guard() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_defect_archive_guard() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.tageswerk_defect_archive_guard() TO authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_archive_defect(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_archive_closed_defects(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.tageswerk_restore_archived_defect(uuid) FROM PUBLIC, anon;

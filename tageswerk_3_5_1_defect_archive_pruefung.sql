@@ -47,21 +47,22 @@ FROM (
       WHEN guard.oid IS NOT NULL
        AND guard.tgtype & 1 = 1
        AND guard.tgtype & 2 = 2
-       AND guard.tgtype & 4 = 0
+       AND guard.tgtype & 4 = 4
        AND guard.tgtype & 8 = 8
        AND guard.tgtype & 16 = 16
        AND guard.tgfoid = guard_fn.oid
+       AND guard_fn.prosecdef IS FALSE
        AND position('Archivierte Mängel können nicht verändert werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierte Mängel können nicht gelöscht werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Archivierung ist nur über die vorgesehene Funktion möglich.' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('flag IS DISTINCT FROM ''restore''' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND position('Die Wiederherstellung verändert keine gespeicherten Angaben.' IN pg_get_functiondef(guard_fn.oid)) > 0
-       AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_at', 'UPDATE')
-       AND NOT has_column_privilege('authenticated', 'public.defects', 'archived_by', 'UPDATE')
+       AND position('NEW.change_note IS DISTINCT FROM OLD.change_note' IN pg_get_functiondef(guard_fn.oid)) > 0
        AND has_column_privilege('authenticated', 'public.defects', 'archived_at', 'SELECT')
        AND has_column_privilege('authenticated', 'public.defects', 'status', 'UPDATE')
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Ein Trigger vor Änderung und Löschung sperrt archivierte Mängel. Die Archivspalten sind für die Anmeldung nicht direkt schreibbar, der Status bleibt es.'
+    'Ein Trigger vor Einfügen, Änderung und Löschung sperrt archivierte Mängel. Die Wiederherstellung läuft nur mit dem internen Kennzeichen. Lesen und die bisherige Statusbearbeitung bleiben möglich.'
   FROM (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
   LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
   LEFT JOIN pg_trigger AS guard ON guard.tgrelid = 'public.defects'::regclass
@@ -81,10 +82,25 @@ FROM (
        AND position('company_admin' IN pg_get_functiondef(allowed.oid)) > 0
        AND position('facility_id IS NULL' IN pg_get_functiondef(allowed.oid)) > 0
        AND position('facility_manager' IN pg_get_functiondef(allowed.oid)) > 0
+       AND position('membership.is_active IS TRUE' IN pg_get_functiondef(allowed.oid)) > 0
+       AND position('membership.organization_id = p_organization_id' IN pg_get_functiondef(allowed.oid)) > 0
+       AND position('employee' IN pg_get_functiondef(allowed.oid)) = 0
+       AND position('technician' IN pg_get_functiondef(allowed.oid)) = 0
        AND position('defect.facility_id = p_facility_id' IN pg_get_functiondef(archive_many.oid)) > 0
        AND position('defect.organization_id = facility_org' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('defect.status = ''resolved''' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('defect.archived_at IS NULL' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(archive_many.oid)) > 0
+       AND position('INSERT INTO public.defect_events' IN pg_get_functiondef(restore_one.oid)) > 0
        AND position('Aus Archiv zurückgeholt' IN pg_get_functiondef(restore_one.oid)) > 0
        AND position('Gesehen und archiviert' IN pg_get_functiondef(archive_one.oid)) > 0
+       AND position('UPDATE public.defect_events' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('UPDATE public.defect_events' IN pg_get_functiondef(restore_one.oid)) = 0
+       AND position('DELETE FROM public.defect_events' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('change_note' IN pg_get_functiondef(archive_one.oid)) = 0
+       AND position('change_note' IN pg_get_functiondef(archive_many.oid)) = 0
+       AND position('change_note' IN pg_get_functiondef(restore_one.oid)) = 0
        AND position('water_checks' IN pg_get_functiondef(restore_one.oid)) = 0
        AND position('SET status' IN pg_get_functiondef(restore_one.oid)) = 0
        AND position('SET title' IN pg_get_functiondef(restore_one.oid)) = 0
@@ -92,7 +108,7 @@ FROM (
        AND position('SET change_note' IN pg_get_functiondef(restore_one.oid)) = 0
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Einzelarchivierung, Sammelarchivierung und Wiederherstellung laufen als definierte Funktionen mit leerem Suchpfad. Die Sammelarchivierung bleibt auf den übergebenen Betrieb begrenzt.'
+    'Die Funktionen prüfen aktive Betriebsleitung und organisationsweite Geschäftsführung. Archivierung und Wiederherstellung schreiben einen neuen Verlaufseintrag und ändern keine Arbeitsvermerke. Die Sammelarchivierung bleibt auf abgeschlossene Mängel des genannten Betriebs begrenzt.'
   FROM (SELECT to_regprocedure('public.tageswerk_archive_defect(uuid)') AS oid) AS one_lookup
   CROSS JOIN (SELECT to_regprocedure('public.tageswerk_archive_closed_defects(uuid)') AS oid) AS many_lookup
   CROSS JOIN (SELECT to_regprocedure('public.tageswerk_restore_archived_defect(uuid)') AS oid) AS restore_lookup
@@ -110,12 +126,12 @@ FROM (
        AND NOT has_function_privilege('anon', 'public.tageswerk_archive_defect(uuid)', 'EXECUTE')
        AND NOT has_function_privilege('anon', 'public.tageswerk_archive_closed_defects(uuid)', 'EXECUTE')
        AND NOT has_function_privilege('anon', 'public.tageswerk_restore_archived_defect(uuid)', 'EXECUTE')
-       AND NOT has_function_privilege('authenticated', 'public.tageswerk_defect_archive_guard()', 'EXECUTE')
-       AND NOT has_function_privilege('authenticated', 'public.tageswerk_defect_archive_allowed(uuid,uuid)', 'EXECUTE')
+       AND has_function_privilege('authenticated', 'public.tageswerk_defect_archive_guard()', 'EXECUTE')
        AND NOT has_function_privilege('anon', 'public.tageswerk_defect_archive_guard()', 'EXECUTE')
+       AND NOT has_function_privilege('authenticated', 'public.tageswerk_defect_archive_allowed(uuid,uuid)', 'EXECUTE')
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Die drei Archivfunktionen sind für angemeldete Benutzer aufrufbar. Die interne Prüfung und der Schutztrigger sind es nicht. Anonyme Aufrufe sind gesperrt.'
+    'Die drei Archivfunktionen und der Schutztrigger sind für angemeldete Benutzer aufrufbar. Die interne Rollenprüfung und anonyme Aufrufe sind gesperrt. Ohne Ausführungsrecht auf den Trigger würde jede Mangeländerung scheitern.'
   UNION ALL
   SELECT 60, 'Bestehende Bearbeitung bleibt unverändert',
     CASE
@@ -130,5 +146,19 @@ FROM (
     'employee_update_assigned_defect schreibt weiterhin nur Status und Arbeitsvermerk und kennt das Archiv nicht.'
   FROM (SELECT to_regprocedure('public.employee_update_assigned_defect(uuid,text,text)') AS oid) AS employee_lookup
   LEFT JOIN pg_proc AS employee ON employee.oid = employee_lookup.oid
+  UNION ALL
+  SELECT 70, 'Abschlusszeitpunkt nur beim neuen Abschluss',
+    CASE
+      WHEN guard_fn.oid IS NOT NULL
+       AND position('NEW.resolved_at := pg_catalog.now()' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('OLD.status IS DISTINCT FROM ''resolved''' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('Der Abschlusszeitpunkt kann nicht direkt geändert werden.' IN pg_get_functiondef(guard_fn.oid)) > 0
+       AND position('UPDATE public.defects' IN pg_get_functiondef(guard_fn.oid)) = 0
+       AND position('SET resolved_at = created_at' IN pg_get_functiondef(guard_fn.oid)) = 0
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'resolved_at setzt der Trigger beim Übergang auf abgeschlossen. Ein direkter Zeitpunkt wird abgewiesen. Bestehende Zeilen bekommen dadurch keinen nachträglichen Wert.'
+  FROM (SELECT to_regprocedure('public.tageswerk_defect_archive_guard()') AS oid) AS guard_lookup
+  LEFT JOIN pg_proc AS guard_fn ON guard_fn.oid = guard_lookup.oid
 ) AS checks
 ORDER BY sortierung;

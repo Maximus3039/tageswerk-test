@@ -102,7 +102,13 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(sql, /Archivierte Mängel können nicht gelöscht werden/);
  assert.match(sql, /Archivierung ist nur über die vorgesehene Funktion möglich/);
  assert.match(sql, /Aus Archiv zurückgeholt/);
- assert.match(sql, /REVOKE UPDATE \(archived_at, archived_by\) ON public\.defects FROM PUBLIC, anon, authenticated/);
+ assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_defect_archive_guard\(\) TO authenticated/);
+ assert.match(sql, /REVOKE ALL ON FUNCTION public\.tageswerk_defect_archive_guard\(\) FROM PUBLIC, anon;/);
+ assert.equal(sql.includes('tageswerk_defect_archive_guard() FROM PUBLIC, anon, authenticated'), false);
+ assert.match(sql, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
+ assert.match(sql, /NEW\.change_note IS DISTINCT FROM OLD\.change_note/);
+ assert.match(sql, /BEFORE INSERT OR UPDATE OR DELETE/);
+ assert.equal(sql.includes('UPDATE public.defects SET resolved_at'), false);
  assert.doesNotMatch(sql, /UPDATE public\.water_checks|UPDATE public\.defect_events SET/);
  assert.match(check, /SELECT pruefung, status, details/);
  assert.doesNotMatch(check, /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|REVOKE|TRUNCATE)\b/im);
@@ -116,4 +122,50 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.match(app, /Alle abgeschlossenen Mängel archivieren/);
  assert.match(app, /Aus Archiv zurückholen/);
  assert.equal(app.includes('archived_at:'), false);
+ assert.match(check, /has_function_privilege\('authenticated', 'public\.tageswerk_defect_archive_guard\(\)', 'EXECUTE'\)/);
+ assert.match(check, /INSERT INTO public\.defect_events/);
+ assert.match(check, /Der Abschlusszeitpunkt kann nicht direkt geändert werden/);
+ assert.match(check, /defect\.status = ''resolved''/);
+ assert.doesNotMatch(check, /NOT has_column_privilege\('authenticated', 'public\.defects', 'archived_at', 'UPDATE'\)/);
+});
+
+function applyStoredChange(previous, next, flag) {
+ if (previous.archived_at) {
+  if (flag !== 'restore' || next.archived_at || next.archived_by) throw new Error('geschützt');
+  if (next.change_note !== previous.change_note || next.status !== previous.status || next.resolved_at !== previous.resolved_at || next.title !== previous.title) throw new Error('vermerk');
+  return {...previous, archived_at: null, archived_by: null};
+ }
+ if ((next.archived_at || next.archived_by) && flag !== 'archive') throw new Error('nur funktion');
+ if (flag === 'archive') {
+  if (previous.status !== 'resolved' || next.status !== 'resolved' || next.change_note !== previous.change_note || next.resolved_at !== previous.resolved_at) throw new Error('archiv');
+  return {...previous, archived_at: 'server', archived_by: 'leitung'};
+ }
+ if (next.status === 'resolved' && previous.status !== 'resolved') return {...next, resolved_at: 'server'};
+ if (next.resolved_at !== previous.resolved_at) throw new Error('zeitpunkt');
+ return {...previous, ...next, resolved_at: previous.resolved_at};
+}
+
+test('Archivschutz, Verlauf und Abschlusszeitpunkt folgen den Datenbankregeln', () => {
+ const historical = {status: 'resolved', resolved_at: null, change_note: 'Pumpe geprüft', title: 'Pumpe', archived_at: null, archived_by: null};
+ const noted = applyStoredChange(historical, {...historical, change_note: 'Pumpe geprüft', assigned_to: 'person'}, null);
+ assert.equal(noted.resolved_at, null);
+ assert.equal(noted.change_note, 'Pumpe geprüft');
+ const closed = applyStoredChange({...historical, status: 'in_progress', change_note: null}, {...historical, status: 'resolved', resolved_at: 'gefälscht', change_note: 'erledigt'}, null);
+ assert.equal(closed.resolved_at, 'server');
+ assert.throws(() => applyStoredChange(historical, {...historical, resolved_at: 'nachgetragen'}, null));
+ const archived = applyStoredChange(historical, historical, 'archive');
+ assert.equal(archived.change_note, 'Pumpe geprüft');
+ assert.equal(archived.resolved_at, null);
+ assert.throws(() => applyStoredChange(archived, {...archived, title: 'geändert'}, null));
+ assert.throws(() => applyStoredChange(archived, {...archived, archived_at: null, archived_by: null}, null));
+ const restored = applyStoredChange(archived, {...archived, archived_at: null, archived_by: null}, 'restore');
+ assert.equal(restored.change_note, 'Pumpe geprüft');
+ assert.equal(restored.status, 'resolved');
+ const defects = [
+  {id: 'a', facility_id: 'fac-a', organization_id: 'org-a', status: 'resolved'},
+  {id: 'b', facility_id: 'fac-a', organization_id: 'org-a', status: 'open'},
+  {id: 'c', facility_id: 'fac-b', organization_id: 'org-a', status: 'resolved'},
+  {id: 'd', facility_id: 'fac-a', organization_id: 'org-b', status: 'resolved'}
+ ];
+ assert.deepEqual(defects.filter(defect => defect.facility_id === 'fac-a' && defect.organization_id === 'org-a' && defect.status === 'resolved' && !defect.archived_at).map(defect => defect.id), ['a']);
 });
