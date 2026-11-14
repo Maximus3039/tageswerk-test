@@ -293,23 +293,53 @@ export function latestWeatherReportLine() {
  return lastWeatherLine;
 }
 
+function paintNexusStatus(openCount, criticalCount, progressCount) {
+ const dateNode = el('nexus-date');
+ if (dateNode) {
+  dateNode.textContent = new Intl.DateTimeFormat('de-DE', {
+   timeZone: 'Europe/Berlin',
+   weekday: 'short',
+   day: '2-digit',
+   month: '2-digit',
+   year: 'numeric'
+  }).format(new Date());
+ }
+ const status = el('nexus-status');
+ if (!status) return;
+ status.classList.remove('status-ok', 'status-warn', 'status-alert', 'status-idle');
+ if (criticalCount > 0) {
+  status.textContent = `${criticalCount} kritisch`;
+  status.classList.add('status-alert');
+ } else if (openCount > 0 || progressCount > 0) {
+  status.textContent = `${openCount + progressCount} offen / laufend`;
+  status.classList.add('status-warn');
+ } else {
+  status.textContent = 'Keine kritischen Meldungen';
+  status.classList.add('status-ok');
+ }
+}
+
 export function renderDashboard() {
  if (!el('metric-open')) return;
  paintMobile();
  const selected = el('dashboard-facility').value;
  const data = state.cachedDefects.filter(item => selected === 'all' || item.facility_id === selected);
  const count = pred => data.filter(pred).length;
+ const openCount = count(item => item.status === 'open' && !item.archived_at);
+ const progressCount = count(item => item.status === 'in_progress' && !item.archived_at);
+ const criticalCount = count(item => item.priority === 'critical' && isActiveDefect(item));
  for (const [id, value] of [
-  ['open', count(item => item.status === 'open' && !item.archived_at)],
-  ['progress', count(item => item.status === 'in_progress' && !item.archived_at)],
+  ['open', openCount],
+  ['progress', progressCount],
   ['resolved', count(item => item.status === 'resolved' && !item.archived_at)],
   ['review', count(item => item.status === 'pending_review' && !item.archived_at)],
   ['mine', count(item => item.assigned_to === state.currentUser?.id && isActiveDefect(item))],
-  ['critical', count(item => item.priority === 'critical' && isActiveDefect(item))]
+  ['critical', criticalCount]
  ]) {
   const node = el('metric-' + id);
   if (node) node.textContent = value;
  }
+ paintNexusStatus(openCount, criticalCount, progressCount);
  dashRows('dash-mine', dashboardMineDefects(data, state.currentUser?.id), 'Keine offenen persönlichen Aufgaben.');
  dashRows('dash-recent', dashboardRecentDefects(data), 'Noch keine aktiven Mängel.');
  const facilities = el('dash-facilities');

@@ -12,7 +12,8 @@ async function openApp(page) {
 test('Login zeigt Marke und hält technische Hinweise hinter Details', async ({page}) => {
  await openApp(page);
  await expect(page.locator('.login-brand')).toBeVisible();
- await expect(page.locator('.login-slogan')).toContainText('Betriebsmanagement');
+ await expect(page.locator('.login-slogan')).toContainText('Dein Betrieb. Dein Überblick.');
+ await expect(page.locator('body')).toHaveClass(/nexus/);
  await expect(page.locator('#email')).toBeVisible();
  await expect(page.locator('#password')).toBeVisible();
  await expect(page.locator('#submit')).toBeVisible();

@@ -1,51 +1,79 @@
-/* Tageswerk 3.6.0 Designsystem – Tokens v2 */
+/* Tageswerk Nexus 3.6.0 – Design-Tokens */
 :root{
- --tw-bg:#070d16;
- --tw-bg-elevated:#0e1724;
- --tw-bg-card:#121c2c;
- --tw-bg-card-soft:#152235;
- --tw-bg-input:#0a1320;
- --tw-border:#24374d;
- --tw-border-strong:#35506b;
- --tw-text:#eaf2fa;
- --tw-text-muted:#8fa6bc;
- --tw-accent:#f0c94a;
+ /* Nexus primary */
+ --nexus-bg:#050910;
+ --nexus-bg-mid:#0a1422;
+ --nexus-bg-deep:#03060c;
+ --nexus-surface:rgba(14,24,40,.72);
+ --nexus-surface-strong:rgba(18,30,48,.88);
+ --nexus-border:rgba(90,150,220,.22);
+ --nexus-border-soft:rgba(90,150,220,.12);
+ --nexus-glow:rgba(56,160,255,.28);
+ --nexus-glow-soft:rgba(56,160,255,.12);
+ --nexus-accent:#f0c94a;
+ --nexus-accent-glow:rgba(240,201,74,.34);
+ --nexus-blue:#38a0ff;
+ --nexus-blue-bright:#6cbcff;
+ --nexus-text:#eaf3fb;
+ --nexus-text-muted:#8ea6bd;
+ --nexus-success:#63d39a;
+ --nexus-warning:#e8a65a;
+ --nexus-danger:#ef7f7a;
+ --nexus-grid:rgba(100,160,230,.045);
+ --nexus-radius:12px;
+ --nexus-radius-sm:7px;
+ --nexus-shadow:0 12px 32px rgba(0,0,0,.38);
+ --nexus-shadow-card:0 0 0 1px rgba(90,150,220,.14),0 10px 28px rgba(0,0,0,.34),inset 0 1px 0 rgba(180,220,255,.08);
+ --nexus-font:"Segoe UI","DIN Alternate","Helvetica Neue",Arial,sans-serif;
+ --nexus-font-display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
+ --nexus-touch:46px;
+ --nexus-motion:1;
+
+ /* Compatibility aliases (V2) */
+ --tw-bg:var(--nexus-bg);
+ --tw-bg-elevated:rgba(12,20,34,.92);
+ --tw-bg-card:var(--nexus-surface-strong);
+ --tw-bg-card-soft:rgba(16,28,46,.78);
+ --tw-bg-input:rgba(6,12,22,.92);
+ --tw-border:rgba(90,150,220,.24);
+ --tw-border-strong:rgba(90,150,220,.36);
+ --tw-text:var(--nexus-text);
+ --tw-text-muted:var(--nexus-text-muted);
+ --tw-accent:var(--nexus-accent);
  --tw-accent-soft:rgba(240,201,74,.14);
- --tw-accent-glow:rgba(240,201,74,.32);
- --tw-blue:#3d9bff;
- --tw-blue-bright:#62b0ff;
- --tw-blue-soft:rgba(61,155,255,.14);
- --tw-blue-glow:rgba(61,155,255,.3);
+ --tw-accent-glow:var(--nexus-accent-glow);
+ --tw-blue:var(--nexus-blue);
+ --tw-blue-bright:var(--nexus-blue-bright);
+ --tw-blue-soft:var(--nexus-glow-soft);
+ --tw-blue-glow:var(--nexus-glow);
  --tw-navy:#0a1a33;
- --tw-success:#63d39a;
- --tw-warning:#e8a65a;
- --tw-danger:#ef7f7a;
- --tw-radius-sm:6px;
- --tw-radius:10px;
+ --tw-success:var(--nexus-success);
+ --tw-warning:var(--nexus-warning);
+ --tw-danger:var(--nexus-danger);
+ --tw-radius-sm:var(--nexus-radius-sm);
+ --tw-radius:var(--nexus-radius);
  --tw-radius-lg:16px;
- --tw-shadow:0 8px 22px rgba(0,0,0,.28);
- --tw-shadow-glow:0 0 0 1px rgba(61,155,255,.2),0 10px 28px rgba(0,0,0,.35);
- --tw-font:"Segoe UI","DIN Alternate","Helvetica Neue",Arial,sans-serif;
- --tw-font-display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
+ --tw-shadow:var(--nexus-shadow);
+ --tw-shadow-glow:var(--nexus-shadow-card);
+ --tw-font:var(--nexus-font);
+ --tw-font-display:var(--nexus-font-display);
  --tw-space-1:4px;
  --tw-space-2:8px;
  --tw-space-3:12px;
  --tw-space-4:16px;
  --tw-space-5:20px;
  --tw-space-6:28px;
- --tw-touch:46px;
+ --tw-touch:var(--nexus-touch);
  --tw-header-h:64px;
  --tw-nav-h:60px;
+
  color-scheme:dark;
- font-family:var(--tw-font);
- background:
-  radial-gradient(900px 420px at 8% -8%,rgba(61,155,255,.16),transparent 55%),
-  radial-gradient(700px 380px at 100% 0%,rgba(240,201,74,.07),transparent 48%),
-  linear-gradient(180deg,#0b1524 0%,var(--tw-bg) 42%,#050910 100%);
- color:var(--tw-text);
+ font-family:var(--nexus-font);
+ color:var(--nexus-text);
+ background:var(--nexus-bg);
 }
 
 @media (prefers-reduced-motion:reduce){
- :root{--tw-motion:0}
+ :root{--nexus-motion:0}
  *,*::before,*::after{animation:none!important;transition:none!important}
 }
