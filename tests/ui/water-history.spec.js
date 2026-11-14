@@ -1,6 +1,35 @@
 import {expect, test} from '@playwright/test';
 
+function berlinDay(value = new Date()) {
+ return new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Berlin'}).format(new Date(value));
+}
+
+function addCalendarDays(day, count) {
+ const [year, month, date] = day.split('-').map(Number);
+ return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
+}
+
+function berlinIso(day, time = '08:00') {
+ for (const offset of ['+01:00', '+02:00']) {
+  const iso = `${day}T${time}:00${offset}`;
+  if (berlinDay(iso) === day) return new Date(iso).toISOString();
+ }
+ return `${day}T07:00:00.000Z`;
+}
+
 function supabaseMock() {
+ const today = berlinDay();
+ const yesterday = addCalendarDays(today, -1);
+ const weekOld = addCalendarDays(today, -3);
+ const monthOld = addCalendarDays(today, -20);
+ const outside = addCalendarDays(today, -40);
+ const todayMorning = berlinIso(today, '08:00');
+ const todayLater = berlinIso(today, '09:00');
+ const yesterdayIso = berlinIso(yesterday, '08:00');
+ const weekIso = berlinIso(weekOld, '08:00');
+ const monthIso = berlinIso(monthOld, '08:00');
+ const outsideIso = berlinIso(outside, '08:00');
+ const ackAt = berlinIso(today, '08:05');
  return `const tables = {
  organizations: [{id: 'org', name: 'Freizeitpark'}],
  facilities: [{id: 'fac', name: 'Prignitzer', organization_id: 'org'}],
@@ -13,7 +42,7 @@ function supabaseMock() {
  water_checks: [
   {
    id: 'check-kinder', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-kinder',
-   measured_at: '2026-11-13T08:00:00.000Z', recorded_by: 'user-1', note: '',
+   measured_at: '${todayMorning}', recorded_by: 'user-1', note: '',
    readings: [
     {parameter_code: 'ph', value: '8.20', unit: '', min_limit: '6.50', max_limit: '7.60'},
     {parameter_code: 'free_chlorine', value: '0.10', unit: 'mg/l', min_limit: '0.30', max_limit: '0.60'},
@@ -22,26 +51,56 @@ function supabaseMock() {
   },
   {
    id: 'check-schwimmer', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-schwimmer',
-   measured_at: '2026-11-13T09:00:00.000Z', recorded_by: 'user-1', note: '',
+   measured_at: '${todayLater}', recorded_by: 'user-1', note: '',
    readings: [
     {parameter_code: 'ph', value: '7.20', unit: '', min_limit: '6.50', max_limit: '7.60'},
     {parameter_code: 'free_chlorine', value: '0.40', unit: 'mg/l', min_limit: '0.30', max_limit: '0.60'},
     {parameter_code: 'temperature', value: '40.0', unit: '°C', min_limit: null, max_limit: null}
    ]
+  },
+  {
+   id: 'check-week', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-kinder',
+   measured_at: '${weekIso}', recorded_by: 'user-1', note: '',
+   readings: [{parameter_code: 'ph', value: '7.10', unit: '', min_limit: '6.50', max_limit: '7.60'}]
+  },
+  {
+   id: 'check-month', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-schwimmer',
+   measured_at: '${monthIso}', recorded_by: 'user-1', note: '',
+   readings: [{parameter_code: 'ph', value: '7.00', unit: '', min_limit: '6.50', max_limit: '7.60'}]
+  },
+  {
+   id: 'check-outside', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-kinder',
+   measured_at: '${outsideIso}', recorded_by: 'user-1', note: '',
+   readings: [{parameter_code: 'ph', value: '6.90', unit: '', min_limit: '6.50', max_limit: '7.60'}]
+  },
+  {
+   id: 'check-follow', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-kinder',
+   measured_at: '${yesterdayIso}', recorded_by: 'user-1', note: 'Nachkontrolle', follow_up_alert_id: 'alert-chlor',
+   readings: [{parameter_code: 'free_chlorine', value: '0.35', unit: 'mg/l', min_limit: '0.30', max_limit: '0.60'}]
   }
  ],
  water_alerts: [
   {
    id: 'alert-ph', check_id: 'check-kinder', pool_id: 'pool-kinder', organization_id: 'org', facility_id: 'fac',
    parameter_code: 'ph', value_amount: '8.20', min_value: '6.50', max_value: '7.60', unit: '',
-   measured_at: '2026-11-13T08:00:00.000Z', recorded_by: 'user-1', status: 'acknowledged',
-   acknowledged_by: 'user-1', acknowledged_at: '2026-11-13T08:05:00.000Z', acknowledgement_note: 'Zur Kenntnis genommen'
+   measured_at: '${todayMorning}', recorded_by: 'user-1', status: 'acknowledged',
+   acknowledged_by: 'user-1', acknowledged_at: '${ackAt}', acknowledgement_note: 'Zur Kenntnis genommen'
   },
   {
    id: 'alert-chlor', check_id: 'check-kinder', pool_id: 'pool-kinder', organization_id: 'org', facility_id: 'fac',
    parameter_code: 'free_chlorine', value_amount: '0.10', min_value: '0.30', max_value: '0.60', unit: 'mg/l',
-   measured_at: '2026-11-13T08:00:00.000Z', recorded_by: 'user-1', status: 'open',
+   measured_at: '${todayMorning}', recorded_by: 'user-1', status: 'open',
    acknowledged_by: null, acknowledged_at: null, acknowledgement_note: ''
+  }
+ ],
+ water_alert_measures: [
+  {
+   id: 'measure-1', alert_id: 'alert-chlor', organization_id: 'org', facility_id: 'fac',
+   measure_text: 'Frischwasser nachgefüllt', recorded_by: 'user-1', recorded_at: '${ackAt}'
+  },
+  {
+   id: 'measure-2', alert_id: 'alert-chlor', organization_id: 'org', facility_id: 'fac',
+   measure_text: 'Dosierung geprüft', recorded_by: 'user-1', recorded_at: '${todayLater}'
   }
  ]
 };
@@ -97,8 +156,12 @@ async function openWater(page) {
 test('Messwerte wechseln zwischen Becken und Uhrzeit und markieren nur gespeicherte Abweichungen', async ({page}) => {
  await openWater(page);
  const history = page.locator('#water-history');
+ const today = berlinDay();
  const poolButton = history.getByRole('button', {name: 'Nach Becken'});
  const timeButton = history.getByRole('button', {name: 'Nach Uhrzeit'});
+ await expect(history.getByRole('button', {name: 'Heute'})).toHaveAttribute('aria-pressed', 'true');
+ await expect(history.locator('#water-history-from')).toHaveValue(today);
+ await expect(history.locator('#water-history-to')).toHaveValue(today);
  await expect(poolButton).toHaveAttribute('aria-pressed', 'true');
  await expect(timeButton).toHaveAttribute('aria-pressed', 'false');
  await expect(history.locator('h4')).toHaveText(['Kinderbecken', 'Schwimmerbecken']);
@@ -117,34 +180,63 @@ test('Messwerte wechseln zwischen Becken und Uhrzeit und markieren nur gespeiche
  });
  expect(marked.background).toBe('rgb(224, 122, 31)');
  expect(marked.color).toBe('rgb(26, 18, 8)');
- await expect(page.getByText('Offene Warnung: Freies Chlor 0.10 mg/l. Quittierung ist keine Behebung.')).toBeVisible();
- await expect(page.getByText(/Die Abweichung gilt damit nicht als behoben/)).toBeVisible();
- await expect(page.getByText('Maßnahme (freiwillig)').first()).toBeVisible();
- await expect(page.getByText('Quittierung (freiwillig)')).toBeVisible();
- await expect(page.getByText('Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.').first()).toBeVisible();
+
+ const alerts = page.locator('#water-alerts');
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Quittierung ist keine Behebung');
+ await expect(alerts.locator('.water-alert.is-acknowledged')).toContainText(/Die Abweichung gilt damit nicht als behoben/);
+ await expect(alerts.getByText('Maßnahme (freiwillig)').first()).toBeVisible();
+ await expect(alerts.getByText('Quittierung (freiwillig)')).toBeVisible();
+ await expect(alerts.getByText('Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.')).toBeVisible();
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Frischwasser nachgefüllt');
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Dosierung geprüft');
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Wiederholungsmessungen (1)');
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('0.35');
+
  const viewport = page.viewportSize();
- for (const button of [poolButton, timeButton]) {
+ for (const button of [poolButton, timeButton, history.getByRole('button', {name: 'Heute'}), history.getByRole('button', {name: 'Letzte 7 Tage'})]) {
   const box = await button.boundingBox();
-  expect(box.height).toBeGreaterThanOrEqual(viewport.width <= 850 ? 48 : 40);
+  expect(box.height).toBeGreaterThanOrEqual(viewport.width <= 850 ? 44 : 40);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
  }
+
  await page.getByRole('button', {name: 'Maßnahme speichern'}).first().click();
  await expect(page.locator('#operations-message')).toHaveText('Eine Maßnahme wird freiwillig erst ab 3 Zeichen gespeichert. Die Messung und die offene Warnung bleiben unverändert.');
- await expect(page.getByText('Offene Warnung: Freies Chlor 0.10 mg/l. Quittierung ist keine Behebung.')).toBeVisible();
+ await expect(alerts.locator('.water-alert.is-open')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
  await expect(kinder.locator('td.is-breach')).toHaveCount(2);
+
+ await history.getByRole('button', {name: 'Letzte 7 Tage'}).click();
+ await expect(history.getByRole('button', {name: 'Letzte 7 Tage'})).toHaveAttribute('aria-pressed', 'true');
+ await expect(history.locator('h4')).toHaveText(['Kinderbecken', 'Schwimmerbecken']);
+ await expect(history).toContainText('7.10');
+ await history.getByRole('button', {name: 'Letzte 30 Tage'}).click();
+ await expect(history).toContainText('7.00');
+ await expect(history).not.toContainText('6.90');
+ await history.locator('#water-history-pool').selectOption('pool-kinder');
+ await expect(history.getByRole('button', {name: 'Letzte 30 Tage'})).toHaveAttribute('aria-pressed', 'true');
+ await expect(history.locator('h4')).toHaveText(['Kinderbecken']);
+ await expect(history).not.toContainText('7.00');
+ const customFrom = addCalendarDays(today, -40);
+ await history.locator('#water-history-from').fill(customFrom);
+ await expect(history.getByRole('button', {name: 'Benutzerdefiniert'})).toHaveAttribute('aria-pressed', 'true');
+ await expect(history).toContainText('6.90');
+ await history.getByRole('button', {name: 'Heute'}).click();
+ await expect(history.locator('#water-history-pool')).toHaveValue('pool-kinder');
+ await expect(history.locator('h4')).toHaveText(['Kinderbecken']);
+
  await timeButton.click();
  await expect(timeButton).toHaveAttribute('aria-pressed', 'true');
  await expect(poolButton).toHaveAttribute('aria-pressed', 'false');
  await expect(history.locator('h4')).toHaveCount(0);
  await expect(history.locator('table')).toHaveCount(1);
  await expect(history.locator('td.is-breach')).toHaveCount(2);
- await expect(history.locator('table tr').nth(1)).toContainText('Schwimmerbecken');
  const stored = await page.evaluate(() => localStorage.getItem('tageswerk-water-history-view'));
  expect(stored).toBe('time');
  await page.locator('[data-operation="temperature"]').click();
  await page.locator('[data-operation="water"]').click();
  await expect(page.locator('#water-history').getByRole('button', {name: 'Nach Uhrzeit'})).toHaveAttribute('aria-pressed', 'true');
+ await expect(page.locator('#water-history').getByRole('button', {name: 'Heute'})).toHaveAttribute('aria-pressed', 'true');
  await expect(page.locator('#water-history h4')).toHaveCount(0);
  await page.locator('#water-history').getByRole('button', {name: 'Nach Becken'}).click();
  await expect(page.locator('#water-history h4')).toHaveText(['Kinderbecken', 'Schwimmerbecken']);

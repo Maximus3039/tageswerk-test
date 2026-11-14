@@ -423,9 +423,28 @@ export function berlinDay(value) {
  return new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Berlin'}).format(date);
 }
 
-function addCalendarDays(day, count) {
- const [year, month, date] = day.split('-').map(Number);
- return new Date(Date.UTC(year, month - 1, date + count)).toISOString().slice(0, 10);
+export function addCalendarDays(day, count) {
+ const [year, month, date] = String(day || '').split('-').map(Number);
+ if (![year, month, date].every(Number.isFinite)) return '';
+ return new Date(Date.UTC(year, month - 1, date + Number(count || 0))).toISOString().slice(0, 10);
+}
+
+export function waterHistoryPeriodWindow(period, now = new Date()) {
+ const to = berlinDay(now);
+ if (!to) return {from: '', to: ''};
+ if (period === 'today') return {from: to, to};
+ if (period === '7') return {from: addCalendarDays(to, -6), to};
+ if (period === '30') return {from: addCalendarDays(to, -29), to};
+ return {from: '', to: ''};
+}
+
+export function matchWaterHistoryPeriod(from, to, now = new Date()) {
+ const today = berlinDay(now);
+ if (!today || !from || !to) return 'custom';
+ if (from === today && to === today) return 'today';
+ if (from === addCalendarDays(today, -6) && to === today) return '7';
+ if (from === addCalendarDays(today, -29) && to === today) return '30';
+ return 'custom';
 }
 
 const weekdayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];

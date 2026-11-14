@@ -47,7 +47,7 @@ import {
  updateWaterParameter,
  updateWaterPool,
 } from '../../js/operations-controls.js';
-import {berlinDay, berlinInstant, emptyOperations, materialStock, operationMetrics, waterControlState, waterDayRounds, waterFacilityPlan, waterHistoryByPool, waterHistoryCsv, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterReadingOutside, waterRowsForMember} from '../../js/operations.js';
+import {addCalendarDays, berlinDay, berlinInstant, emptyOperations, matchWaterHistoryPeriod, materialStock, operationMetrics, waterControlState, waterDayRounds, waterFacilityPlan, waterHistoryByPool, waterHistoryCsv, waterHistoryPeriodWindow, waterHistoryRows, waterMeasurementCsv, waterOverviewRows, waterParameterCatalog, waterReadingOutside, waterRowsForMember} from '../../js/operations.js';
 import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
@@ -2196,10 +2196,67 @@ test('Messwerte lassen sich nach Becken gruppieren und nur mit gespeicherten Gre
  assert.match(screen, /Quittierung \(freiwillig\)/);
  assert.match(screen, /Die Messung ist gespeichert/);
  assert.match(screen, /Offene Warnung:/);
+ assert.match(screen, /waterHistoryPeriodWindow\('today'\)/);
+ assert.match(screen, /Letzte 7 Tage/);
+ assert.match(screen, /Letzte 30 Tage/);
+ assert.match(screen, /Benutzerdefiniert/);
+ assert.match(screen, /renderWaterAlerts/);
+ assert.match(screen, /Wiederholungsmessungen/);
+ assert.match(screen, /Quittierung ist keine Behebung/);
  const controls = readFileSync(new URL('../../js/operations-controls.js', import.meta.url), 'utf8');
  assert.match(controls, /status: 'open'/);
  assert.match(controls, /Ohne Quittierung bleibt die Warnung offen/);
  assert.doesNotMatch(controls, /status: 'acknowledged',\s*acknowledgedBy: null/);
  const styles = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
  assert.match(styles, /td\.is-breach\{background:#e07a1f;color:#1a1208/);
+ assert.match(styles, /\.water-alert\.is-open/);
+ assert.match(styles, /\.water-period-presets/);
+ assert.match(styles, /\.water-history-filters/);
+});
+
+test('Wasserhistorie filtert nach Berlin-Zeiträumen inklusive Sommer- und Winterzeit', () => {
+ const winter = new Date('2026-11-14T12:00:00.000Z');
+ const summer = new Date('2026-07-15T12:00:00.000Z');
+ assert.equal(berlinDay(winter), '2026-11-14');
+ assert.equal(berlinDay('2026-03-28T23:30:00.000Z'), '2026-03-29');
+ assert.equal(berlinDay('2026-10-24T22:30:00.000Z'), '2026-10-25');
+ assert.equal(addCalendarDays('2026-03-29', -6), '2026-03-23');
+ assert.equal(addCalendarDays('2026-10-25', -29), '2026-09-26');
+ assert.deepEqual(waterHistoryPeriodWindow('today', winter), {from: '2026-11-14', to: '2026-11-14'});
+ assert.deepEqual(waterHistoryPeriodWindow('7', winter), {from: '2026-11-08', to: '2026-11-14'});
+ assert.deepEqual(waterHistoryPeriodWindow('30', winter), {from: '2026-10-16', to: '2026-11-14'});
+ assert.deepEqual(waterHistoryPeriodWindow('today', summer), {from: '2026-07-15', to: '2026-07-15'});
+ assert.deepEqual(waterHistoryPeriodWindow('7', summer), {from: '2026-07-09', to: '2026-07-15'});
+ assert.equal(matchWaterHistoryPeriod('2026-11-14', '2026-11-14', winter), 'today');
+ assert.equal(matchWaterHistoryPeriod('2026-11-08', '2026-11-14', winter), '7');
+ assert.equal(matchWaterHistoryPeriod('2026-10-16', '2026-11-14', winter), '30');
+ assert.equal(matchWaterHistoryPeriod('2026-11-01', '2026-11-10', winter), 'custom');
+ const bundle = {
+  waterPools: [{id: 'pool-a', facilityId: 'fac', name: 'Kinderbecken'}],
+  waterChecks: [
+   {id: 'c-today', facilityId: 'fac', poolId: 'pool-a', measuredAt: '2026-11-14T08:00:00+01:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '7.1'}]},
+   {id: 'c-week', facilityId: 'fac', poolId: 'pool-a', measuredAt: '2026-11-10T08:00:00+01:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '7.0'}]},
+   {id: 'c-month', facilityId: 'fac', poolId: 'pool-a', measuredAt: '2026-10-20T08:00:00+02:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '6.9'}]},
+   {id: 'c-old', facilityId: 'fac', poolId: 'pool-a', measuredAt: '2026-09-01T08:00:00+02:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '6.8'}]},
+   {id: 'c-other', facilityId: 'fac', poolId: 'pool-b', measuredAt: '2026-11-14T09:00:00+01:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '7.2'}]}
+  ]
+ };
+ const today = waterHistoryPeriodWindow('today', winter);
+ const week = waterHistoryPeriodWindow('7', winter);
+ const month = waterHistoryPeriodWindow('30', winter);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', today).map(row => row.id), ['c-other', 'c-today']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', week).map(row => row.id), ['c-other', 'c-today', 'c-week']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', month).map(row => row.id), ['c-other', 'c-today', 'c-week', 'c-month']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', {from: '2026-11-10', to: '2026-11-12'}).map(row => row.id), ['c-week']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', {...week, poolId: 'pool-a'}).map(row => row.id), ['c-today', 'c-week']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', {...today, poolId: 'pool-b'}).map(row => row.id), ['c-other']);
+ assert.deepEqual(waterHistoryRows(bundle, 'fac', {...today, poolId: 'pool-a'}).map(row => row.id), ['c-today']);
+ const csv = waterHistoryCsv(waterHistoryRows(bundle, 'fac', today));
+ assert.match(csv, /Datum;Uhrzeit;Becken/);
+ assert.match(csv, /Kinderbecken/);
+ assert.equal(waterHistoryRole({id: 'fac', organization_id: 'org'}, [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'technician'}]), true);
+ assert.equal(waterHistoryRole({id: 'fac', organization_id: 'org'}, [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'employee'}]), false);
+ assert.equal(berlinInstant('2026-03-29', '08:00').startsWith('2026-03-29T'), true);
+ assert.equal(berlinDay(berlinInstant('2026-03-29', '08:00')), '2026-03-29');
+ assert.equal(berlinDay(berlinInstant('2026-10-25', '08:00')), '2026-10-25');
 });

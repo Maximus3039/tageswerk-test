@@ -28,6 +28,7 @@ import {
  waterFacilitySlots,
  waterHistoryByPool,
  waterHistoryCsv,
+ waterHistoryPeriodWindow,
  waterHistoryRows,
  waterOverviewRows,
  waterReadingOutside,
@@ -614,21 +615,47 @@ function historyTable(rows) {
  return table;
 }
 
+function syncHistoryPeriodButtons(active, buttons) {
+ for (const [control, key] of buttons) {
+  control.setAttribute('aria-pressed', active === key ? 'true' : 'false');
+ }
+}
+
 function renderWaterHistory(host, current, data, visible) {
  const wrap = document.createElement('section');
  wrap.id = 'water-history';
  wrap.className = 'water-history';
  const heading = document.createElement('h3');
  heading.textContent = 'Messwertübersicht';
- const from = input();
- const to = input();
+ const initial = waterHistoryPeriodWindow('today');
+ let activePeriod = 'today';
+ const from = input(initial.from);
+ const to = input(initial.to);
  from.type = 'date';
  to.type = 'date';
+ from.id = 'water-history-from';
+ to.id = 'water-history-to';
  const poolOptions = [{value: '', label: 'Alle Becken'}].concat(data.waterPools.filter(pool => pool.facilityId === current.id).map(pool => ({value: pool.id, label: pool.name})));
  const people = [...new Map(visible.checks.filter(check => check.facilityId === current.id).map(check => [check.recordedBy, check.recordedName || 'Mitarbeiter']))];
  const personOptions = [{value: '', label: 'Alle Mitarbeiter'}].concat(people.map(([id, name]) => ({value: id, label: name})));
  const poolFilter = select(poolOptions, '');
  const personFilter = select(personOptions, '');
+ poolFilter.id = 'water-history-pool';
+ personFilter.id = 'water-history-person';
+ const periodBar = document.createElement('div');
+ periodBar.className = 'water-period-presets figure-presets';
+ periodBar.setAttribute('role', 'group');
+ periodBar.setAttribute('aria-label', 'Zeitraum der Messwerte');
+ const periodButtons = [];
+ for (const [key, label] of [['today', 'Heute'], ['7', 'Letzte 7 Tage'], ['30', 'Letzte 30 Tage'], ['custom', 'Benutzerdefiniert']]) {
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.className = 'secondary';
+  control.textContent = label;
+  control.dataset.period = key;
+  periodButtons.push([control, key]);
+  periodBar.append(control);
+ }
  const viewBar = document.createElement('div');
  viewBar.className = 'water-view-toggle';
  viewBar.setAttribute('role', 'group');
@@ -651,6 +678,12 @@ function renderWaterHistory(host, current, data, visible) {
  exportButton.className = 'secondary';
  exportButton.textContent = 'Messwerte als CSV exportieren';
  const paint = () => {
+  if (activePeriod !== 'custom') {
+   const window = waterHistoryPeriodWindow(activePeriod);
+   from.value = window.from;
+   to.value = window.to;
+  }
+  syncHistoryPeriodButtons(activePeriod, periodButtons);
   const rows = waterHistoryRows({...data, waterChecks: visible.checks}, current.id, {from: from.value, to: to.value, poolId: poolFilter.value, recordedBy: personFilter.value});
   const view = waterHistoryView();
   poolButton.setAttribute('aria-pressed', view === 'pool' ? 'true' : 'false');
@@ -675,10 +708,162 @@ function renderWaterHistory(host, current, data, visible) {
    tableHost.append(title, historyTable(group.rows));
   }
  };
- for (const control of [from, to, poolFilter, personFilter]) control.addEventListener('change', paint);
- wrap.append(heading, labeled('Von', from), labeled('Bis', to), labeled('Becken', poolFilter), labeled('Mitarbeiter', personFilter), exportButton, viewBar, tableHost);
+ for (const [control, key] of periodButtons) {
+  control.addEventListener('click', () => {
+   activePeriod = key;
+   if (key === 'custom') {
+    syncHistoryPeriodButtons(activePeriod, periodButtons);
+    from.focus();
+    return;
+   }
+   paint();
+  });
+ }
+ from.addEventListener('change', () => {
+  activePeriod = 'custom';
+  paint();
+ });
+ to.addEventListener('change', () => {
+  activePeriod = 'custom';
+  paint();
+ });
+ for (const control of [poolFilter, personFilter]) control.addEventListener('change', paint);
+ const filters = document.createElement('div');
+ filters.className = 'water-history-filters';
+ filters.append(periodBar, labeled('Von', from), labeled('Bis', to), labeled('Becken', poolFilter), labeled('Mitarbeiter', personFilter));
+ wrap.append(heading, filters, exportButton, viewBar, tableHost);
  paint();
  host.append(wrap);
+}
+
+function alertLimitText(alert) {
+ const unit = alert.unit ? ` ${alert.unit}` : '';
+ if (alert.minLimit != null && alert.minLimit !== '' && alert.maxLimit != null && alert.maxLimit !== '') return `${alert.minLimit}–${alert.maxLimit}${unit}`;
+ if (alert.minLimit != null && alert.minLimit !== '') return `mindestens ${alert.minLimit}${unit}`;
+ if (alert.maxLimit != null && alert.maxLimit !== '') return `höchstens ${alert.maxLimit}${unit}`;
+ return `kein Bereich${unit}`;
+}
+
+function renderWaterAlerts(host, current, data, visible, pools) {
+ const alerts = visible.alerts
+  .filter(item => pools.some(entry => entry.id === item.poolId))
+  .slice()
+  .sort((left, right) => Number(right.status === 'open') - Number(left.status === 'open') || String(right.measuredAt).localeCompare(String(left.measuredAt)));
+ if (!alerts.length) return;
+ const section = document.createElement('section');
+ section.className = 'water-alerts';
+ section.id = 'water-alerts';
+ const heading = document.createElement('h3');
+ heading.textContent = 'Grenzwertwarnungen';
+ section.append(heading);
+ const note = document.createElement('p');
+ note.className = 'help';
+ note.textContent = 'Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.';
+ section.append(note);
+ for (const alert of alerts) {
+  const poolName = pools.find(entry => entry.id === alert.poolId)?.name || 'Becken';
+  const name = waterParameterName(data, alert.parameterCode);
+  const unit = alert.unit ? ` ${alert.unit}` : '';
+  const open = alert.status === 'open';
+  const card = document.createElement('article');
+  card.className = open ? 'water-alert is-open' : 'water-alert is-acknowledged';
+  card.dataset.alertId = alert.id;
+  card.dataset.status = alert.status;
+  const title = document.createElement('h4');
+  title.textContent = open
+   ? `Offene Warnung: ${name} ${alert.value}${unit}`
+   : `Quittierte Warnung: ${name} ${alert.value}${unit}`;
+  card.append(title);
+  const status = document.createElement('p');
+  status.className = open ? 'water-alert-status is-open' : 'water-alert-status is-acknowledged';
+  status.textContent = open
+   ? 'Status: offen · Quittierung ist keine Behebung.'
+   : `Status: quittiert · Die Abweichung gilt damit nicht als behoben.`;
+  card.append(status);
+  const facts = document.createElement('dl');
+  facts.className = 'water-alert-facts';
+  for (const [label, value] of [
+   ['Becken', poolName],
+   ['Parameter', name],
+   ['Messwert', `${alert.value}${unit}`.trim()],
+   ['Grenzwert', alertLimitText(alert)],
+   ['Messzeitpunkt', alert.measuredAt ? new Date(alert.measuredAt).toLocaleString('de-DE') : 'unbekannt'],
+   ['Warnungsstatus', open ? 'offen' : 'quittiert']
+  ]) {
+   const dt = document.createElement('dt');
+   dt.textContent = label;
+   const dd = document.createElement('dd');
+   dd.textContent = value;
+   facts.append(dt, dd);
+  }
+  card.append(facts);
+  if (!open) {
+   const ack = document.createElement('p');
+   ack.className = 'water-alert-ack';
+   ack.textContent = `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.acknowledgementNote}. Die Abweichung gilt damit nicht als behoben.`;
+   card.append(ack);
+  }
+  const measures = visible.measures.filter(item => item.alertId === alert.id).sort((left, right) => String(right.recordedAt).localeCompare(String(left.recordedAt)));
+  const measureBlock = document.createElement('div');
+  measureBlock.className = 'water-alert-measures';
+  const measureHeading = document.createElement('strong');
+  measureHeading.textContent = measures.length ? `Maßnahmen (${measures.length})` : 'Maßnahmen';
+  measureBlock.append(measureHeading);
+  if (!measures.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Noch keine Maßnahme dokumentiert.';
+   measureBlock.append(empty);
+  } else {
+   const list = document.createElement('ul');
+   for (const measure of measures) {
+    const item = document.createElement('li');
+    item.textContent = `${new Date(measure.recordedAt).toLocaleString('de-DE')} · ${measure.recordedName}: ${measure.measureText}`;
+    list.append(item);
+   }
+   measureBlock.append(list);
+  }
+  card.append(measureBlock);
+  const followUps = visible.checks.filter(check => check.followUpAlertId === alert.id).sort((left, right) => String(right.measuredAt).localeCompare(String(left.measuredAt)));
+  const followBlock = document.createElement('div');
+  followBlock.className = 'water-alert-followups';
+  const followHeading = document.createElement('strong');
+  followHeading.textContent = followUps.length ? `Wiederholungsmessungen (${followUps.length})` : 'Wiederholungsmessungen';
+  followBlock.append(followHeading);
+  if (!followUps.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Noch keine Wiederholungsmessung.';
+   followBlock.append(empty);
+  } else {
+   const list = document.createElement('ul');
+   for (const check of followUps) {
+    const item = document.createElement('li');
+    const values = (check.readings || []).map(reading => `${waterParameterName(data, reading.parameterCode)} ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`).join(', ');
+    item.textContent = `${check.measuredAt ? new Date(check.measuredAt).toLocaleString('de-DE') : 'unbekannt'} · ${check.recordedName || 'Mitarbeiter'}${values ? `: ${values}` : ''}`;
+    list.append(item);
+   }
+   followBlock.append(list);
+  }
+  card.append(followBlock);
+  const measure = input();
+  measure.placeholder = 'Durchgeführte Maßnahme';
+  card.append(labeled('Maßnahme (freiwillig)', measure));
+  card.append(button('Maßnahme speichern', 'secondary', () => commit(() => saveWaterMeasure(database(), bundle(), alert.id, measure.value, actor(), new Date().toISOString(), context()))));
+  card.append(button('Wiederholungsmessung', 'secondary', () => {
+   opsUi.followUpAlertId = alert.id;
+   opsUi.selectedWaterPoolId = alert.poolId;
+   renderPanel('');
+  }));
+  if (open) {
+   const acknowledgement = input();
+   acknowledgement.placeholder = 'Kenntnisnahme, keine Behebung';
+   card.append(labeled('Quittierung (freiwillig)', acknowledgement));
+   card.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
+  }
+  section.append(card);
+ }
+ host.append(section);
 }
 
 export function renderWater(host, current) {
@@ -759,7 +944,7 @@ export function renderWater(host, current) {
  ));
  renderWaterDay(host, current, data, nowIso);
  const duePool = pools.find(pool => waterControlState(pool, visible.checks, data.waterPoolParameters, nowIso).due);
- const initialPool = pools.some(pool => pool.id === opsUi.selectedWaterPoolId) ? selectedWaterPoolId: (duePool || pools[0]).id;
+ const initialPool = pools.some(pool => pool.id === opsUi.selectedWaterPoolId) ? opsUi.selectedWaterPoolId : (duePool || pools[0]).id;
  const pool = pools.find(item => item.id === initialPool) || pools[0];
  if (!pool) return;
  const parameterOrder = code => waterCatalog(data).findIndex(item => item.code === code);
@@ -862,41 +1047,8 @@ export function renderWater(host, current) {
   paused.textContent = history ? 'Deaktiviert. Die bisherigen Messungen bleiben sichtbar.' : 'Deaktiviert. Die laufende Kontrollrunde bleibt sichtbar.';
   row.append(paused);
  }
- for (const alert of visible.alerts.filter(item => pools.some(entry => entry.id === item.poolId))) {
-  const name = waterParameterName(data, alert.parameterCode);
-  const unit = alert.unit ? ` ${alert.unit}` : '';
-  const line = document.createElement('p');
-  line.className = 'help';
-  line.textContent = alert.status === 'open'
-   ? `Offene Warnung: ${name} ${alert.value}${unit}. Quittierung ist keine Behebung.`
-   : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.acknowledgementNote}. Die Abweichung gilt damit nicht als behoben.`;
-  row.append(line);
-  const optional = document.createElement('p');
-  optional.className = 'help';
-  optional.textContent = 'Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.';
-  row.append(optional);
-  for (const measure of visible.measures.filter(item => item.alertId === alert.id)) {
-   const measureLine = document.createElement('p');
-   measureLine.className = 'help';
-   measureLine.textContent = `Maßnahme ${new Date(measure.recordedAt).toLocaleString('de-DE')} · ${measure.recordedName}: ${measure.measureText}`;
-   row.append(measureLine);
-  }
-  const measure = input();
-  measure.placeholder = 'Durchgeführte Maßnahme';
-  row.append(labeled('Maßnahme (freiwillig)', measure));
-  row.append(button('Maßnahme speichern', 'secondary', () => commit(() => saveWaterMeasure(database(), bundle(), alert.id, measure.value, actor(), new Date().toISOString(), context()))));
-  row.append(button('Wiederholungsmessung', 'secondary', () => {
-   opsUi.followUpAlertId = alert.id;
-   opsUi.selectedWaterPoolId = alert.poolId;
-   renderPanel('');
-  }));
-  if (alert.status !== 'open') continue;
-  const acknowledgement = input();
-  acknowledgement.placeholder = 'Kenntnisnahme, keine Behebung';
-  row.append(labeled('Quittierung (freiwillig)', acknowledgement));
-  row.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
- }
  host.append(row);
+ renderWaterAlerts(host, current, data, visible, pools);
  if (!opsUi.followUpAlertId) renderWaterRound(host, current, data);
  if (history) renderWaterHistory(host, current, data, visible);
 }
