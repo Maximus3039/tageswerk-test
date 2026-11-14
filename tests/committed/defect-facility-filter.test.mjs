@@ -120,6 +120,9 @@ test('Berechtigungsentzug setzt ungültige Filter zurück und lädt seitenweise'
  const store = readFileSync(path.join(root, 'js/defects-store.js'), 'utf8');
  assert.match(store, /PAGE_SIZE = 500/);
  assert.match(store, /\.range\(from, to\)/);
+ assert.match(store, /order\('created_at', \{ascending: false\}\)/);
+ assert.match(store, /order\('id', \{ascending: false\}\)/);
+ assert.match(store, /seen\.has\(row\.id\)/);
  assert.match(store, /from\('defects'\)/);
  assert.doesNotMatch(store, /service_role|sb_secret_/);
 });

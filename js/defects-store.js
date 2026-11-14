@@ -5,6 +5,7 @@ const PAGE_SIZE = 500;
 
 export async function fetchDefectRows() {
  const rows = [];
+ const seen = new Set();
  let from = 0;
  while (true) {
   const to = from + PAGE_SIZE - 1;
@@ -12,10 +13,15 @@ export async function fetchDefectRows() {
    .from('defects')
    .select(DEFECT_COLUMNS)
    .order('created_at', {ascending: false})
+   .order('id', {ascending: false})
    .range(from, to);
   if (error) return {data: null, error};
   const page = data || [];
-  rows.push(...page);
+  for (const row of page) {
+   if (!row?.id || seen.has(row.id)) continue;
+   seen.add(row.id);
+   rows.push(row);
+  }
   if (page.length < PAGE_SIZE) break;
   from += PAGE_SIZE;
  }
