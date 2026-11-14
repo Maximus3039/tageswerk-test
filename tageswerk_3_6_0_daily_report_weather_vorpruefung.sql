@@ -16,4 +16,16 @@ FROM (
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Migration ist nicht wiederholbar.'
+  UNION ALL
+  SELECT 'RLS auf daily_reports aktiv',
+    CASE WHEN EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = 'daily_reports' AND c.relrowsecurity
+    ) THEN 'bereit' ELSE 'pruefen' END,
+    'Neue Spalten erben bestehende Berichtsberechtigungen.'
+  UNION ALL
+  SELECT 'bestehende Berichte vorhanden oder leer',
+    CASE WHEN to_regclass('public.daily_reports') IS NOT NULL THEN 'bereit' ELSE 'stoppen' END,
+    'Defaults schützen bestehende Zeilen.'
 ) AS rows;

@@ -3,7 +3,6 @@ import {
  dateKey,
  berlinToday,
  addDays,
- addMonths,
  formatAmount,
  thousandthsText,
  trendQuality

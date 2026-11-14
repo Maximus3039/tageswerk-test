@@ -20,4 +20,12 @@ FROM (
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Migration ist nicht wiederholbar.'
+  UNION ALL
+  SELECT 'RLS auf facilities aktiv',
+    CASE WHEN EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = 'facilities' AND c.relrowsecurity
+    ) THEN 'bereit' ELSE 'pruefen' END,
+    'Koordinaten erben bestehende Mandanten-/Betriebstrennung.'
 ) AS rows;

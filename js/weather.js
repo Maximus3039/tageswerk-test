@@ -31,14 +31,22 @@ export function facilityCoordinates(facility) {
  const lat = Number(facility?.latitude ?? facility?.lat);
  const lon = Number(facility?.longitude ?? facility?.lon);
  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-  return {lat, lon, source: 'facility'};
+  return {lat, lon, source: 'facility', uncertain: false};
  }
  return null;
 }
 
+export function looksLikePlaceName(name) {
+ const query = String(name || '').trim();
+ if (query.length < 3) return false;
+ if (/^[0-9a-f-]{8,}$/i.test(query)) return false;
+ if (!/[a-zäöüß]/i.test(query)) return false;
+ return true;
+}
+
 export async function geocodeFacilityName(name) {
  const query = String(name || '').trim();
- if (query.length < 2) return null;
+ if (!looksLikePlaceName(query)) return null;
  const url = `${GEOCODE_URL}?name=${encodeURIComponent(query)}&count=1&language=de&format=json`;
  const response = await fetch(url);
  if (!response.ok) throw new Error('Geocoding nicht erreichbar.');
@@ -49,13 +57,15 @@ export async function geocodeFacilityName(name) {
   lat: hit.latitude,
   lon: hit.longitude,
   source: 'geocode',
+  uncertain: true,
   place: [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ')
  };
 }
 
-export async function resolveFacilityLocation(facility) {
+export async function resolveFacilityLocation(facility, {allowGeocode = false} = {}) {
  const direct = facilityCoordinates(facility);
  if (direct) return direct;
+ if (!allowGeocode) return null;
  return geocodeFacilityName(facility?.name);
 }
 
@@ -88,10 +98,15 @@ export async function fetchWeather(lat, lon, {now = Date.now()} = {}) {
  return data;
 }
 
-export async function weatherForFacility(facility) {
- const location = await resolveFacilityLocation(facility);
+export async function weatherForFacility(facility, {allowGeocode = false} = {}) {
+ const location = await resolveFacilityLocation(facility, {allowGeocode});
  if (!location) {
-  return {ok: false, error: 'Für diesen Betrieb ist kein Standort hinterlegt.'};
+  return {
+   ok: false,
+   error: allowGeocode
+    ? 'Für diesen Betrieb konnte kein verlässlicher Standort ermittelt werden.'
+    : 'Kein hinterlegter Standort. Wetter erscheint erst mit Koordinaten oder nach ausdrücklicher Standortschätzung.'
+  };
  }
  try {
   const weather = await fetchWeather(location.lat, location.lon);
@@ -107,7 +122,10 @@ export function weatherReportLine(weather, location) {
  const rain = weather.rainChance != null ? `${weather.rainChance} % Niederschlagswahrscheinlichkeit` : 'Niederschlag unklar';
  const place = location?.place ? ` (${location.place})` : '';
  const stamp = weather.observedAt ? `, Stand ${String(weather.observedAt).replace('T', ' ')}` : '';
- return `Wetter${place}: ${temp}, ${weather.label}, ${rain}. Quelle: ${weather.source} (${weather.kind})${stamp}.`;
+ const uncertain = location?.uncertain || location?.source === 'geocode'
+  ? ' Standort geschätzt – bitte prüfen.'
+  : '';
+ return `Wetter${place}: ${temp}, ${weather.label}, ${rain}. Quelle: ${weather.source} (${weather.kind})${stamp}.${uncertain}`;
 }
 
 export function clearWeatherCache() {

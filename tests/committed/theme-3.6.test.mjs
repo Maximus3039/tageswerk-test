@@ -71,7 +71,9 @@ test('Wetterzeile und Tagesbericht-Übernahme sind vorbereitet', () => {
  assert.match(line, /18 °C/);
  assert.match(line, /Open-Meteo/);
  assert.match(sections, /Wetter für Bericht laden/);
+ assert.match(sections, /allowGeocode:\s*true/);
  assert.match(sections, /weatherSummary/);
+ assert.match(dashboard, /weather-uncertain/);
  assert.match(locationMigration, /ADD COLUMN latitude/);
  assert.match(weatherMigration, /weather_summary/);
  assert.match(weatherMigration, /Nicht ohne ausdrückliche Freigabe ausführen/);

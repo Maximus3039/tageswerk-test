@@ -199,6 +199,12 @@ async function renderWeatherPanel() {
   facts.append(cell);
  }
  box.append(layout, facts);
+ if (result.location.uncertain || result.location.source === 'geocode') {
+  const warn = document.createElement('p');
+  warn.className = 'estimate-badge weather-uncertain';
+  warn.textContent = `Standort geschätzt${result.location.place ? `: ${result.location.place}` : ''} – bitte Koordinaten hinterlegen.`;
+  box.append(warn);
+ }
  const source = document.createElement('p');
  source.className = 'help';
  source.textContent = `${weather.source} · ${weather.kind === 'forecast' ? 'Prognose' : 'Beobachtung'} · Standort ${result.location.source === 'facility' ? 'hinterlegt' : 'per Ortsname geschätzt'}`;

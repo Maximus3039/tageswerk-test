@@ -103,7 +103,17 @@ button.link{background:transparent;box-shadow:none;color:var(--tw-blue);text-dec
 .stat-chip .delta-up{color:var(--tw-danger)}
 .stat-chip .delta-down{color:var(--tw-success)}
 .stat-chip .delta-flat{color:var(--tw-text-muted)}
-.estimate-badge{display:inline-block;margin-top:6px;padding:2px 8px;border:1px solid var(--tw-warning);color:var(--tw-warning);border-radius:999px;font-size:.75rem}
+.estimate-badge{display:inline-block;margin-top:6px;padding:2px 8px;border:1px solid var(--tw-warning);color:var(--tw-warning);border-radius:var(--tw-radius-sm);font-size:.75rem}
+.weather-uncertain{display:block;margin-top:10px;line-height:1.35}
+#login.card,#login{max-width:420px;margin:48px auto}
+#login input{font-size:16px}
+.side-nav button{min-height:44px}
+.item,.history{border-color:var(--tw-border);color:var(--tw-text)}
+.review{border:1px solid rgba(231,163,90,.45);background:rgba(231,163,90,.1);padding:10px 12px;border-radius:var(--tw-radius-sm);color:var(--tw-warning)}
+.filterbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.filterbar select,.app-filter{min-height:var(--tw-touch)}
+.operations-tabs{display:flex;flex-wrap:wrap;gap:8px}
+.operations-tabs button{margin-top:0;min-height:44px}
 
 .defect .badge,.water-filter-card .badge{border-radius:var(--tw-radius-sm)}
 .water-filter-card.is-active{border-left:3px solid var(--tw-success)}

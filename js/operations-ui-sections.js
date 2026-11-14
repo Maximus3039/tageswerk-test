@@ -73,14 +73,18 @@ export function renderReports(host, current) {
   loadWeather.disabled = true;
   try {
    const {weatherForFacility, weatherReportLine} = await import('./weather.js');
-   const result = await weatherForFacility(current);
+   const result = await weatherForFacility(current, {allowGeocode: true});
    if (!result.ok) {
     say('error', result.error);
     return;
    }
    weatherSnapshot = weatherReportLine(result.weather, result.location);
    weatherPreview.value = weatherSnapshot;
-   say('ok', 'Wettersnapshot geladen. Er wird beim Speichern unveränderlich in den Bericht übernommen.');
+   if (result.location.uncertain || result.location.source === 'geocode') {
+    say('ok', 'Wettersnapshot geladen (Standort geschätzt). Bitte vor dem Speichern prüfen; danach bleibt der Text unveränderlich.');
+   } else {
+    say('ok', 'Wettersnapshot geladen. Er wird beim Speichern unveränderlich in den Bericht übernommen.');
+   }
   } catch (error) {
    say('error', error?.message || 'Wetter konnte nicht geladen werden.');
   } finally {
