@@ -2,7 +2,7 @@
 
 **Branch:** `entwicklung/tageswerk-3.6.0`  
 **Geprüfter Stand vor Nachbesserungen:** `8a25e65`  
-**Commit dieser Prüfung:** siehe Git-Log (dieser Bericht + Fixes)  
+**Commit dieser Prüfung:** `981a63e`  
 **Produktiv:** 3.5.7 (`240a2e8`) · **Pages-Pin:** unverändert `240a2e85dee772857bd14cd6206818e33175e56e`  
 **Push / Veröffentlichung / SQL-Ausführung:** nicht erfolgt
 
@@ -168,7 +168,7 @@ Erzeugung: `node scripts/release-screenshots-3.6.mjs`
 ## 13. Commit-ID
 
 - Ausgang: `8a25e65`
-- Dieser Releaseprüfungs-Commit: lokal nach Abschluss (siehe `git log -1`)
+- Releaseprüfungs-Commit: `981a63e`
 
 Diff zu Produktiv 3.5.7: ca. 57 Dateien / +6861 Zeilen (inkl. 3.5.8 Filter + 3.6.0).
 
