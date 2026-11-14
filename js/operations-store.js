@@ -495,23 +495,6 @@ function assemble(loaded, actor, context) {
    lastFlushedAt: row.last_flushed_at || null,
    lastFlushedBy: row.last_flushed_by || null
   })),
-  waterFilterFlushes: (loaded.water_filter_flushes || []).filter(row => visible(row, actor)).map(row => ({
-   id: row.id,
-   facilityId: row.facility_id,
-   facilityName: facilityName(context, row.facility_id),
-   organizationId: row.organization_id,
-   poolId: row.pool_id,
-   filterId: row.filter_id,
-   flushedAt: row.flushed_at,
-   recordedAt: row.recorded_at,
-   recordedBy: row.recorded_by,
-   recordedName: personName(context, row.recorded_by, actor),
-   note: row.note || '',
-   correctedAt: row.corrected_at || null,
-   correctedBy: row.corrected_by || null,
-   correctedName: row.corrected_by ? personName(context, row.corrected_by, actor) : '',
-   correctionCount: Number(row.correction_count) || 0
-  })).sort((a, b) => String(b.flushedAt).localeCompare(String(a.flushedAt))),
   waterFilterFlushCorrections: (loaded.water_filter_flush_corrections || []).filter(row => visible(row, actor)).map(row => ({
    id: row.id,
    flushId: row.flush_id,
@@ -521,15 +504,65 @@ function assemble(loaded, actor, context) {
    correctedBy: row.corrected_by,
    correctedName: personName(context, row.corrected_by, actor),
    reason: row.reason || '',
-   oldFilterId: row.old_filter_id,
-   newFilterId: row.new_filter_id,
-   oldPoolId: row.old_pool_id,
-   newPoolId: row.new_pool_id,
-   oldFlushedAt: row.old_flushed_at,
-   newFlushedAt: row.new_flushed_at,
-   oldNote: row.old_note || '',
-   newNote: row.new_note || ''
-  })).sort((a, b) => String(b.correctedAt).localeCompare(String(a.correctedAt)))
+   previousFilterId: row.previous_filter_id,
+   previousPoolId: row.previous_pool_id,
+   previousFlushedAt: row.previous_flushed_at,
+   previousNote: row.previous_note || '',
+   filterId: row.filter_id,
+   poolId: row.pool_id,
+   flushedAt: row.flushed_at,
+   note: row.note || ''
+  })).sort((a, b) => String(b.correctedAt).localeCompare(String(a.correctedAt))),
+  waterFilterStatusEvents: (loaded.water_filter_status_events || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   filterId: row.filter_id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   changedAt: row.changed_at,
+   changedBy: row.changed_by,
+   changedName: personName(context, row.changed_by, actor),
+   reason: row.reason || '',
+   oldActive: row.old_active === true,
+   newActive: row.new_active === true
+  })).sort((a, b) => String(b.changedAt).localeCompare(String(a.changedAt))),
+  waterFilterFlushes: (() => {
+   const corrections = (loaded.water_filter_flush_corrections || [])
+    .filter(row => visible(row, actor))
+    .slice()
+    .sort((left, right) => {
+     const byTime = String(right.corrected_at || '').localeCompare(String(left.corrected_at || ''));
+     return byTime || String(right.id || '').localeCompare(String(left.id || ''));
+    });
+   const latestByFlush = new Map();
+   for (const row of corrections) {
+    if (!latestByFlush.has(row.flush_id)) latestByFlush.set(row.flush_id, row);
+   }
+   return (loaded.water_filter_flushes || []).filter(row => visible(row, actor)).map(row => {
+    const latest = latestByFlush.get(row.id);
+    return {
+     id: row.id,
+     facilityId: row.facility_id,
+     facilityName: facilityName(context, row.facility_id),
+     organizationId: row.organization_id,
+     poolId: latest ? latest.pool_id : row.pool_id,
+     filterId: latest ? latest.filter_id : row.filter_id,
+     flushedAt: latest ? latest.flushed_at : row.flushed_at,
+     recordedAt: row.recorded_at,
+     recordedBy: row.recorded_by,
+     recordedName: personName(context, row.recorded_by, actor),
+     note: latest ? (latest.note || '') : (row.note || ''),
+     originalFilterId: row.filter_id,
+     originalPoolId: row.pool_id,
+     originalFlushedAt: row.flushed_at,
+     originalNote: row.note || '',
+     correctedAt: latest?.corrected_at || null,
+     correctedBy: latest?.corrected_by || null,
+     correctedName: latest?.corrected_by ? personName(context, latest.corrected_by, actor) : '',
+     correctionCount: corrections.filter(item => item.flush_id === row.id).length,
+     isCorrected: !!latest
+    };
+   }).sort((a, b) => String(b.flushedAt).localeCompare(String(a.flushedAt)));
+  })()
  };
 }
 
@@ -631,7 +664,12 @@ export async function loadOperations(db, actor, context) {
    bundle: assemble(loaded, actor, context)
   };
  }
- const filters = await readOptionalGroup(db, loaded, ['water_filters', 'water_filter_flushes', 'water_filter_flush_corrections']);
+ const filters = await readOptionalGroup(db, loaded, [
+  'water_filters',
+  'water_filter_flushes',
+  'water_filter_flush_corrections',
+  'water_filter_status_events'
+ ]);
  if (!filters.ok) {
   return {
    ok: false,
@@ -1672,23 +1710,32 @@ export async function saveWaterFilterChange(db, bundle, filterId, draft, actor, 
  return {ok: true, id: filter.id, bundle: loaded.bundle, filter};
 }
 
-export async function saveWaterFilterActive(db, bundle, filterId, active, actor, context) {
+export async function saveWaterFilterActive(db, bundle, filterId, active, reason, actor, context) {
  const before = (bundle?.waterFilters || []).find(item => item.id === filterId);
  if (!before) return denied(bundle, 'Der Filter wurde nicht gefunden.');
  const facility = {id: before.facilityId, organization_id: before.organizationId};
  if (!canManageWaterFilters(facility, actor?.memberships)) return denied(bundle, 'Keine Berechtigung für die Filterverwaltung.');
+ const cleanReason = String(reason || '').trim();
+ if (cleanReason.length < 3 || cleanReason.length > 2000) {
+  return denied(bundle, 'Bitte eine Begründung mit 3 bis 2000 Zeichen angeben.');
+ }
  let result;
  try {
-  result = await db.update('water_filters', filterId, {active: active === true});
+  result = await db.rpc('tageswerk_set_water_filter_active', {
+   p_filter_id: filterId,
+   p_active: active === true,
+   p_reason: cleanReason
+  });
  } catch (caught) {
   return denied(bundle, storageMessage(caught));
  }
- const saved = confirmed(result);
- if (!saved.ok) return denied(bundle, saved.error);
+ if (result?.error) return denied(bundle, storageMessage(result.error));
+ const payload = Array.isArray(result?.data) ? result.data[0] : result?.data;
+ if (!payload || payload.ok !== true) return denied(bundle, 'Der Filterstatus wurde nicht bestätigt.');
  const loaded = await loadOperations(db, actor, context);
  const filter = loaded.ok ? loaded.bundle.waterFilters.find(item => item.id === filterId) : null;
  if (!filter || filter.active !== (active === true)) return denied(bundle, 'Der Filterstatus wurde nicht bestätigt.');
- return {ok: true, id: filter.id, bundle: loaded.bundle, filter};
+ return {ok: true, id: filter.id, bundle: loaded.bundle, filter, eventId: payload.event_id};
 }
 
 export async function saveWaterFilterFlush(db, bundle, facility, draft, actor, now, context) {
@@ -1733,6 +1780,6 @@ export async function saveWaterFilterFlushCorrection(db, bundle, flushId, draft,
  if (!payload || payload.ok !== true) return denied(bundle, 'Die Korrektur wurde nicht bestätigt.');
  const loaded = await loadOperations(db, actor, context);
  const flush = loaded.ok ? loaded.bundle.waterFilterFlushes.find(item => item.id === flushId) : null;
- if (!flush || !(flush.correctionCount > 0)) return denied(bundle, 'Die Korrektur wurde nicht bestätigt.');
+ if (!flush || flush.isCorrected !== true) return denied(bundle, 'Die Korrektur wurde nicht bestätigt.');
  return {ok: true, id: flush.id, bundle: loaded.bundle, flush, correctionId: payload.correction_id};
 }

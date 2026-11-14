@@ -77,8 +77,15 @@ export function flushesForFacility(flushes, facilityId) {
 }
 
 export function flushCorrectionMark(flush) {
- if (!flush?.correctedAt && !(Number(flush?.correctionCount) > 0)) return '';
- return 'Korrigiert';
+ if (flush?.isCorrected === true || flush?.correctedAt || Number(flush?.correctionCount) > 0) return 'Korrigiert';
+ return '';
+}
+
+export function waterFilterStatusDraftError(draft) {
+ const reason = String(draft?.reason ?? '').trim();
+ if (reason.length < 3 || reason.length > 2000) return 'Bitte eine Begründung mit 3 bis 2000 Zeichen angeben.';
+ if (typeof draft?.active !== 'boolean') return 'Der neue Status fehlt.';
+ return '';
 }
 
 export function waterFilterInsertPayload(facility, draft, actor) {

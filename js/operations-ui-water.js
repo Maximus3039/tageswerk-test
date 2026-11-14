@@ -1130,9 +1130,12 @@ function renderWaterFilters(host, current, data) {
    const row = document.createElement('div');
    row.className = 'item';
    const rename = input(filter.name);
-   row.append(labeled(`${poolName(data, filter.poolId)} · ${filter.active === false ? 'deaktiviert' : 'aktiv'}`, rename));
+   const statusReason = input();
+   statusReason.placeholder = 'Begründung für Außerbetriebnahme oder Reaktivierung';
+   row.append(labeled(`${poolName(data, filter.poolId)} · ${filter.active === false ? 'außer Betrieb' : 'in Betrieb'}`, rename));
+   row.append(labeled('Begründung Statuswechsel', statusReason));
    row.append(button('Umbenennen', 'secondary', () => commit(() => saveWaterFilterChange(database(), bundle(), filter.id, {name: rename.value}, person, context()))));
-   row.append(button(filter.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveWaterFilterActive(database(), bundle(), filter.id, filter.active === false, person, context()))));
+   row.append(button(filter.active === false ? 'Reaktivieren' : 'Außer Betrieb', 'secondary', () => commit(() => saveWaterFilterActive(database(), bundle(), filter.id, filter.active === false, statusReason.value, person, context()))));
    manageBox.append(row);
   }
   section.append(manageBox);
