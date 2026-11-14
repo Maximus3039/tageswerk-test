@@ -317,6 +317,21 @@ function paintNexusStatus(openCount, criticalCount, progressCount) {
   status.textContent = 'Keine kritischen Meldungen';
   status.classList.add('status-ok');
  }
+ const spotlight = el('facility-spotlight-status');
+ if (spotlight) {
+  spotlight.replaceChildren();
+  const chips = [
+   [`${openCount} Mängel`, openCount ? 'status-warn' : 'status-ok'],
+   [`${progressCount} laufend`, progressCount ? 'status-warn' : 'status-idle'],
+   criticalCount ? [`${criticalCount} kritisch`, 'status-alert'] : null
+  ].filter(Boolean);
+  for (const [text, tone] of chips) {
+   const chip = document.createElement('span');
+   chip.className = `nexus-chip ${tone}`;
+   chip.textContent = text;
+   spotlight.append(chip);
+  }
+ }
 }
 
 export function renderDashboard() {

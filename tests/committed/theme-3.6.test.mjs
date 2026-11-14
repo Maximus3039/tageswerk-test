@@ -31,14 +31,22 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(index, /Dein Betrieb\. Dein Überblick\./);
  assert.match(index, /defect-composer/);
  assert.match(index, /module-grid/);
- assert.match(index, /class="nexus"/);
+ assert.match(index, /nexus-v4/);
+ assert.match(index, /facility-spotlight/);
+ assert.match(index, /class="nexus/);
  assert.match(index, /Tageswerk 3\.6\.0/);
  assert.match(tokens, /--nexus-bg/);
+ assert.match(tokens, /--nexus-cyan/);
  assert.match(tokens, /--nexus-glow/);
  assert.match(tokens, /--nexus-accent/);
+ assert.match(tokens, /--nexus-danger/);
+ assert.match(tokens, /--nexus-success/);
  assert.match(tokens, /--tw-accent/);
  assert.match(tokens, /--tw-blue/);
  assert.match(theme, /body\.nexus::before/);
+ assert.match(theme, /body\.nexus-v4/);
+ assert.match(theme, /facility-spotlight/);
+ assert.match(theme, /neon-tile/);
  assert.match(theme, /dash-hero/);
  assert.match(theme, /kpi-strip/);
  assert.match(theme, /module-card/);
@@ -50,6 +58,7 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(dashboard, /renderWeatherPanel/);
  assert.match(dashboard, /renderAnalyticsPanel/);
  assert.match(dashboard, /paintNexusStatus/);
+ assert.match(dashboard, /facility-spotlight-status/);
  assert.match(dashboard, /membershipAllowsMeterReading/);
 });
 

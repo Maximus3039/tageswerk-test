@@ -1,58 +1,71 @@
-/* Tageswerk Nexus 3.6.0 – Design-Tokens */
+/* Tageswerk Nexus V4 – Design-Tokens */
 :root{
- /* Nexus primary */
- --nexus-bg:#050910;
- --nexus-bg-mid:#0a1422;
- --nexus-bg-deep:#03060c;
- --nexus-surface:rgba(14,24,40,.72);
- --nexus-surface-strong:rgba(18,30,48,.88);
- --nexus-border:rgba(90,150,220,.22);
- --nexus-border-soft:rgba(90,150,220,.12);
- --nexus-glow:rgba(56,160,255,.28);
- --nexus-glow-soft:rgba(56,160,255,.12);
- --nexus-accent:#f0c94a;
- --nexus-accent-glow:rgba(240,201,74,.34);
- --nexus-blue:#38a0ff;
- --nexus-blue-bright:#6cbcff;
- --nexus-text:#eaf3fb;
- --nexus-text-muted:#8ea6bd;
- --nexus-success:#63d39a;
- --nexus-warning:#e8a65a;
- --nexus-danger:#ef7f7a;
- --nexus-grid:rgba(100,160,230,.045);
- --nexus-radius:12px;
- --nexus-radius-sm:7px;
- --nexus-shadow:0 12px 32px rgba(0,0,0,.38);
- --nexus-shadow-card:0 0 0 1px rgba(90,150,220,.14),0 10px 28px rgba(0,0,0,.34),inset 0 1px 0 rgba(180,220,255,.08);
+ --nexus-bg:#03070f;
+ --nexus-bg-mid:#07101c;
+ --nexus-bg-deep:#010409;
+ --nexus-surface:rgba(10,22,38,.78);
+ --nexus-surface-strong:rgba(12,26,44,.9);
+ --nexus-border:rgba(0,229,255,.34);
+ --nexus-border-soft:rgba(0,229,255,.16);
+ --nexus-cyan:#00e5ff;
+ --nexus-cyan-bright:#7af3ff;
+ --nexus-glow:rgba(0,229,255,.42);
+ --nexus-glow-soft:rgba(0,229,255,.16);
+ --nexus-accent:#ffd84a;
+ --nexus-accent-glow:rgba(255,216,74,.4);
+ --nexus-blue:var(--nexus-cyan);
+ --nexus-blue-bright:var(--nexus-cyan-bright);
+ --nexus-text:#eef8ff;
+ --nexus-text-muted:#8fb0c8;
+ --nexus-success:#39e6a0;
+ --nexus-success-glow:rgba(57,230,160,.35);
+ --nexus-warning:#ffb347;
+ --nexus-danger:#ff5d6c;
+ --nexus-danger-glow:rgba(255,93,108,.4);
+ --nexus-grid:rgba(0,229,255,.05);
+ --nexus-radius:16px;
+ --nexus-radius-sm:10px;
+ --nexus-shadow:0 14px 36px rgba(0,0,0,.45);
+ --nexus-shadow-card:
+  0 0 0 1px rgba(0,229,255,.22),
+  0 0 18px rgba(0,229,255,.12),
+  0 12px 28px rgba(0,0,0,.42),
+  inset 0 1px 0 rgba(180,245,255,.12);
+ --nexus-shadow-tile:
+  0 0 0 1px rgba(0,229,255,.35),
+  0 0 22px rgba(0,229,255,.18),
+  0 10px 24px rgba(0,0,0,.4),
+  inset 0 1px 0 rgba(200,250,255,.16),
+  inset 0 -10px 24px rgba(0,40,70,.35);
  --nexus-font:"Segoe UI","DIN Alternate","Helvetica Neue",Arial,sans-serif;
  --nexus-font-display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
- --nexus-touch:46px;
+ --nexus-touch:48px;
  --nexus-motion:1;
 
- /* Compatibility aliases (V2) */
+ /* V2/V3 aliases */
  --tw-bg:var(--nexus-bg);
- --tw-bg-elevated:rgba(12,20,34,.92);
+ --tw-bg-elevated:rgba(8,18,32,.94);
  --tw-bg-card:var(--nexus-surface-strong);
- --tw-bg-card-soft:rgba(16,28,46,.78);
- --tw-bg-input:rgba(6,12,22,.92);
- --tw-border:rgba(90,150,220,.24);
- --tw-border-strong:rgba(90,150,220,.36);
+ --tw-bg-card-soft:rgba(14,28,48,.82);
+ --tw-bg-input:rgba(4,12,22,.94);
+ --tw-border:rgba(0,229,255,.28);
+ --tw-border-strong:rgba(0,229,255,.45);
  --tw-text:var(--nexus-text);
  --tw-text-muted:var(--nexus-text-muted);
  --tw-accent:var(--nexus-accent);
- --tw-accent-soft:rgba(240,201,74,.14);
+ --tw-accent-soft:rgba(255,216,74,.14);
  --tw-accent-glow:var(--nexus-accent-glow);
- --tw-blue:var(--nexus-blue);
- --tw-blue-bright:var(--nexus-blue-bright);
+ --tw-blue:var(--nexus-cyan);
+ --tw-blue-bright:var(--nexus-cyan-bright);
  --tw-blue-soft:var(--nexus-glow-soft);
  --tw-blue-glow:var(--nexus-glow);
- --tw-navy:#0a1a33;
+ --tw-navy:#071426;
  --tw-success:var(--nexus-success);
  --tw-warning:var(--nexus-warning);
  --tw-danger:var(--nexus-danger);
  --tw-radius-sm:var(--nexus-radius-sm);
  --tw-radius:var(--nexus-radius);
- --tw-radius-lg:16px;
+ --tw-radius-lg:20px;
  --tw-shadow:var(--nexus-shadow);
  --tw-shadow-glow:var(--nexus-shadow-card);
  --tw-font:var(--nexus-font);
@@ -65,7 +78,7 @@
  --tw-space-6:28px;
  --tw-touch:var(--nexus-touch);
  --tw-header-h:64px;
- --tw-nav-h:60px;
+ --tw-nav-h:64px;
 
  color-scheme:dark;
  font-family:var(--nexus-font);

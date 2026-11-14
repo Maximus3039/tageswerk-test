@@ -259,6 +259,34 @@ function paintList(host, notices) {
  }
 }
 
+function paintFacilitySpotlight() {
+ const box = el('facility-spotlight');
+ if (!box) return;
+ const selected = el('dashboard-facility');
+ const facilityId = selected?.value && selected.value !== 'all' ? selected.value : state.accessibleFacilities[0]?.id;
+ const facility = state.accessibleFacilities.find(item => item.id === facilityId) || null;
+ const nameNode = el('facility-spotlight-name');
+ const media = el('facility-spotlight-media');
+ const statusHost = el('facility-spotlight-status');
+ if (nameNode) nameNode.textContent = facility?.name || selected?.selectedOptions?.[0]?.textContent || 'Kein Betrieb';
+ const image = facility?.image_url || facility?.photo_url || facility?.cover_url || '';
+ if (media) {
+  if (image) {
+   media.classList.remove('hidden');
+   media.style.backgroundImage = `url("${String(image).replace(/"/g, '')}")`;
+  } else {
+   media.classList.add('hidden');
+   media.style.backgroundImage = '';
+  }
+ }
+ if (statusHost && !statusHost.childElementCount) {
+  const chip = document.createElement('span');
+  chip.className = 'nexus-chip status-idle';
+  chip.textContent = facility ? 'Berechtigter Betrieb' : 'Betriebsauswahl';
+  statusHost.append(chip);
+ }
+}
+
 export function paintMobile() {
  if (!el('home-greeting')) return;
  ensureCapture();
@@ -271,9 +299,15 @@ export function paintMobile() {
  const lines = bundle
   ? homeLines(agendaCounts(items, notices.length, state.temperatureInstalled, state.waterInstalled))
   : ['Die Betriebsdaten werden geladen.'];
- el('home-greeting').textContent = `${greeting()}!`;
  const selected = el('dashboard-facility');
+ const displayName = state.staff?.find(member => member.user_id === state.currentUser?.id)?.name
+  || state.currentUser?.user_metadata?.full_name
+  || state.currentUser?.user_metadata?.name
+  || '';
+ const firstName = String(displayName).trim().split(/\s+/)[0];
+ el('home-greeting').textContent = firstName ? `${greeting()}, ${firstName}!` : `${greeting()}!`;
  el('home-facility').textContent = selected?.selectedOptions?.[0]?.textContent || 'Betrieb';
+ paintFacilitySpotlight();
  const today = el('home-today');
  today.replaceChildren();
  for (const line of lines) {

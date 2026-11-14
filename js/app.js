@@ -12,6 +12,7 @@ import {clearLocalWaterDrafts} from './operations-controls.js';
 import {inviteFacilityOptions,loadInvitations,setStaffActions,staffFacilityOptions} from './staff-ui.js';
 import {loadDefects,populateDefectFacilityFilter} from './defects-ui.js';
 import {loadCriticalAcks,loadSettings,populateConsumptionFacility,populateDashboardFilters,renderDashboard,resetConsumptionPanel,setDashboardActions,touchConsumptionFacility} from './dashboard.js';
+import {decorateModuleIcons,decorateNavIcons} from './nexus-icons.js';
 
 // Invitation URLs contain type=invite. Recovery URLs contain type=recovery or vorgang=passwort.
 const initialCallback=readAuthCallback({hash:location.hash,search:location.search});
@@ -193,6 +194,8 @@ onOpenTask(async task=>{navigate('more');const section=task.kind==='maintenance'
 onOpenNotice(notice=>{if(String(notice.kind).startsWith('defect')){focusNotice(notice);return}navigate('more');focusNotice(notice)});
 el('capture-close')?.addEventListener('click',()=>toggleCapture(false));
 mountOperations();
+decorateNavIcons();
+decorateModuleIcons();
 function startRealtime(){if(state.realtimeChannel){supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}if(!state.currentUser)return;state.realtimeChannel=supabase.channel('tageswerk29-updates').on('postgres_changes',{event:'*',schema:'public',table:'defects'},()=>scheduleRefresh()).on('postgres_changes',{event:'*',schema:'public',table:'critical_defect_acknowledgements'},()=>scheduleRefresh()).subscribe((channelState)=>{el('live-indicator').textContent=channelState==='SUBSCRIBED'?'● Live verbunden':channelState==='CHANNEL_ERROR'?'⚠ Live-Verbindung gestört':'Synchronisierung: '+channelState});}
 function scheduleRefresh(){clearTimeout(state.refreshTimer);state.refreshTimer=setTimeout(async()=>{await loadDefects();await loadCriticalAcks();renderDashboard()},550)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.currentUser)scheduleRefresh()});
