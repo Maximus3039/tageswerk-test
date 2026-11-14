@@ -3,7 +3,7 @@
 **Arbeitstitel:** Tageswerk Nexus  
 **Produktname:** Tageswerk  
 **Branch:** `entwicklung/tageswerk-3.6.0`  
-**Commit:** wird nach dem Commit ergänzt  
+**Commit:** `3124799`  
 **Pages-Pin:** unverändert `240a2e8` (3.5.7)
 
 ## Neue Hintergrundgestaltung
