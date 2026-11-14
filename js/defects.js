@@ -1,4 +1,6 @@
 const OPEN = ['open', 'in_progress', 'pending_review'];
+const PRIORITY_RANK = {critical: 0, high: 1, normal: 2, low: 3};
+export const DASHBOARD_DEFECT_LIMIT = 10;
 
 export function defectSection(defect) {
  if (defect?.archived_at) return 'archive';
@@ -6,8 +8,36 @@ export function defectSection(defect) {
  return 'open';
 }
 
+export function isActiveDefect(defect) {
+ return defectSection(defect) === 'open' && OPEN.includes(defect?.status || 'open');
+}
+
 export function sectionDefects(defects, section) {
  return (defects || []).filter(defect => defectSection(defect) === section);
+}
+
+export function activeDefects(defects) {
+ return (defects || []).filter(isActiveDefect);
+}
+
+export function myActiveDefects(defects, userId) {
+ if (!userId) return [];
+ return activeDefects(defects).filter(defect => defect.assigned_to === userId);
+}
+
+export function sortByPriorityThenAge(defects) {
+ return [...(defects || [])].sort((left, right) =>
+  (PRIORITY_RANK[left.priority] ?? 2) - (PRIORITY_RANK[right.priority] ?? 2)
+  || new Date(left.created_at || 0) - new Date(right.created_at || 0)
+ );
+}
+
+export function dashboardRecentDefects(defects, limit = DASHBOARD_DEFECT_LIMIT) {
+ return sortByPriorityThenAge(activeDefects(defects)).slice(0, limit);
+}
+
+export function dashboardMineDefects(defects, userId, limit = DASHBOARD_DEFECT_LIMIT) {
+ return sortByPriorityThenAge(myActiveDefects(defects, userId)).slice(0, limit);
 }
 
 export function sectionCounts(defects) {

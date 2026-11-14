@@ -3,7 +3,7 @@ import {priorityNames,statusNames} from './labels.js';
 import {el,status} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
-import {archiveConfirmation,archiveHeading,closedInFacility,completionText,matchesArchiveQuery,sectionCounts,sectionDefects,sortByCompletion} from './defects.js';
+import {archiveConfirmation,archiveHeading,closedInFacility,completionText,isActiveDefect,matchesArchiveQuery,myActiveDefects,sectionCounts,sectionDefects,sortByCompletion} from './defects.js';
 import {getCurrentUser} from './auth.js';
 import {loadCriticalAcks,renderDashboard} from './dashboard.js';
 
@@ -25,14 +25,19 @@ export async function loadDefects(){
  state.cachedDefects=(data||[]).filter(defect=>allowedFacilities.has(defect.facility_id)).sort((left,right)=>(rank[left.priority]??2)-(rank[right.priority]??2)||new Date(right.created_at)-new Date(left.created_at));
  defectEvents.clear();
  renderDashboard();
- el('mine-count').textContent=String(state.cachedDefects.filter(defect=>defect.assigned_to===state.currentUser?.id&&defect.status!=='resolved').length);
+ el('mine-count').textContent=String(myActiveDefects(state.cachedDefects,state.currentUser?.id).length);
  await paintDefects();
 }
 async function paintDefects(){
  const token=++defectPaint;
  const box=el('defect-list');
  const mode=el('defect-filter').value;
- const visible=state.cachedDefects.filter(defect=>mode==='mine'?defect.assigned_to===state.currentUser?.id:mode==='open'?defect.status!=='resolved':mode==='review'?defect.status==='pending_review':true);
+ const visible=state.cachedDefects.filter(defect=>{
+  if(mode==='mine')return defect.assigned_to===state.currentUser?.id&&isActiveDefect(defect);
+  if(mode==='open')return isActiveDefect(defect);
+  if(mode==='review')return defect.status==='pending_review'&&isActiveDefect(defect);
+  return true;
+ });
  box.replaceChildren();
  el('defect-count').textContent=String(visible.length);
  if(mode==='all'){await paintDefectSections(box,token);return}
