@@ -5,6 +5,7 @@ import test from 'node:test';
 const migration = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes.sql', import.meta.url), 'utf8');
 const pruefung = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_pruefung.sql', import.meta.url), 'utf8');
 const verhalten = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_verhalten.sql', import.meta.url), 'utf8');
+const vorpruefung = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_vorpruefung.sql', import.meta.url), 'utf8');
 
 test('Filterspülungs-Migration bleibt vorbereitet und nicht wiederholbar', () => {
  assert.match(migration, /Nicht ohne ausdrückliche Freigabe ausführen/);
@@ -30,9 +31,14 @@ test('Filter und Spülungen haben serverseitige Schutz- und Stempelregeln', () =
  assert.match(migration, /NEW\.recorded_at := now_ts/);
  assert.match(migration, /ORDER BY flush_row\.flushed_at DESC, flush_row\.recorded_at DESC, flush_row\.id DESC/);
  assert.match(migration, /SECURITY DEFINER/);
+ assert.match(migration, /TG_OP IS DISTINCT FROM 'INSERT'/);
+ assert.match(migration, /TG_WHEN IS DISTINCT FROM 'AFTER'/);
+ assert.match(migration, /water_filter_flushes_a_stamp/);
+ assert.match(migration, /water_filter_flushes_b_bind/);
  assert.match(migration, /pg_trigger_depth\(\) <= 1/);
  assert.match(migration, /Der Filter gehört zu einem anderen Betrieb als das Becken/);
  assert.match(migration, /REVOKE ALL ON FUNCTION public\.tageswerk_apply_water_filter_last_flush\(\) FROM PUBLIC, anon, authenticated;/);
+ assert.match(migration, /REVOKE ALL ON FUNCTION public\.tageswerk_stamp_water_filter_flush\(\) FROM PUBLIC, anon, authenticated;/);
 });
 
 test('RLS trennt Mitarbeiter, Techniker und Leitung', () => {
@@ -55,6 +61,12 @@ test('Prüfskripte decken Schema und Verhalten ab ohne Produktivzwang', () => {
  assert.match(pruefung, /schreibt nichts/);
  assert.match(pruefung, /24 Stunden/);
  assert.match(pruefung, /Mitarbeiter ohne Historie/);
+ assert.match(pruefung, /Kein EXECUTE für authenticated/);
+ assert.match(vorpruefung, /Vorprüfung vor tageswerk_3_5_8_water_filter_flushes/);
+ assert.match(vorpruefung, /Ausschließlich lesend/);
+ assert.match(vorpruefung, /Keine Namenskonflikte Tabellen/);
+ assert.match(vorpruefung, /technician/);
+ assert.doesNotMatch(vorpruefung, /INSERT INTO|UPDATE |DELETE FROM|DROP /i);
  assert.match(verhalten, /NICHT in der Produktivdatenbank/);
  assert.match(verhalten, /tageswerk\.integration_test/);
  assert.match(verhalten, /Nachtrag außerhalb 24 Stunden/);

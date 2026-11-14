@@ -70,12 +70,13 @@ FROM (
       WHEN EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filters_bind_facility' AND NOT tgisinternal)
        AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filters_normalize' AND NOT tgisinternal)
        AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filters_protect' AND NOT tgisinternal)
-       AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filter_flushes_stamp' AND NOT tgisinternal)
+       AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filter_flushes_a_stamp' AND NOT tgisinternal)
+       AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filter_flushes_b_bind' AND NOT tgisinternal)
        AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filter_flushes_protect' AND NOT tgisinternal)
        AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'water_filter_flushes_apply_last' AND NOT tgisinternal)
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Bind-, Normalize-, Protect-, Stamp- und Last-Flush-Trigger sind vorhanden.'
+    'Stamp vor Bind (a_stamp/b_bind), Protect und Last-Flush-Trigger sind vorhanden.'
   UNION ALL
   SELECT 70, 'Stamp prüft 24 Stunden und Zukunft',
     CASE
@@ -91,16 +92,18 @@ FROM (
   FROM (SELECT to_regprocedure('public.tageswerk_stamp_water_filter_flush()') AS oid) AS stamp_lookup
   LEFT JOIN pg_proc AS stamp ON stamp.oid = stamp_lookup.oid
   UNION ALL
-  SELECT 80, 'Letzte Spülung deterministisch',
+  SELECT 80, 'Letzte Spülung deterministisch und gehärtet',
     CASE
       WHEN apply.oid IS NOT NULL
        AND apply.prosecdef IS TRUE
        AND position('ORDER BY flush_row.flushed_at DESC, flush_row.recorded_at DESC, flush_row.id DESC' IN pg_get_functiondef(apply.oid)) > 0
+       AND position('TG_OP IS DISTINCT FROM ''INSERT''' IN pg_get_functiondef(apply.oid)) > 0
+       AND position('TG_WHEN IS DISTINCT FROM ''AFTER''' IN pg_get_functiondef(apply.oid)) > 0
        AND protect.oid IS NOT NULL
        AND position('pg_trigger_depth() <= 1' IN pg_get_functiondef(protect.oid)) > 0
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Die letzte Spülung folgt flushed_at/recorded_at/id, läuft als SECURITY DEFINER und ist gegen direkte Manipulation geschützt.'
+    'Die letzte Spülung folgt flushed_at/recorded_at/id, nur AFTER INSERT, SECURITY DEFINER, gegen direkte Manipulation geschützt.'
   FROM (SELECT to_regprocedure('public.tageswerk_apply_water_filter_last_flush()') AS oid) AS apply_lookup
   CROSS JOIN (SELECT to_regprocedure('public.tageswerk_protect_water_filter()') AS oid) AS protect_lookup
   LEFT JOIN pg_proc AS apply ON apply.oid = apply_lookup.oid
@@ -118,6 +121,17 @@ FROM (
   FROM (SELECT to_regprocedure('public.tageswerk_apply_water_filter_last_flush()') AS oid) AS apply_lookup
   LEFT JOIN pg_proc AS apply ON apply.oid = apply_lookup.oid
   LEFT JOIN pg_class AS filters ON filters.oid = to_regclass('public.water_filters')
+  UNION ALL
+  SELECT 88, 'Kein EXECUTE für authenticated auf Triggerfunktionen',
+    CASE
+      WHEN NOT has_function_privilege('authenticated', 'public.tageswerk_apply_water_filter_last_flush()', 'EXECUTE')
+       AND NOT has_function_privilege('authenticated', 'public.tageswerk_stamp_water_filter_flush()', 'EXECUTE')
+       AND NOT has_function_privilege('authenticated', 'public.tageswerk_normalize_water_filter()', 'EXECUTE')
+       AND NOT has_function_privilege('authenticated', 'public.tageswerk_protect_water_filter()', 'EXECUTE')
+       AND NOT has_function_privilege('authenticated', 'public.tageswerk_protect_water_filter_flush()', 'EXECUTE')
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Triggerfunktionen sind nicht direkt ausführbar.'
   UNION ALL
   SELECT 90, 'RLS erzwungen',
     CASE

@@ -202,8 +202,17 @@ AS $tageswerk$
 DECLARE
   latest public.water_filter_flushes;
 BEGIN
-  -- Läuft als Tabelleneigentümer, damit Mitarbeiter die letzte Spülung am Filter
-  -- aktualisieren können, ohne Filter-UPDATE-Rechte zu erhalten.
+  -- Nur als AFTER-INSERT-Trigger. Kein direktes Aufrufen: EXECUTE ist entzogen.
+  -- SECURITY DEFINER aktualisiert last_* ohne Filter-UPDATE-Recht für Mitarbeiter.
+  -- Mit FORCE RLS muss der Funktions-Eigentümer Tabelleneigentümer bzw. BYPASSRLS sein
+  -- (Supabase-Standard: Migration als postgres).
+  IF TG_OP IS DISTINCT FROM 'INSERT' OR TG_LEVEL IS DISTINCT FROM 'ROW' OR TG_WHEN IS DISTINCT FROM 'AFTER' THEN
+    RAISE EXCEPTION 'Die letzte Spülung wird nur nach einer neuen Spüldokumentation gesetzt.';
+  END IF;
+  IF NEW.filter_id IS NULL OR NEW.id IS NULL THEN
+    RAISE EXCEPTION 'Die Spülung ist unvollständig.';
+  END IF;
+
   SELECT *
     INTO latest
   FROM public.water_filter_flushes AS flush_row
@@ -211,10 +220,15 @@ BEGIN
   ORDER BY flush_row.flushed_at DESC, flush_row.recorded_at DESC, flush_row.id DESC
   LIMIT 1;
 
+  IF latest.id IS NULL THEN
+    RAISE EXCEPTION 'Die Spülung wurde nicht gefunden.';
+  END IF;
+
   UPDATE public.water_filters AS filter_row
   SET last_flushed_at = latest.flushed_at,
       last_flushed_by = latest.recorded_by
   WHERE filter_row.id = NEW.filter_id
+    AND filter_row.id = latest.filter_id
     AND (
       filter_row.last_flushed_at IS DISTINCT FROM latest.flushed_at
       OR filter_row.last_flushed_by IS DISTINCT FROM latest.recorded_by
@@ -234,12 +248,14 @@ CREATE TRIGGER water_filters_protect
   BEFORE UPDATE OR DELETE ON public.water_filters
   FOR EACH ROW EXECUTE FUNCTION public.tageswerk_protect_water_filter();
 
-CREATE TRIGGER water_filter_flushes_bind_facility
-  BEFORE INSERT OR UPDATE OF facility_id ON public.water_filter_flushes
-  FOR EACH ROW EXECUTE FUNCTION public.tageswerk_bind_operation_facility();
-CREATE TRIGGER water_filter_flushes_stamp
+-- Alphabetische Reihenfolge steuert BEFORE-INSERT: Stamp setzt Betrieb/Becken aus dem Filter,
+-- Bind bestätigt danach organization_id zum gestempelten facility_id.
+CREATE TRIGGER water_filter_flushes_a_stamp
   BEFORE INSERT ON public.water_filter_flushes
   FOR EACH ROW EXECUTE FUNCTION public.tageswerk_stamp_water_filter_flush();
+CREATE TRIGGER water_filter_flushes_b_bind
+  BEFORE INSERT OR UPDATE OF facility_id ON public.water_filter_flushes
+  FOR EACH ROW EXECUTE FUNCTION public.tageswerk_bind_operation_facility();
 CREATE TRIGGER water_filter_flushes_protect
   BEFORE UPDATE OR DELETE ON public.water_filter_flushes
   FOR EACH ROW EXECUTE FUNCTION public.tageswerk_protect_water_filter_flush();
@@ -308,10 +324,11 @@ REVOKE ALL ON TABLE public.water_filter_flushes FROM PUBLIC, anon;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.water_filters TO authenticated;
 GRANT SELECT, INSERT ON TABLE public.water_filter_flushes TO authenticated;
 
-REVOKE ALL ON FUNCTION public.tageswerk_normalize_water_filter() FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter() FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_filter_flush() FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_flush() FROM PUBLIC, anon;
+-- Triggerfunktionen nicht direkt ausführbar machen. Trigger brauchen kein GRANT EXECUTE.
+REVOKE ALL ON FUNCTION public.tageswerk_normalize_water_filter() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_stamp_water_filter_flush() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_flush() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_apply_water_filter_last_flush() FROM PUBLIC, anon, authenticated;
 
 COMMIT;
