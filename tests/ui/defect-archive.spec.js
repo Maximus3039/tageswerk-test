@@ -20,6 +20,7 @@ function query(table) {
   eq() {return chain},
   order() {return chain},
   limit() {return chain},
+  range() {return chain},
   insert() {return Promise.resolve({data: null, error: null})},
   update() {return chain},
   then(ok, bad) {return result.then(ok, bad)}

@@ -131,8 +131,11 @@ test('Die Migration schützt das Archiv und lässt die bisherige Bearbeitung ste
  assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_archive_closed_defects/i);
  assert.doesNotMatch(check, /SELECT\s+public\.tageswerk_restore_archived_defect/i);
  assert.equal(runner.includes('tageswerk_3_5_1_defect_archive.sql'), false);
- assert.match(ui, /employee_update_assigned_defect/);
- assert.match(ui, /update\(\{status:statusSelect\.value,assigned_to:assign\.value\|\|null,change_note:note\.value\.trim\(\)\|\|null\}\)/);
+ const store = readFileSync(new URL('../../js/defects-store.js', import.meta.url), 'utf8');
+ assert.match(ui, /employeeUpdateAssignedDefect/);
+ assert.match(store, /employee_update_assigned_defect/);
+ assert.match(ui, /updateDefectRow\(defect\.id,\{status:statusSelect\.value,assigned_to:assign\.value\|\|null,change_note:note\.value\.trim\(\)\|\|null\}\)/);
+ assert.match(store, /\.update\(patch\)\.eq\('id', defectId\)/);
  assert.match(ui, /Gesehen & archivieren/);
  assert.match(ui, /Alle abgeschlossenen Mängel archivieren/);
  assert.match(ui, /Aus Archiv zurückholen/);

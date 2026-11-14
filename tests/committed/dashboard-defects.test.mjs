@@ -106,16 +106,21 @@ test('Dashboard und Mängel-UI nutzen die gemeinsame Filterlogik', () => {
  assert.match(dashboard, /DASHBOARD_DEFECT_LIMIT/);
  assert.doesNotMatch(dashboard, /dash-recent.*sort\(\(a,b\)=>new Date\(b\.created_at\)/);
  assert.match(ui, /myActiveDefects/);
- assert.match(ui, /isActiveDefect\(defect\)/);
+ assert.match(ui, /scopeDefects/);
+ assert.match(ui, /defectFacilityFilter/);
  const css = readFileSync(new URL('../../css/app.css', import.meta.url), 'utf8');
  assert.match(css, /\.dashboard-columns \.dash-list\{max-height:none;overflow:visible\}/);
 });
 
 test('Bestehende Berechtigungsgrenzen bleiben in der Mängel-Ladung erhalten', () => {
  const ui = readFileSync(new URL('../../js/defects-ui.js', import.meta.url), 'utf8');
- assert.match(ui, /allowedFacilities\.has\(defect\.facility_id\)/);
+ const store = readFileSync(new URL('../../js/defects-store.js', import.meta.url), 'utf8');
+ assert.match(ui, /allowed\.has\(defect\.facility_id\)/);
  assert.match(ui, /isManager\(facility\)/);
- assert.match(ui, /tageswerk_archive_closed_defects/);
- assert.match(ui, /tageswerk_archive_defect/);
- assert.match(ui, /tageswerk_restore_archived_defect/);
+ assert.match(ui, /archiveClosedDefectsForFacility/);
+ assert.match(ui, /archiveDefectById/);
+ assert.match(ui, /restoreArchivedDefect/);
+ assert.match(store, /tageswerk_archive_closed_defects/);
+ assert.match(store, /tageswerk_archive_defect/);
+ assert.match(store, /tageswerk_restore_archived_defect/);
 });

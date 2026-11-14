@@ -10,6 +10,7 @@ export const state = {
   staff: [],
   currentUser: null,
   cachedDefects: [],
+  defectFacilityFilter: 'all',
   ackRows: [],
   realtimeChannel: null,
   currentView: "dashboard",

@@ -1,6 +1,7 @@
 const OPEN = ['open', 'in_progress', 'pending_review'];
 const PRIORITY_RANK = {critical: 0, high: 1, normal: 2, low: 3};
 export const DASHBOARD_DEFECT_LIMIT = 10;
+export const DEFECT_FACILITY_ALL = 'all';
 
 export function defectSection(defect) {
  if (defect?.archived_at) return 'archive';
@@ -85,4 +86,34 @@ export function archiveConfirmation(count, facilityName) {
 
 export function openStatuses() {
  return [...OPEN];
+}
+
+export function defectFacilityOptions(facilities) {
+ return [...(facilities || [])].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'de'));
+}
+
+export function resolveDefectFacilityFilter(filter, facilities) {
+ if (filter === DEFECT_FACILITY_ALL || filter == null || filter === '') return DEFECT_FACILITY_ALL;
+ return (facilities || []).some(facility => facility.id === filter) ? filter : DEFECT_FACILITY_ALL;
+}
+
+export function filterDefectsByFacility(defects, facilityFilter) {
+ const selected = facilityFilter || DEFECT_FACILITY_ALL;
+ if (selected === DEFECT_FACILITY_ALL) return [...(defects || [])];
+ return (defects || []).filter(defect => defect.facility_id === selected);
+}
+
+export function visibleDefectsForMode(defects, mode, userId) {
+ return (defects || []).filter(defect => {
+  if (mode === 'mine') return defect.assigned_to === userId && isActiveDefect(defect);
+  if (mode === 'open') return isActiveDefect(defect);
+  if (mode === 'review') return defect.status === 'pending_review' && isActiveDefect(defect);
+  return true;
+ });
+}
+
+export function scopeDefects(defects, {facilityFilter = DEFECT_FACILITY_ALL, mode = 'all', userId = null} = {}) {
+ const scoped = filterDefectsByFacility(defects, facilityFilter);
+ if (mode === 'all') return scoped;
+ return visibleDefectsForMode(scoped, mode, userId);
 }

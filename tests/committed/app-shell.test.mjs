@@ -80,7 +80,7 @@ test('Event-Listener der Shell-IDs bleiben einmalig registriert', () => {
  }
  const duplicates = [...counts.entries()].filter(([, count]) => count > 1);
  assert.deepEqual(duplicates, []);
- for (const id of ['invite-form', 'staff-form', 'defect-form', 'defect-filter', 'dashboard-facility', 'form', 'reload']) {
+ for (const id of ['invite-form', 'staff-form', 'defect-form', 'defect-filter', 'defect-facility-filter', 'dashboard-facility', 'form', 'reload']) {
   assert.equal(counts.get(id), 1, id);
  }
 });
@@ -90,5 +90,6 @@ test('js-Ordner enthält die Shell-Module der Modularisierung', () => {
  assert.ok(names.has('app.js'));
  assert.ok(names.has('dashboard.js'));
  assert.ok(names.has('defects-ui.js'));
+ assert.ok(names.has('defects-store.js'));
  assert.ok(names.has('staff-ui.js'));
 });
