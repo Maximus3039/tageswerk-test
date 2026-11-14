@@ -58,10 +58,20 @@ import {
  canCorrectWaterFilterFlush,
  canManageWaterFilters,
  canReadWaterFilterFlushHistory,
+ canReadWaterFilterStatusHistory,
  canRecordWaterFilterFlush,
+ filterFlushHistoryRows,
+ filterStatusHistoryRows,
+ filterStatusLabel,
+ filterStatusTone,
+ filtersForFacility,
  filtersForPool,
  flushCorrectionMark,
- flushesForFacility
+ flushHistoryPeriodBounds,
+ waterFilterDraftError,
+ waterFilterFlushCorrectionDraftError,
+ waterFilterFlushDraftError,
+ waterFilterStatusDraftError
 } from './water-filters.js';
 import {
  actor,
@@ -1091,6 +1101,33 @@ function poolName(data, poolId) {
  return (data.waterPools || []).find(item => item.id === poolId)?.name || 'Becken';
 }
 
+function staffName(userId) {
+ if (!userId) return '—';
+ const names = context().names || {};
+ if (names[userId]) return names[userId];
+ return 'Mitarbeiter';
+}
+
+function formatFlushWhen(value) {
+ if (!value) return 'Noch keine Spülung';
+ try {
+  return berlinLocal(new Date(value)).replace('T', ' ');
+ } catch {
+  return String(value);
+ }
+}
+
+function fillSelect(node, options, selected) {
+ node.replaceChildren();
+ for (const option of options) {
+  const item = document.createElement('option');
+  item.value = option.value;
+  item.textContent = option.label;
+  node.append(item);
+ }
+ if (selected != null && selected !== '') node.value = selected;
+}
+
 function renderWaterFilters(host, current, data) {
  if (!opsUi.waterFiltersInstalled) {
   const note = document.createElement('p');
@@ -1105,9 +1142,11 @@ function renderWaterFilters(host, current, data) {
  const record = canRecordWaterFilterFlush(current, person.memberships);
  const history = canReadWaterFilterFlushHistory(current, person.memberships);
  const correct = canCorrectWaterFilterFlush(current, person.memberships);
- const pools = (data.waterPools || []).filter(pool => pool.facilityId === current.id);
- const filters = (data.waterFilters || []).filter(filter => filter.facilityId === current.id);
- const flushes = flushesForFacility(data.waterFilterFlushes || [], current.id);
+ const statusHistory = canReadWaterFilterStatusHistory(current, person.memberships);
+ const pools = (data.waterPools || []).filter(pool => pool.facilityId === current.id)
+  .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'de'));
+ const filters = filtersForFacility(data.waterFilters || [], current.id);
+ const events = data.waterFilterStatusEvents || [];
 
  const section = document.createElement('section');
  section.className = 'water-filters';
@@ -1115,49 +1154,118 @@ function renderWaterFilters(host, current, data) {
  heading.textContent = 'Filterspülungen';
  section.append(heading);
 
+ const overview = document.createElement('div');
+ overview.className = 'water-filter-overview';
+ const overviewTitle = document.createElement('h3');
+ overviewTitle.textContent = 'Filterübersicht';
+ overview.append(overviewTitle);
+ if (!filters.length) {
+  const empty = document.createElement('p');
+  empty.className = 'help';
+  empty.textContent = manage ? 'Noch keine Filter angelegt.' : 'Keine aktiven Filter in diesem Betrieb.';
+  overview.append(empty);
+ } else {
+  let shown = 0;
+  for (const pool of pools) {
+   const poolFilters = filtersForPool(filters, pool.id, {includeInactive: manage || history});
+   if (!poolFilters.length) continue;
+   shown += 1;
+   const poolBlock = document.createElement('div');
+   poolBlock.className = 'water-filter-pool';
+   const poolHeading = document.createElement('h4');
+   poolHeading.textContent = pool.name || 'Becken';
+   poolBlock.append(poolHeading);
+   const cards = document.createElement('div');
+   cards.className = 'water-filter-cards';
+   for (const filter of poolFilters) {
+    const card = document.createElement('article');
+    card.className = `water-filter-card ${filterStatusTone(filter)}`;
+    const name = document.createElement('strong');
+    name.textContent = filter.name;
+    const status = document.createElement('span');
+    status.className = `badge ${filter.active === false ? 'inactive' : 'active'}`;
+    status.textContent = filterStatusLabel(filter);
+    const last = document.createElement('p');
+    last.className = 'help';
+    last.textContent = `Letzte Spülung: ${formatFlushWhen(filter.lastFlushedAt)}`;
+    const who = document.createElement('p');
+    who.className = 'help';
+    who.textContent = `Verantwortlich: ${filter.lastFlushedBy ? staffName(filter.lastFlushedBy) : '—'}`;
+    card.append(name, status, last, who);
+    if (manage) {
+     const rename = input(filter.name);
+     const reason = input();
+     reason.placeholder = 'Begründung Statuswechsel (Pflicht)';
+     const actions = document.createElement('div');
+     actions.className = 'point-actions';
+     actions.append(button('Umbenennen', 'secondary', () => {
+      const error = waterFilterDraftError({poolId: filter.poolId, name: rename.value});
+      if (error) {
+       say('error', error);
+       return;
+      }
+      return commit(() => saveWaterFilterChange(database(), bundle(), filter.id, {name: rename.value}, person, context()));
+     }));
+     actions.append(button(filter.active === false ? 'Wieder in Betrieb' : 'Außer Betrieb', 'secondary', () => {
+      const nextActive = filter.active === false;
+      const error = waterFilterStatusDraftError({active: nextActive, reason: reason.value});
+      if (error) {
+       say('error', error);
+       return;
+      }
+      return commit(() => saveWaterFilterActive(database(), bundle(), filter.id, nextActive, reason.value, person, context()));
+     }));
+     card.append(labeled('Neuer Name', rename), labeled('Begründung', reason), actions);
+    }
+    cards.append(card);
+   }
+   poolBlock.append(cards);
+   overview.append(poolBlock);
+  }
+  if (!shown) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Keine aktiven Filter in diesem Betrieb.';
+   overview.append(empty);
+  }
+ }
+ section.append(overview);
+
  if (manage) {
-  const manageBox = document.createElement('div');
-  manageBox.className = 'water-settings';
+  const createBox = document.createElement('div');
+  createBox.className = 'manage water-filter-create';
   const title = document.createElement('h3');
-  title.textContent = 'Filterverwaltung';
-  manageBox.append(title);
+  title.textContent = 'Filter hinzufügen';
   const pool = select(pools.map(item => ({value: item.id, label: item.name})));
   const name = input();
   name.placeholder = 'Filterbezeichnung';
-  manageBox.append(labeled('Becken', pool), labeled('Neuer Filter', name));
-  manageBox.append(button('Filter anlegen', '', () => commit(() => saveWaterFilter(database(), bundle(), current, {poolId: pool.value, name: name.value}, person, context()))));
-  for (const filter of filters.sort((left, right) => String(left.name).localeCompare(String(right.name), 'de'))) {
-   const row = document.createElement('div');
-   row.className = 'item';
-   const rename = input(filter.name);
-   const statusReason = input();
-   statusReason.placeholder = 'Begründung für Außerbetriebnahme oder Reaktivierung';
-   row.append(labeled(`${poolName(data, filter.poolId)} · ${filter.active === false ? 'außer Betrieb' : 'in Betrieb'}`, rename));
-   row.append(labeled('Begründung Statuswechsel', statusReason));
-   row.append(button('Umbenennen', 'secondary', () => commit(() => saveWaterFilterChange(database(), bundle(), filter.id, {name: rename.value}, person, context()))));
-   row.append(button(filter.active === false ? 'Reaktivieren' : 'Außer Betrieb', 'secondary', () => commit(() => saveWaterFilterActive(database(), bundle(), filter.id, filter.active === false, statusReason.value, person, context()))));
-   manageBox.append(row);
-  }
-  section.append(manageBox);
+  createBox.append(title, labeled('Becken', pool), labeled('Bezeichnung', name));
+  createBox.append(button('Filter anlegen', '', () => {
+   const draft = {poolId: pool.value, name: name.value};
+   const error = waterFilterDraftError(draft);
+   if (error) {
+    say('error', error);
+    return;
+   }
+   return commit(() => saveWaterFilter(database(), bundle(), current, draft, person, context()));
+  }));
+  section.append(createBox);
  }
 
  if (record) {
   const capture = document.createElement('div');
-  capture.className = 'water-readings';
+  capture.className = 'water-readings water-filter-capture';
   const title = document.createElement('h3');
-  title.textContent = 'Spülung erfassen';
+  title.textContent = 'Spülung dokumentieren';
   capture.append(title);
+  const help = document.createElement('p');
+  help.className = 'help';
+  help.textContent = 'Zeitpunkt ist vorbelegt. Nachträge sind höchstens 24 Stunden zulässig.';
+  capture.append(help);
   const pool = select([{value: '', label: 'Becken wählen'}].concat(pools.filter(item => item.active !== false).map(item => ({value: item.id, label: item.name}))));
   const filter = select([{value: '', label: 'Filter wählen'}]);
   const paintFilters = () => {
-   const options = filtersForPool(filters, pool.value).map(item => ({value: item.id, label: item.name}));
-   filter.replaceChildren();
-   for (const option of [{value: '', label: 'Filter wählen'}].concat(options)) {
-    const node = document.createElement('option');
-    node.value = option.value;
-    node.textContent = option.label;
-    filter.append(node);
-   }
+   fillSelect(filter, [{value: '', label: 'Filter wählen'}].concat(filtersForPool(filters, pool.value).map(item => ({value: item.id, label: item.name}))), '');
   };
   pool.addEventListener('change', paintFilters);
   paintFilters();
@@ -1166,46 +1274,120 @@ function renderWaterFilters(host, current, data) {
   when.value = toLocalInputValue(new Date().toISOString());
   const note = input();
   note.placeholder = 'Optionale Bemerkung';
-  capture.append(labeled('Becken', pool), labeled('Filter', filter), labeled('Zeitpunkt (Nachtrag optional)', when), labeled('Bemerkung', note));
-  capture.append(button('Spülung speichern', '', () => commit(() => saveWaterFilterFlush(database(), bundle(), current, {
-   filterId: filter.value,
-   flushedAt: fromLocalInputValue(when.value) || new Date().toISOString(),
-   note: note.value
-  }, person, new Date().toISOString(), context()))));
+  const save = button('Spülung speichern', '', async () => {
+   const draft = {
+    filterId: filter.value,
+    flushedAt: fromLocalInputValue(when.value) || new Date().toISOString(),
+    note: note.value
+   };
+   const error = waterFilterFlushDraftError(draft, new Date());
+   if (error) {
+    say('error', error);
+    return;
+   }
+   const result = await commit(() => saveWaterFilterFlush(database(), bundle(), current, draft, person, new Date().toISOString(), context()));
+   if (result?.ok) {
+    note.value = '';
+    when.value = toLocalInputValue(new Date().toISOString());
+   }
+  });
+  capture.append(labeled('Becken', pool), labeled('Aktiver Filter', filter), labeled('Zeitpunkt', when), labeled('Bemerkung', note), save);
   section.append(capture);
  }
 
  if (history) {
+  if (!opsUi.flushHistoryFrom || !opsUi.flushHistoryTo) {
+   const bounds = flushHistoryPeriodBounds(opsUi.flushHistoryPeriod || '30');
+   opsUi.flushHistoryFrom = bounds.from;
+   opsUi.flushHistoryTo = bounds.to;
+  }
   const historyBox = document.createElement('div');
-  historyBox.className = 'water-history';
+  historyBox.className = 'water-history water-filter-history';
   const title = document.createElement('h3');
   title.textContent = 'Spülhistorie';
   historyBox.append(title);
-  if (!flushes.length) {
+  const filtersBar = document.createElement('div');
+  filtersBar.className = 'water-history-filters';
+  const poolFilter = select([{value: '', label: 'Alle Becken'}].concat(pools.map(item => ({value: item.id, label: item.name}))), opsUi.flushHistoryPoolId || '');
+  const filterFilter = select([{value: '', label: 'Alle Filter'}]);
+  const paintHistoryFilters = () => {
+   const poolId = poolFilter.value;
+   const options = filtersForPool(filters, poolId, {includeInactive: true});
+   const list = poolId ? options : filters;
+   fillSelect(filterFilter, [{value: '', label: 'Alle Filter'}].concat(list.map(item => ({value: item.id, label: `${poolName(data, item.poolId)} · ${item.name}`}))), opsUi.flushHistoryFilterId || '');
+  };
+  paintHistoryFilters();
+  const from = input(opsUi.flushHistoryFrom || '');
+  from.type = 'date';
+  const to = input(opsUi.flushHistoryTo || '');
+  to.type = 'date';
+  const periodBar = document.createElement('div');
+  periodBar.className = 'water-period-presets figure-presets';
+  for (const [value, label] of [['today', 'Heute'], ['7', '7 Tage'], ['30', '30 Tage']]) {
+   const preset = button(label, 'secondary', () => {
+    opsUi.flushHistoryPeriod = value;
+    const bounds = flushHistoryPeriodBounds(value);
+    opsUi.flushHistoryFrom = bounds.from;
+    opsUi.flushHistoryTo = bounds.to;
+    renderPanel();
+   });
+   preset.setAttribute('aria-pressed', opsUi.flushHistoryPeriod === value ? 'true' : 'false');
+   periodBar.append(preset);
+  }
+  const applyFilters = () => {
+   opsUi.flushHistoryPoolId = poolFilter.value;
+   opsUi.flushHistoryFilterId = filterFilter.value;
+   opsUi.flushHistoryFrom = from.value;
+   opsUi.flushHistoryTo = to.value;
+   opsUi.flushHistoryPeriod = 'custom';
+   renderPanel();
+  };
+  poolFilter.addEventListener('change', () => {
+   opsUi.flushHistoryPoolId = poolFilter.value;
+   opsUi.flushHistoryFilterId = '';
+   paintHistoryFilters();
+   applyFilters();
+  });
+  filterFilter.addEventListener('change', applyFilters);
+  from.addEventListener('change', applyFilters);
+  to.addEventListener('change', applyFilters);
+  filtersBar.append(labeled('Becken', poolFilter), labeled('Filter', filterFilter), labeled('Von', from), labeled('Bis', to), periodBar);
+  historyBox.append(filtersBar);
+
+  const rows = filterFlushHistoryRows(data.waterFilterFlushes || [], {
+   facilityId: current.id,
+   poolId: opsUi.flushHistoryPoolId || '',
+   filterId: opsUi.flushHistoryFilterId || '',
+   from: opsUi.flushHistoryFrom || '',
+   to: opsUi.flushHistoryTo || ''
+  });
+  if (!rows.length) {
    const empty = document.createElement('p');
    empty.className = 'help';
-   empty.textContent = 'Noch keine Spülungen dokumentiert.';
+   empty.textContent = 'Keine Spülungen im gewählten Zeitraum.';
    historyBox.append(empty);
   } else {
    const table = document.createElement('table');
    table.className = 'water-table';
    const head = document.createElement('tr');
-   for (const label of ['Zeitpunkt', 'Becken', 'Filter', 'Erfasst von', 'Bemerkung', 'Korrektur']) {
+   for (const label of ['Zeitpunkt', 'Becken', 'Filter', 'Erfasst von', 'Bemerkung', 'Kennzeichnung']) {
     const cell = document.createElement('th');
     cell.textContent = label;
     head.append(cell);
    }
    table.append(head);
-   for (const flush of flushes) {
+   for (const flush of rows) {
     const row = document.createElement('tr');
     if (opsUi.selectedFlushId === flush.id) row.classList.add('is-selected');
+    if (flush.isCorrected) row.classList.add('is-corrected');
+    const mark = flushCorrectionMark(flush) || '—';
     const values = [
-     berlinLocal(new Date(flush.flushedAt)),
+     formatFlushWhen(flush.flushedAt),
      poolName(data, flush.poolId),
      filterName(data, flush.filterId),
      flush.recordedName || 'Mitarbeiter',
      flush.note || '—',
-     flushCorrectionMark(flush) || '—'
+     mark
     ];
     for (const value of values) {
      const cell = document.createElement('td');
@@ -1213,10 +1395,18 @@ function renderWaterFilters(host, current, data) {
      row.append(cell);
     }
     if (correct) {
-     row.style.cursor = 'pointer';
-     row.onclick = () => {
+     row.tabIndex = 0;
+     row.classList.add('is-selectable');
+     const selectFlush = () => {
       opsUi.selectedFlushId = flush.id;
       renderPanel();
+     };
+     row.onclick = selectFlush;
+     row.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+       event.preventDefault();
+       selectFlush();
+      }
      };
     }
     table.append(row);
@@ -1227,17 +1417,23 @@ function renderWaterFilters(host, current, data) {
  }
 
  if (correct && opsUi.selectedFlushId) {
-  const flush = flushes.find(item => item.id === opsUi.selectedFlushId);
+  const flush = (data.waterFilterFlushes || []).find(item => item.id === opsUi.selectedFlushId);
   if (flush) {
    const box = document.createElement('div');
-   box.className = 'manage';
+   box.className = 'manage water-filter-correct';
    const title = document.createElement('h3');
    title.textContent = 'Spülung korrigieren';
    box.append(title);
    const help = document.createElement('p');
    help.className = 'help';
-   help.textContent = 'Die Originalwerte bleiben im Korrekturprotokoll erhalten. Eine Begründung ist Pflicht.';
+   help.textContent = 'Der Originaleintrag bleibt unverändert. Die Korrektur wird gesondert protokolliert. Begründung ist Pflicht.';
    box.append(help);
+   if (flush.isCorrected) {
+    const mark = document.createElement('p');
+    mark.className = 'notice';
+    mark.textContent = `Bereits korrigiert${flush.correctedAt ? ` am ${formatFlushWhen(flush.correctedAt)}` : ''}${flush.correctedName ? ` von ${flush.correctedName}` : ''}.`;
+    box.append(mark);
+   }
    const activeFilters = filters.filter(item => item.active !== false);
    const filter = select(activeFilters.map(item => ({value: item.id, label: `${poolName(data, item.poolId)} · ${item.name}`})), flush.filterId);
    const when = input();
@@ -1246,15 +1442,27 @@ function renderWaterFilters(host, current, data) {
    const note = input(flush.note || '');
    const reason = input();
    reason.placeholder = 'Begründung der Korrektur';
-   box.append(labeled('Filter', filter), labeled('Spülzeitpunkt', when), labeled('Bemerkung', note), labeled('Begründung', reason));
+   box.append(labeled('Filterzuordnung', filter), labeled('Spülzeitpunkt', when), labeled('Bemerkung', note), labeled('Begründung', reason));
    const actions = document.createElement('div');
-   actions.className = 'row';
-   actions.append(button('Korrektur speichern', '', () => commit(() => saveWaterFilterFlushCorrection(database(), bundle(), flush.id, {
-    filterId: filter.value,
-    flushedAt: fromLocalInputValue(when.value),
-    note: note.value,
-    reason: reason.value
-   }, person, context()))));
+   actions.className = 'row point-actions';
+   actions.append(button('Korrektur speichern', '', () => {
+    const draft = {
+     filterId: filter.value,
+     flushedAt: fromLocalInputValue(when.value),
+     note: note.value,
+     reason: reason.value
+    };
+    const error = waterFilterFlushCorrectionDraftError(draft, flush);
+    if (error) {
+     say('error', error);
+     return;
+    }
+    return commit(async () => {
+     const result = await saveWaterFilterFlushCorrection(database(), bundle(), flush.id, draft, person, context());
+     if (result?.ok) opsUi.selectedFlushId = '';
+     return result;
+    });
+   }));
    actions.append(button('Abbrechen', 'secondary', () => {
     opsUi.selectedFlushId = '';
     renderPanel();
@@ -1262,6 +1470,50 @@ function renderWaterFilters(host, current, data) {
    box.append(actions);
    section.append(box);
   }
+ }
+
+ if (statusHistory) {
+  const box = document.createElement('div');
+  box.className = 'water-filter-status-history';
+  const title = document.createElement('h3');
+  title.textContent = 'Statushistorie';
+  box.append(title);
+  const filterFilter = select([{value: '', label: 'Alle Filter'}].concat(filters.map(item => ({
+   value: item.id,
+   label: `${poolName(data, item.poolId)} · ${item.name}`
+  }))), opsUi.statusHistoryFilterId || '');
+  filterFilter.addEventListener('change', () => {
+   opsUi.statusHistoryFilterId = filterFilter.value;
+   renderPanel();
+  });
+  box.append(labeled('Filter', filterFilter));
+  const rows = filterStatusHistoryRows(events, {
+   facilityId: current.id,
+   filterId: opsUi.statusHistoryFilterId || ''
+  });
+  if (!rows.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Noch keine dokumentierten Statuswechsel.';
+   box.append(empty);
+  } else {
+   for (const event of rows) {
+    const card = document.createElement('article');
+    card.className = 'water-filter-status-card';
+    const headingLine = document.createElement('strong');
+    headingLine.textContent = filterName(data, event.filterId);
+    const facts = document.createElement('p');
+    facts.className = 'help';
+    const fromLabel = event.oldActive ? 'In Betrieb' : 'Außer Betrieb';
+    const toLabel = event.newActive ? 'In Betrieb' : 'Außer Betrieb';
+    facts.textContent = `${formatFlushWhen(event.changedAt)} · ${fromLabel} → ${toLabel} · ${event.changedName || staffName(event.changedBy)}`;
+    const reason = document.createElement('p');
+    reason.textContent = event.reason || '';
+    card.append(headingLine, facts, reason);
+    box.append(card);
+   }
+  }
+  section.append(box);
  }
 
  host.append(section);

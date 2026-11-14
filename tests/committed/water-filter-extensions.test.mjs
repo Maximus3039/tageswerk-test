@@ -5,6 +5,7 @@ import {
  canCorrectWaterFilterFlush,
  canManageWaterFilters,
  canReadWaterFilterFlushHistory,
+ canReadWaterFilterStatusHistory,
  canRecordWaterFilterFlush,
  flushCorrectionMark,
  waterFilterDraftError,
@@ -113,10 +114,14 @@ test('Oberflächenrechte trennen Erfassen, Lesen und Korrigieren', () => {
  assert.equal(canReadWaterFilterFlushHistory(facility, employee), false);
  assert.equal(canCorrectWaterFilterFlush(facility, employee), false);
  assert.equal(canManageWaterFilters(facility, employee), false);
+ assert.equal(canReadWaterFilterStatusHistory(facility, employee), false);
  assert.equal(canReadWaterFilterFlushHistory(facility, technician), true);
  assert.equal(canCorrectWaterFilterFlush(facility, technician), false);
+ assert.equal(canReadWaterFilterStatusHistory(facility, technician), false);
  assert.equal(canCorrectWaterFilterFlush(facility, manager), true);
+ assert.equal(canReadWaterFilterStatusHistory(facility, manager), true);
  assert.equal(canCorrectWaterFilterFlush(facility, admin), true);
+ assert.equal(canReadWaterFilterStatusHistory(facility, admin), true);
 });
 
 test('Entwürfe für Korrektur und Statuswechsel bleiben begrenzt', () => {

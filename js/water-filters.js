@@ -1,4 +1,5 @@
 import {facilityVisibleToMember, membershipCoversFacility, waterHistoryRole} from './permissions.js';
+import {berlinDay, waterHistoryPeriodWindow} from './operations.js';
 
 export function canManageWaterFilters(facility, memberships) {
  return (memberships || []).some(membership => membershipCoversFacility(facility, membership, false));
@@ -13,6 +14,10 @@ export function canReadWaterFilterFlushHistory(facility, memberships) {
 }
 
 export function canCorrectWaterFilterFlush(facility, memberships) {
+ return canManageWaterFilters(facility, memberships);
+}
+
+export function canReadWaterFilterStatusHistory(facility, memberships) {
  return canManageWaterFilters(facility, memberships);
 }
 
@@ -58,9 +63,22 @@ export function waterFilterFlushCorrectionDraftError(draft, original) {
  return '';
 }
 
+export function waterFilterStatusDraftError(draft) {
+ const reason = String(draft?.reason ?? '').trim();
+ if (reason.length < 3 || reason.length > 2000) return 'Bitte eine Begründung mit 3 bis 2000 Zeichen angeben.';
+ if (typeof draft?.active !== 'boolean') return 'Der neue Status fehlt.';
+ return '';
+}
+
 export function filtersForPool(filters, poolId, {includeInactive = false} = {}) {
  return (filters || [])
   .filter(filter => filter.poolId === poolId && (includeInactive || filter.active !== false))
+  .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'de'));
+}
+
+export function filtersForFacility(filters, facilityId) {
+ return (filters || [])
+  .filter(filter => filter.facilityId === facilityId)
   .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'de'));
 }
 
@@ -76,16 +94,38 @@ export function flushesForFacility(flushes, facilityId) {
   .sort((left, right) => String(right.flushedAt || '').localeCompare(String(left.flushedAt || '')));
 }
 
+export function filterFlushHistoryRows(flushes, {facilityId, poolId = '', filterId = '', from = '', to = ''} = {}) {
+ return flushesForFacility(flushes, facilityId).filter(flush => {
+  if (poolId && flush.poolId !== poolId) return false;
+  if (filterId && flush.filterId !== filterId) return false;
+  const day = berlinDay(flush.flushedAt);
+  if (from && (!day || day < from)) return false;
+  if (to && (!day || day > to)) return false;
+  return true;
+ });
+}
+
+export function filterStatusHistoryRows(events, {facilityId, filterId = ''} = {}) {
+ return (events || [])
+  .filter(event => event.facilityId === facilityId && (!filterId || event.filterId === filterId))
+  .sort((left, right) => String(right.changedAt || '').localeCompare(String(left.changedAt || '')));
+}
+
+export function flushHistoryPeriodBounds(period, now = new Date()) {
+ return waterHistoryPeriodWindow(period, now);
+}
+
 export function flushCorrectionMark(flush) {
  if (flush?.isCorrected === true || flush?.correctedAt || Number(flush?.correctionCount) > 0) return 'Korrigiert';
  return '';
 }
 
-export function waterFilterStatusDraftError(draft) {
- const reason = String(draft?.reason ?? '').trim();
- if (reason.length < 3 || reason.length > 2000) return 'Bitte eine Begründung mit 3 bis 2000 Zeichen angeben.';
- if (typeof draft?.active !== 'boolean') return 'Der neue Status fehlt.';
- return '';
+export function filterStatusLabel(filter) {
+ return filter?.active === false ? 'Außer Betrieb' : 'In Betrieb';
+}
+
+export function filterStatusTone(filter) {
+ return filter?.active === false ? 'is-inactive' : 'is-active';
 }
 
 export function waterFilterInsertPayload(facility, draft, actor) {
