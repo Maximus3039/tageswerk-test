@@ -1,0 +1,125 @@
+Tageswerk 3.5.8 – PostgreSQL-Integrationstests Filterspülungen
+Nur für eine ausdrücklich als Testumgebung bestätigte Supabase-Datenbank.
+Dieses Paket legt keine Instanz an und spricht das produktive Projekt nicht an.
+
+========================================
+1. Zweck
+========================================
+
+Laufzeitnachweise für:
+- Filterverwaltung (anlegen, umbenennen, deaktivieren, reaktivieren)
+- Spülungserfassung und Grenzen (24 Stunden, Zukunft)
+- Korrekturen inkl. Mehrfachkorrektur und Korrekturhistorie
+- Statushistorie
+- Neuberechnung von last_flushed_at / last_flushed_by
+- Mandantentrennung und Rollen
+- Manipulationsschutz und Capability-Sicherheit
+- echte Zwei-Session-Parallelität (Korrektur und Spülung)
+
+Keine automatische Ausführung gegen Supabase.
+Keine schreibenden Tests in der Produktivdatenbank.
+
+========================================
+2. Benötigte Testumgebung
+========================================
+
+- Eigenes Supabase-Projekt nur für Tests (nicht eqtrifscedpsngsysxvc).
+- Leere oder bewusst für Integration freigegebene Instanz.
+- PostgreSQL-Verbindungs-URI (Direct/Session, Rolle mit Rechten für Auth- und Public-Schema).
+- psql im Suchpfad (PostgreSQL-Client).
+- Node.js für die Runner-Skripte.
+- Ausdrückliche Freigabe: TAGESWERK_TEST_DATABASE=bestaetigt
+
+Empfohlen: frische Testinstanz. Die Migrationen sind nicht wiederholbar.
+
+========================================
+3. Datenbankvoraussetzungen
+========================================
+
+Vor den Filter-Migrationen müssen vorhanden sein:
+
+Tabellen
+- public.organizations, public.facilities, public.profiles, public.memberships
+- public.water_pools (aus tageswerk_3_3_water_hygiene.sql)
+- auth.users (Supabase Auth)
+
+Funktionen
+- public.tageswerk_meter_role(uuid,uuid) inkl. technician
+- public.tageswerk_bind_operation_facility()
+- public.tageswerk_facility_organization(uuid)
+
+Rollen / Policies
+- Rolle authenticated
+- Technikerrolle (tageswerk_3_4_technician_role.sql)
+
+Installationsreihenfolge auf leerer Testinstanz
+1. tests/integration/run.mjs
+   (baseline bei Bedarf, dann Temperature → Points → Water → Technician → Invitation → Management)
+2. tageswerk_3_5_8_water_filter_flushes_vorpruefung.sql (lesend)
+3. tageswerk_3_5_8_water_filter_flushes.sql
+4. tageswerk_3_5_8_water_filter_flushes_verhalten.sql
+5. tageswerk_3_5_8_water_filter_extensions_vorpruefung.sql (lesend)
+6. tageswerk_3_5_8_water_filter_extensions.sql
+7. tageswerk_3_5_8_water_filter_extensions_verhalten.sql
+8. tests/integration/water-filters/umbenennen.sql
+9. tests/integration/water-filters/parallelitaet.mjs
+
+Der Runner tests/integration/water-filters/run.mjs orchestriert die Schritte 2–9,
+setzt aber voraus, dass Schritt 1 bereits erfolgreich war (water_pools vorhanden).
+
+========================================
+4. Einrichtung Schritt für Schritt
+========================================
+
+A. Neues Supabase-Projekt anlegen (nur Test).
+B. Database-URL der Testinstanz notieren (nicht die produktive).
+C. psql prüfen: psql --version
+D. Basis-Integration (falls water_pools fehlt):
+
+   $env:TAGESWERK_TEST_DATABASE = 'bestaetigt'
+   $env:TAGESWERK_TEST_DATABASE_URL = 'postgresql://…Testinstanz…'
+   node tests/integration/run.mjs
+
+E. Voraussetzungsprüfung lesen (optional im SQL-Editor, nur lesend):
+
+   tests/integration/water-filters/voraussetzungen.sql
+
+   Alle relevanten Zeilen müssen „bereit“ sein, bevor Schreibschritte starten.
+
+F. Filter-Integration starten:
+
+   $env:TAGESWERK_TEST_DATABASE = 'bestaetigt'
+   $env:TAGESWERK_TEST_DATABASE_URL = 'postgresql://…dieselbe Testinstanz…'
+   node tests/integration/water-filters/run.mjs
+
+G. Bei Fehler: Ausgabe lesen. Die produktive Datenbank wird vom Runner abgelehnt,
+   wenn die URL den Produktivmarker enthält.
+
+H. Wiederholung: neue leere Testinstanz verwenden. Migrationen nicht erneut auf dieselbe Instanz anwenden.
+
+========================================
+5. Testskripte in diesem Paket
+========================================
+
+- voraussetzungen.sql
+  Lesende Abhängigkeit- und Sicherheitsvorprüfung.
+- run.mjs
+  Guarded Orchestrator. Startet nur mit bestätigter Test-URL.
+- umbenennen.sql
+  Umbenennen über Spalten-UPDATE (name), Ablehnung unberechtigter Umbenennung.
+- parallelitaet.mjs
+  Zwei echte psql-Sitzungen: parallele Korrektur und parallele Spülungserfassung.
+
+Bestehende Wurzel-Skripte (vom Runner mit genutzt)
+- tageswerk_3_5_8_water_filter_flushes*.sql
+- tageswerk_3_5_8_water_filter_extensions*.sql
+
+========================================
+6. Sicherheitsregeln
+========================================
+
+- Runner bricht ab ohne TAGESWERK_TEST_DATABASE=bestaetigt.
+- Runner bricht ab, wenn die URL den Produktivmarker enthält.
+- Verhalten-/Ergänzungsskripte prüfen tageswerk.integration_test=bestaetigt.
+- Kein Service-Role-Key in den Skripten.
+- Keine GitHub-Pages- oder App-Veröffentlichung durch dieses Paket.
