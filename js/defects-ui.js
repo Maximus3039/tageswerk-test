@@ -205,13 +205,17 @@ async function restoreDefect(defect,button,msg){
 }
 
 async function defectCard(defect){
- const card=document.createElement('div');card.className='defect';
+ const card=document.createElement('div');
+ card.className=`defect defect-card priority-${defect.priority||'normal'} status-${defect.status||'open'}${defect.archived_at?' is-archived':''}`;
  const facility=state.accessibleFacilities.find(item=>item.id===defect.facility_id);
  const facilityLine=document.createElement('div');facilityLine.className='help';facilityLine.textContent=facility?.name||'Betrieb';
  const title=document.createElement('strong');title.textContent=defect.title;
- const badges=document.createElement('div');badges.className='help';
+ const badges=document.createElement('div');badges.className='defect-badges';
  const when=defect.status==='resolved'?completionText(defect):(defect.created_at?new Date(defect.created_at).toLocaleString('de-DE'):'');
- badges.textContent=[priorityNames[defect.priority]||defect.priority,statusNames[defect.status]||defect.status||'open',when].filter(Boolean).join(' · ');
+ const priorityBadge=document.createElement('span');priorityBadge.className=`badge priority-${defect.priority||'normal'}`;priorityBadge.textContent=priorityNames[defect.priority]||defect.priority;
+ const statusBadge=document.createElement('span');statusBadge.className=`badge status-${defect.status||'open'}`;statusBadge.textContent=statusNames[defect.status]||defect.status||'open';
+ badges.append(priorityBadge,statusBadge);
+ if(when){const whenBadge=document.createElement('span');whenBadge.className='badge muted-badge';whenBadge.textContent=when;badges.append(whenBadge)}
  card.append(facilityLine,title,badges);
  if(defect.description){const description=document.createElement('p');description.textContent=defect.description;card.append(description)}
  if(defect.assigned_to){const assigned=document.createElement('p');assigned.className='help';assigned.textContent='Zugewiesen an: '+(state.staff.find(item=>item.user_id===defect.assigned_to)?.name||defect.assigned_to.slice(0,8));card.append(assigned)}
