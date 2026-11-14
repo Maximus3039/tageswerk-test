@@ -175,7 +175,7 @@ FROM (
        AND coalesce(filter_insert.with_check, '') ILIKE '%company_admin%'
        AND coalesce(filter_insert.with_check, '') ILIKE '%facility_manager%'
        AND coalesce(filter_insert.with_check, '') NOT ILIKE '%technician%'
-       AND coalesce(filter_insert.with_check, '') !~* $$=\s*'employee'|ANY\s*\(.*'employee'$$
+       AND coalesce(filter_insert.with_check, '') !~* $re$=\s*'employee'|ANY\s*\([^)]*'employee'$re$
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Historie nur Techniker/Leitung/Admin; Mitarbeiter nur aktive Filter; Verwaltung nur Leitung/Admin.'

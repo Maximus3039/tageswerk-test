@@ -77,8 +77,13 @@ test('Prüfskripte decken Schema und Verhalten ab ohne Produktivzwang', () => {
  assert.match(diagnose, /Lesende Diagnose/);
  assert.match(diagnose, /Schreibt nichts/);
  assert.match(diagnose, /fehlschlag_der_prueflogik/);
- assert.match(diagnose, /= ANY \(ARRAY/);
- assert.doesNotMatch(diagnose, /INSERT INTO|UPDATE |DELETE FROM|DROP POLICY|CREATE POLICY/i);
+ assert.match(diagnose, /=\s*ANY\s*\(ARRAY/);
+ assert.match(diagnose, /\$\$flush_select: technician\$\$/);
+ assert.match(diagnose, /\$\$'technician', 'facility_manager', 'company_admin'\$\$/);
+ assert.match(diagnose, /Katalog: alle water_filters/);
+ assert.match(diagnose, /Endgültige RLS-Sicherheit/);
+ assert.doesNotMatch(diagnose, /position\(''''/);
+ assert.doesNotMatch(diagnose, /\bINSERT INTO\b|\bDELETE FROM\b|\bDROP POLICY\b|\bCREATE POLICY\b|\bALTER POLICY\b/i);
  assert.match(verhalten, /NICHT in der Produktivdatenbank/);
  assert.match(verhalten, /tageswerk\.integration_test/);
  assert.match(verhalten, /Nachtrag außerhalb 24 Stunden/);
