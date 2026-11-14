@@ -90,3 +90,54 @@ test('Techniker behalten den Textbericht ohne Kennzahlen', async ({page}) => {
  await expect(page.locator('#day-figures')).toHaveCount(0);
  await expect(page.getByRole('button', {name: 'Kennzahlen speichern'})).toHaveCount(0);
 });
+
+test('Die Auswertungsschaltflächen bleiben auf dem Smartphone kompakt', async ({page}, testInfo) => {
+ test.skip(testInfo.project.name !== 'smartphone', 'Nur für die Smartphone-Ansicht');
+ await openReports(page, 'manager');
+ const board = page.locator('#day-figures');
+ const filters = board.locator('.figure-filters');
+ const presets = board.locator('.figure-presets');
+ await expect(filters.getByRole('button', {name: 'Zeitraum anzeigen'})).toBeVisible();
+ await expect(presets.getByRole('button')).toHaveCount(4);
+ await presets.scrollIntoViewIfNeeded();
+ const layout = await presets.evaluate(el => {
+  const style = getComputedStyle(el);
+  const buttons = [...el.querySelectorAll('button')].map(btn => {
+   const box = btn.getBoundingClientRect();
+   return {text: btn.textContent.trim(), top: box.top, left: box.left, width: box.width, height: box.height};
+  });
+  return {display: style.display, columns: style.gridTemplateColumns, buttons};
+ });
+ expect(layout.display).toBe('grid');
+ expect(layout.columns.split(' ').filter(Boolean)).toHaveLength(2);
+ const month = layout.buttons.find(btn => btn.text === 'Aktueller Monat');
+ const previous = layout.buttons.find(btn => btn.text === 'Vorheriger Monat');
+ const year = layout.buttons.find(btn => btn.text === 'Aktuelles Jahr');
+ expect(month.height).toBeGreaterThanOrEqual(44);
+ expect(month.height).toBeLessThanOrEqual(56);
+ expect(Math.abs(previous.top - month.top)).toBeLessThan(2);
+ expect(previous.left).toBeGreaterThan(month.left + month.width - 1);
+ expect(year.top).toBeGreaterThan(month.top + month.height - 1);
+ const show = await filters.getByRole('button', {name: 'Zeitraum anzeigen'}).boundingBox();
+ expect(show.height).toBeGreaterThanOrEqual(44);
+ expect(show.height).toBeLessThanOrEqual(56);
+ await page.setViewportSize({width: 320, height: 720});
+ await presets.scrollIntoViewIfNeeded();
+ const narrow = await presets.evaluate(el => {
+  const style = getComputedStyle(el);
+  const buttons = [...el.querySelectorAll('button')].map(btn => {
+   const box = btn.getBoundingClientRect();
+   return {text: btn.textContent.trim(), top: box.top, left: box.left, right: box.right, height: box.height};
+  });
+  const boardBox = el.closest('#day-figures').getBoundingClientRect();
+  return {columns: style.gridTemplateColumns, buttons, boardRight: boardBox.right, viewport: window.innerWidth};
+ });
+ expect(narrow.columns.split(' ').filter(Boolean)).toHaveLength(2);
+ expect(narrow.viewport).toBe(320);
+ const narrowMonth = narrow.buttons.find(btn => btn.text === 'Aktueller Monat');
+ const narrowPrevious = narrow.buttons.find(btn => btn.text === 'Vorheriger Monat');
+ expect(narrowMonth.height).toBeLessThanOrEqual(56);
+ expect(Math.abs(narrowPrevious.top - narrowMonth.top)).toBeLessThan(2);
+ expect(narrow.boardRight).toBeLessThanOrEqual(321);
+ expect(narrowMonth.right).toBeLessThanOrEqual(321);
+});

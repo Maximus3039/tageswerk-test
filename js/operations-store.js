@@ -597,33 +597,59 @@ export async function saveDailyReportRevision(db, bundle, reportId, draft, actor
  return {ok: true, id: report.id, bundle: next, report};
 }
 
-function figuresMissing(error) {
+function figuresErrorText(error) {
+ return [error?.code, error?.message, error?.details, error?.hint].filter(Boolean).join(' ');
+}
+
+export function figuresMissing(error) {
  const code = String(error?.code || '');
- const message = String(error?.message || '');
- return code === 'PGRST202' || code === '42883' || /function .* does not exist|schema cache/i.test(message);
+ const text = figuresErrorText(error);
+ if (code === 'PGRST202' || /schema cache/i.test(text)) return false;
+ if (code === '42883') return true;
+ return /function .* does not exist/i.test(text);
+}
+
+export function figuresStorageMessage(error) {
+ const text = figuresErrorText(error);
+ if (/row-level security|42501|permission denied|Keine Berechtigung/i.test(text)) {
+  return 'Keine Berechtigung für die Tageskennzahlen. Es wurde nichts gespeichert.';
+ }
+ if (/schema cache/i.test(text) || String(error?.code || '') === 'PGRST202') {
+  return 'Die Kennzahlenfunktion ist in der Datenbank vorhanden, aber für die API noch nicht freigeschaltet. Bitte den Schema-Cache neu laden. Es wurde nichts gespeichert.';
+ }
+ if (figuresMissing(error)) {
+  return 'Die Tageskennzahlen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.';
+ }
+ return storageMessage(error);
+}
+
+export function figureRpcArgs(draft, prepared) {
+ const cents = value => value == null ? null : String(value);
+ return {
+  p_facility_id: draft.facility.id,
+  p_service_day: draft.day,
+  p_visitors: prepared.visitors,
+  p_gate_cents: cents(prepared.gateCents),
+  p_bistro_cents: cents(prepared.bistroCents),
+  p_total_cents: cents(prepared.totalCents),
+  p_change_note: String(draft.changeNote || '').trim(),
+  p_source: prepared.source
+ };
 }
 
 export async function saveDayFigures(db, draft, actor, today) {
  const access = draft?.access;
  const prepared = draft?.source === 'import' ? historicalFigurePayload(draft, access, today) : dayFigurePayload(draft, access, today);
  if (!prepared.ok) return denied(null, prepared.error);
+ if (!draft?.facility?.id) return denied(null, 'Bitte zuerst einen Betrieb auswählen.');
  let result;
  try {
-  result = await db.rpc('tageswerk_save_day_figures', {
-   p_facility_id: draft.facility.id,
-   p_service_day: draft.day,
-   p_visitors: prepared.visitors,
-   p_gate_cents: prepared.gateCents,
-   p_bistro_cents: prepared.bistroCents,
-   p_total_cents: prepared.totalCents,
-   p_change_note: String(draft.changeNote || '').trim(),
-   p_source: prepared.source
-  });
+  result = await db.rpc('tageswerk_save_day_figures', figureRpcArgs(draft, prepared));
  } catch (error) {
-  return denied(null, figuresMissing(error) ? 'Die Tageskennzahlen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.' : storageMessage(error));
+  return denied(null, figuresStorageMessage(error));
  }
  const saved = confirmed(result);
- if (!saved.ok) return denied(null, figuresMissing(result?.error) ? 'Die Tageskennzahlen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.' : saved.error);
+ if (!saved.ok) return denied(null, result?.error ? figuresStorageMessage(result.error) : saved.error);
  return {ok: true, id: saved.data.id, bundle: null, figure: saved.data};
 }
 
@@ -639,13 +665,11 @@ export async function loadDayFigureBoard(db, facilityId, range) {
   });
   period = await db.rpc('tageswerk_day_figure_period', {p_facility_id: facilityId});
  } catch (error) {
-  if (figuresMissing(error)) return {ok: false, missing: true, error: 'Die Tageskennzahlen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.'};
-  return {ok: false, error: storageMessage(error)};
+  return {ok: false, missing: figuresMissing(error) || /schema cache|PGRST202/i.test(figuresErrorText(error)), error: figuresStorageMessage(error)};
  }
  if (overview?.error || period?.error) {
   const error = overview?.error || period?.error;
-  if (figuresMissing(error)) return {ok: false, missing: true, error: 'Die Tageskennzahlen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.'};
-  return {ok: false, error: storageMessage(error)};
+  return {ok: false, missing: figuresMissing(error) || /schema cache|PGRST202/i.test(figuresErrorText(error)), error: figuresStorageMessage(error)};
  }
  return {ok: true, overview: overview.data, period: period.data};
 }

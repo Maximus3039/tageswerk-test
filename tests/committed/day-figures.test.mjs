@@ -17,7 +17,7 @@ import {
  historicalFigurePayload,
  parseVisitors
 } from '../../js/operations.js';
-import {saveDayFigures} from '../../js/operations-store.js';
+import {figureRpcArgs, figuresMissing, figuresStorageMessage, saveDayFigures} from '../../js/operations-store.js';
 
 const facility = {id: 'fac-a', organization_id: 'org-a', name: 'Bad'};
 const otherFacility = {id: 'fac-b', organization_id: 'org-a', name: 'Zweites Bad'};
@@ -33,6 +33,8 @@ const manager = {userId: 'manager-1', name: 'Lea', memberships: [membership('fac
 const admin = {userId: 'admin-1', name: 'Kim', memberships: [membership('company_admin')]};
 const technician = {userId: 'tech-1', name: 'Tim', memberships: [membership('technician')]};
 const sql = readFileSync(new URL('../../tageswerk_3_5_4_day_figures.sql', import.meta.url), 'utf8');
+const hotfix = readFileSync(new URL('../../tageswerk_3_5_4_day_figures_hotfix.sql', import.meta.url), 'utf8');
+const schemaReload = readFileSync(new URL('../../tageswerk_3_5_4_day_figures_schema_reload.sql', import.meta.url), 'utf8');
 
 test('Tageskennzahlen rechnen Vergleich, Prozent und getrennte Zeiträume', () => {
  assert.equal(compareCalendarDay('2026-11-14'), '2025-11-15');
@@ -140,12 +142,81 @@ test('Die Speicherung prüft lokal und ruft die Kennzahlenfunktion auf', async (
  const saved = await saveDayFigures(db, {facility, access: 'employee', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, employee, '2026-11-14');
  assert.equal(saved.ok, true, saved.error);
  assert.equal(calls[0][0], 'tageswerk_save_day_figures');
- assert.equal(calls[0][1].p_gate_cents, 250);
- assert.equal(calls[0][1].p_total_cents, 375);
+ assert.equal(calls[0][1].p_facility_id, facility.id);
+ assert.equal(calls[0][1].p_service_day, '2026-11-14');
+ assert.equal(calls[0][1].p_visitors, 4);
+ assert.equal(calls[0][1].p_gate_cents, '250');
+ assert.equal(calls[0][1].p_bistro_cents, '125');
+ assert.equal(calls[0][1].p_total_cents, '375');
+ assert.equal(typeof calls[0][1].p_gate_cents, 'string');
+ assert.equal(typeof calls[0][1].p_bistro_cents, 'string');
+ assert.equal(typeof calls[0][1].p_total_cents, 'string');
+ assert.equal(calls[0][1].p_source, 'erfassung');
+ assert.deepEqual(figureRpcArgs({facility, day: '2026-11-14', changeNote: ''}, {
+  visitors: 4,
+  gateCents: 250,
+  bistroCents: 125,
+  totalCents: 375,
+  source: 'erfassung'
+ }), calls[0][1]);
+ const missingFacility = await saveDayFigures(db, {facility: {name: 'Ohne Id'}, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.equal(missingFacility.ok, false);
+ assert.match(missingFacility.error, /Betrieb auswählen/);
+ assert.equal(calls.length, 1);
+});
+
+test('Kennzahlen-RPC-Argumente bleiben als Text-Cents stabil', () => {
+ const args = figureRpcArgs({facility, day: '2026-11-14', changeNote: 'Korrektur'}, {
+  visitors: 9,
+  gateCents: 0,
+  bistroCents: null,
+  totalCents: 100,
+  source: 'import'
+ });
+ assert.equal(args.p_gate_cents, '0');
+ assert.equal(args.p_bistro_cents, null);
+ assert.equal(args.p_total_cents, '100');
+ assert.equal(args.p_change_note, 'Korrektur');
+ assert.equal(args.p_source, 'import');
+ assert.notEqual(typeof args.p_gate_cents, 'number');
+ assert.notEqual(typeof args.p_total_cents, 'number');
+});
+
+test('Speicherfehler unterscheiden fehlende Migration, Schema-Cache und Berechtigung', async () => {
+ const cacheError = {
+  code: 'PGRST202',
+  message: 'Could not find the function public.tageswerk_save_day_figures(p_facility_id, p_service_day, p_visitors, p_gate_cents, p_bistro_cents, p_total_cents, p_change_note, p_source) in the schema cache',
+  details: 'Searched for the function public.tageswerk_save_day_figures with parameter p_facility_id or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.',
+  hint: null
+ };
+ assert.equal(figuresMissing(cacheError), false);
+ assert.match(figuresStorageMessage(cacheError), /Schema-Cache|API noch nicht freigeschaltet/);
+ assert.doesNotMatch(figuresStorageMessage(cacheError), /noch nicht in der Datenbank installiert/);
+
+ const missingError = {code: '42883', message: 'function public.tageswerk_save_day_figures(uuid, date, integer, bigint, bigint, bigint, text, text) does not exist'};
+ assert.equal(figuresMissing(missingError), true);
+ assert.match(figuresStorageMessage(missingError), /noch nicht in der Datenbank installiert/);
+
+ const permissionError = {code: 'P0001', message: 'Keine Berechtigung für die Tageskennzahlen.'};
+ assert.equal(figuresMissing(permissionError), false);
+ assert.match(figuresStorageMessage(permissionError), /Keine Berechtigung für die Tageskennzahlen/);
+
+ const cache = await saveDayFigures({rpc() {
+  return Promise.resolve({data: null, error: cacheError});
+ }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.equal(cache.ok, false);
+ assert.match(cache.error, /Schema-Cache|API noch nicht freigeschaltet/);
+ assert.doesNotMatch(cache.error, /noch nicht in der Datenbank installiert/);
+
  const missing = await saveDayFigures({rpc() {
-  return Promise.resolve({data: null, error: {code: 'PGRST202', message: 'function does not exist'}});
+  return Promise.resolve({data: null, error: missingError});
  }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
  assert.match(missing.error, /noch nicht in der Datenbank/);
+
+ const denied = await saveDayFigures({rpc() {
+  return Promise.resolve({data: null, error: permissionError});
+ }}, {facility, access: 'manager', day: '2026-11-14', visitors: '4', gate: '2,50', bistro: '1,25', source: 'erfassung'}, manager, '2026-11-14');
+ assert.match(denied.error, /Keine Berechtigung/);
 });
 
 test('Die Migration schützt Beträge und lässt die Textberichte stehen', () => {
@@ -180,6 +251,36 @@ test('Die Migration schützt Beträge und lässt die Textberichte stehen', () =>
  assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION public\.tageswerk_figure_measure/);
  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION tageswerk_private\.figure_measure/);
  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.tageswerk_figure_measure/);
+ assert.doesNotMatch(sql, /pg_catalog\.coalesce\s*\(/);
+ assert.doesNotMatch(sql, /pg_catalog\.least\s*\(/);
+ assert.doesNotMatch(sql, /pg_catalog\.greatest\s*\(/);
+ assert.match(sql, /COALESCE\(pg_catalog\.current_setting\('tageswerk\.figure_note', true\), ''\)/);
+ assert.match(sql, /COALESCE\(p_source, 'erfassung'\)/);
+ assert.match(sql, /COALESCE\(p_change_note, ''\)/);
+ assert.match(sql, /LEAST\(COALESCE\(p_to, berlin\), berlin\)/);
+ assert.match(sql, /GREATEST\(COALESCE\(p_from, last_day - 30\), last_day - 399\)/);
+ assert.match(sql, /COALESCE\(p_weekday, 'all'\)/);
+});
+
+test('Der COALESCE-Hotfix ersetzt nur die betroffenen Kennzahlenfunktionen', () => {
+ assert.match(hotfix, /Nicht ohne ausdr\u00fcckliche Freigabe ausf\u00fchren/);
+ assert.match(hotfix, /^BEGIN;/m);
+ assert.match(hotfix, /^COMMIT;/m);
+ assert.match(hotfix, /CREATE OR REPLACE FUNCTION public\.tageswerk_audit_day_figure\(\)/);
+ assert.match(hotfix, /CREATE OR REPLACE FUNCTION public\.tageswerk_save_day_figures\(/);
+ assert.match(hotfix, /CREATE OR REPLACE FUNCTION public\.tageswerk_day_figure_overview\(/);
+ assert.doesNotMatch(hotfix, /CREATE TABLE/);
+ assert.doesNotMatch(hotfix, /ALTER TABLE/);
+ assert.doesNotMatch(hotfix, /CREATE POLICY/);
+ assert.doesNotMatch(hotfix, /DROP /);
+ assert.doesNotMatch(hotfix, /GRANT /);
+ assert.doesNotMatch(hotfix, /pg_catalog\.coalesce\s*\(/);
+ assert.doesNotMatch(hotfix, /pg_catalog\.least\s*\(/);
+ assert.doesNotMatch(hotfix, /pg_catalog\.greatest\s*\(/);
+ assert.match(hotfix, /COALESCE\(p_source, 'erfassung'\)/);
+ assert.match(hotfix, /LEAST\(COALESCE\(p_to, berlin\), berlin\)/);
+ assert.match(schemaReload, /NOTIFY pgrst, 'reload schema'/);
+ assert.match(schemaReload, /Nicht ohne ausdr\u00fcckliche Freigabe ausf\u00fchren/);
 });
 
 test('Die Migration sperrt Zuordnung, Herkunft und Revisionsmanipulation', () => {

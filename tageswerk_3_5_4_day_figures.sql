@@ -101,7 +101,7 @@ SECURITY DEFINER
 SET search_path = ''
 AS $tageswerk$
 DECLARE
-  note text := pg_catalog.btrim(pg_catalog.coalesce(pg_catalog.current_setting('tageswerk.figure_note', true), ''));
+  note text := pg_catalog.btrim(COALESCE(pg_catalog.current_setting('tageswerk.figure_note', true), ''));
 BEGIN
   IF NEW.visitors IS NOT DISTINCT FROM OLD.visitors
      AND NEW.gate_cents IS NOT DISTINCT FROM OLD.gate_cents
@@ -260,7 +260,7 @@ DECLARE
   next_gate bigint := p_gate_cents;
   next_bistro bigint := p_bistro_cents;
   next_total bigint := p_total_cents;
-  next_source text := pg_catalog.coalesce(p_source, 'erfassung');
+  next_source text := COALESCE(p_source, 'erfassung');
   existing public.facility_day_figures;
   saved public.facility_day_figures;
 BEGIN
@@ -297,7 +297,7 @@ BEGIN
   SELECT * INTO existing
   FROM public.facility_day_figures
   WHERE facility_id = p_facility_id AND service_day = p_service_day;
-  PERFORM pg_catalog.set_config('tageswerk.figure_note', pg_catalog.coalesce(p_change_note, ''), true);
+  PERFORM pg_catalog.set_config('tageswerk.figure_note', COALESCE(p_change_note, ''), true);
   IF existing.id IS NULL THEN
     INSERT INTO public.facility_day_figures (
       facility_id, service_day, visitors, gate_cents, bistro_cents, total_cents, source, imported_at, imported_by
@@ -352,14 +352,14 @@ BEGIN
     first_day := berlin - 6;
     last_day := berlin;
   ELSE
-    last_day := pg_catalog.least(pg_catalog.coalesce(p_to, berlin), berlin);
-    first_day := pg_catalog.greatest(pg_catalog.coalesce(p_from, last_day - 30), last_day - 399);
+    last_day := LEAST(COALESCE(p_to, berlin), berlin);
+    first_day := GREATEST(COALESCE(p_from, last_day - 30), last_day - 399);
   END IF;
   day := first_day;
   WHILE day <= last_day LOOP
     dow := pg_catalog.date_part('isodow', day)::integer;
     weekend := CASE dow WHEN 6 THEN 'saturday' WHEN 7 THEN 'sunday' ELSE '' END;
-    IF role = 'employee' OR pg_catalog.coalesce(p_weekday, 'all') = 'all' OR p_weekday = weekend THEN
+    IF role = 'employee' OR COALESCE(p_weekday, 'all') = 'all' OR p_weekday = weekend THEN
       current_row := NULL;
       prior_row := NULL;
       SELECT * INTO current_row FROM public.facility_day_figures WHERE facility_id = p_facility_id AND service_day = day;
