@@ -1,5 +1,16 @@
 import {facilityVisibleToMember, waterHistoryRole} from './permissions.js';
 import {
+ canCorrectWaterFilterFlush,
+ canManageWaterFilters,
+ canRecordWaterFilterFlush,
+ waterFilterDraftError,
+ waterFilterFlushCorrectionArgs,
+ waterFilterFlushCorrectionDraftError,
+ waterFilterFlushDraftError,
+ waterFilterFlushInsertPayload,
+ waterFilterInsertPayload
+} from './water-filters.js';
+import {
  acknowledgeTemperatureAlert,
  acknowledgeWaterAlert,
  addWaterParameter,
@@ -470,7 +481,55 @@ function assemble(loaded, actor, context) {
    slotTime: String(row.slot_time || ''),
    serviceDay: String(row.service_day || '').slice(0, 10),
    userId: row.user_id
-  }))
+  })),
+  waterFilters: (loaded.water_filters || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   poolId: row.pool_id,
+   name: row.name,
+   active: row.active !== false,
+   createdBy: row.created_by,
+   createdAt: row.created_at,
+   lastFlushedAt: row.last_flushed_at || null,
+   lastFlushedBy: row.last_flushed_by || null
+  })),
+  waterFilterFlushes: (loaded.water_filter_flushes || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   facilityId: row.facility_id,
+   facilityName: facilityName(context, row.facility_id),
+   organizationId: row.organization_id,
+   poolId: row.pool_id,
+   filterId: row.filter_id,
+   flushedAt: row.flushed_at,
+   recordedAt: row.recorded_at,
+   recordedBy: row.recorded_by,
+   recordedName: personName(context, row.recorded_by, actor),
+   note: row.note || '',
+   correctedAt: row.corrected_at || null,
+   correctedBy: row.corrected_by || null,
+   correctedName: row.corrected_by ? personName(context, row.corrected_by, actor) : '',
+   correctionCount: Number(row.correction_count) || 0
+  })).sort((a, b) => String(b.flushedAt).localeCompare(String(a.flushedAt))),
+  waterFilterFlushCorrections: (loaded.water_filter_flush_corrections || []).filter(row => visible(row, actor)).map(row => ({
+   id: row.id,
+   flushId: row.flush_id,
+   facilityId: row.facility_id,
+   organizationId: row.organization_id,
+   correctedAt: row.corrected_at,
+   correctedBy: row.corrected_by,
+   correctedName: personName(context, row.corrected_by, actor),
+   reason: row.reason || '',
+   oldFilterId: row.old_filter_id,
+   newFilterId: row.new_filter_id,
+   oldPoolId: row.old_pool_id,
+   newPoolId: row.new_pool_id,
+   oldFlushedAt: row.old_flushed_at,
+   newFlushedAt: row.new_flushed_at,
+   oldNote: row.old_note || '',
+   newNote: row.new_note || ''
+  })).sort((a, b) => String(b.correctedAt).localeCompare(String(a.correctedAt)))
  };
 }
 
@@ -507,19 +566,93 @@ export async function loadOperations(db, actor, context) {
   const result = await readTable(db, table);
   if (result?.error) {
    const missing = missingTable(result.error);
-   return {ok: false, installed: !missing, temperatureInstalled: false, materialsInstalled: false, waterInstalled: false, error: storageMessage(result.error), bundle: emptyOperations()};
+   return {
+    ok: false,
+    installed: !missing,
+    temperatureInstalled: false,
+    materialsInstalled: false,
+    waterInstalled: false,
+    waterFiltersInstalled: false,
+    error: storageMessage(result.error),
+    bundle: emptyOperations()
+   };
   }
   loaded[table] = result?.data || [];
  }
  const temperature = await readGroup(db, loaded, temperatureTables);
- if (!temperature.ok) return {ok: false, installed: true, temperatureInstalled: false, materialsInstalled: false, waterInstalled: false, error: temperature.error, bundle: assemble(loaded, actor, context)};
+ if (!temperature.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: false,
+   materialsInstalled: false,
+   waterInstalled: false,
+   waterFiltersInstalled: false,
+   error: temperature.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
  const materials = await readGroup(db, loaded, materialTables);
- if (!materials.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: false, waterInstalled: false, error: materials.error, bundle: assemble(loaded, actor, context)};
+ if (!materials.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: temperature.installed,
+   materialsInstalled: false,
+   waterInstalled: false,
+   waterFiltersInstalled: false,
+   error: materials.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
  const water = await readGroup(db, loaded, waterTables);
- if (!water.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: false, error: water.error, bundle: assemble(loaded, actor, context)};
+ if (!water.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: temperature.installed,
+   materialsInstalled: materials.installed,
+   waterInstalled: false,
+   waterFiltersInstalled: false,
+   error: water.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
  const schedule = await readOptional(db, loaded, ['water_facility_slots', 'water_round_slots']);
- if (!schedule.ok) return {ok: false, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: water.installed, error: schedule.error, bundle: assemble(loaded, actor, context)};
- return {ok: true, installed: true, temperatureInstalled: temperature.installed, materialsInstalled: materials.installed, waterInstalled: water.installed, bundle: assemble(loaded, actor, context)};
+ if (!schedule.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: temperature.installed,
+   materialsInstalled: materials.installed,
+   waterInstalled: water.installed,
+   waterFiltersInstalled: false,
+   error: schedule.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
+ const filters = await readOptionalGroup(db, loaded, ['water_filters', 'water_filter_flushes', 'water_filter_flush_corrections']);
+ if (!filters.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: temperature.installed,
+   materialsInstalled: materials.installed,
+   waterInstalled: water.installed,
+   waterFiltersInstalled: false,
+   error: filters.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
+ return {
+  ok: true,
+  installed: true,
+  temperatureInstalled: temperature.installed,
+  materialsInstalled: materials.installed,
+  waterInstalled: water.installed,
+  waterFiltersInstalled: filters.installed,
+  bundle: assemble(loaded, actor, context)
+ };
 }
 
 async function readOptional(db, loaded, names) {
@@ -533,6 +666,26 @@ async function readOptional(db, loaded, names) {
   loaded[table] = result?.data || [];
  }
  return {ok: true};
+}
+
+async function readOptionalGroup(db, loaded, names) {
+ const first = await readTable(db, names[0]);
+ if (first?.error) {
+  if (!missingTable(first.error)) return {ok: false, error: storageMessage(first.error), installed: false};
+  for (const name of names) loaded[name] = [];
+  return {ok: true, installed: false};
+ }
+ loaded[names[0]] = first?.data || [];
+ for (const table of names.slice(1)) {
+  const result = await readTable(db, table);
+  if (result?.error) {
+   if (!missingTable(result.error)) return {ok: false, error: storageMessage(result.error), installed: false};
+   loaded[table] = [];
+   continue;
+  }
+  loaded[table] = result?.data || [];
+ }
+ return {ok: true, installed: true};
 }
 
 function owned(row, facility, actor) {
@@ -1478,4 +1631,108 @@ export async function saveWaterMeasure(db, bundle, alertId, measure, actor, now,
   return denied(bundle, 'Die Maßnahme wurde nicht bestätigt.');
  }
  return {ok: true, id: entry.id, bundle: loaded.bundle, measure: entry, alert};
+}
+
+export async function saveWaterFilter(db, bundle, facility, draft, actor, context) {
+ if (!canManageWaterFilters(facility, actor?.memberships)) return denied(bundle, 'Keine Berechtigung für die Filterverwaltung.');
+ const error = waterFilterDraftError(draft);
+ if (error) return denied(bundle, error);
+ let result;
+ try {
+  result = await db.insert('water_filters', waterFilterInsertPayload(facility, draft, actor));
+ } catch (caught) {
+  return denied(bundle, storageMessage(caught));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error);
+ const loaded = await loadOperations(db, actor, context);
+ const filter = loaded.ok ? loaded.bundle.waterFilters.find(item => item.id === saved.data.id) : null;
+ if (!filter) return denied(bundle, 'Der Filter wurde nicht bestätigt.');
+ return {ok: true, id: filter.id, bundle: loaded.bundle, filter};
+}
+
+export async function saveWaterFilterChange(db, bundle, filterId, draft, actor, context) {
+ const before = (bundle?.waterFilters || []).find(item => item.id === filterId);
+ if (!before) return denied(bundle, 'Der Filter wurde nicht gefunden.');
+ const facility = {id: before.facilityId, organization_id: before.organizationId};
+ if (!canManageWaterFilters(facility, actor?.memberships)) return denied(bundle, 'Keine Berechtigung für die Filterverwaltung.');
+ const error = waterFilterDraftError({...draft, poolId: before.poolId});
+ if (error) return denied(bundle, error);
+ let result;
+ try {
+  result = await db.update('water_filters', filterId, {name: String(draft.name || '').trim()});
+ } catch (caught) {
+  return denied(bundle, storageMessage(caught));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error);
+ const loaded = await loadOperations(db, actor, context);
+ const filter = loaded.ok ? loaded.bundle.waterFilters.find(item => item.id === filterId) : null;
+ if (!filter || filter.name !== String(draft.name || '').trim()) return denied(bundle, 'Die Filteränderung wurde nicht bestätigt.');
+ return {ok: true, id: filter.id, bundle: loaded.bundle, filter};
+}
+
+export async function saveWaterFilterActive(db, bundle, filterId, active, actor, context) {
+ const before = (bundle?.waterFilters || []).find(item => item.id === filterId);
+ if (!before) return denied(bundle, 'Der Filter wurde nicht gefunden.');
+ const facility = {id: before.facilityId, organization_id: before.organizationId};
+ if (!canManageWaterFilters(facility, actor?.memberships)) return denied(bundle, 'Keine Berechtigung für die Filterverwaltung.');
+ let result;
+ try {
+  result = await db.update('water_filters', filterId, {active: active === true});
+ } catch (caught) {
+  return denied(bundle, storageMessage(caught));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error);
+ const loaded = await loadOperations(db, actor, context);
+ const filter = loaded.ok ? loaded.bundle.waterFilters.find(item => item.id === filterId) : null;
+ if (!filter || filter.active !== (active === true)) return denied(bundle, 'Der Filterstatus wurde nicht bestätigt.');
+ return {ok: true, id: filter.id, bundle: loaded.bundle, filter};
+}
+
+export async function saveWaterFilterFlush(db, bundle, facility, draft, actor, now, context) {
+ if (!canRecordWaterFilterFlush(facility, actor?.memberships)) return denied(bundle, 'Keine Berechtigung für diesen Betrieb.');
+ const error = waterFilterFlushDraftError(draft, now);
+ if (error) return denied(bundle, error);
+ let result;
+ try {
+  result = await db.insert('water_filter_flushes', waterFilterFlushInsertPayload(facility, draft));
+ } catch (caught) {
+  return denied(bundle, storageMessage(caught));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error);
+ const loaded = await loadOperations(db, actor, context);
+ const flush = loaded.ok ? loaded.bundle.waterFilterFlushes.find(item => item.id === saved.data.id) : null;
+ // Mitarbeiter sehen keine Historie; Speicherung gilt trotzdem, wenn die DB bestätigt.
+ if (flush) return {ok: true, id: flush.id, bundle: loaded.bundle, flush};
+ if (saved.data?.id && saved.data.recorded_by === actor.userId) {
+  return {ok: true, id: saved.data.id, bundle: loaded.bundle, flush: null};
+ }
+ return denied(bundle, 'Die Spülung wurde nicht bestätigt.');
+}
+
+export async function saveWaterFilterFlushCorrection(db, bundle, flushId, draft, actor, context) {
+ const before = (bundle?.waterFilterFlushes || []).find(item => item.id === flushId);
+ if (!before) return denied(bundle, 'Die Spülung wurde nicht gefunden.');
+ const facility = {id: before.facilityId, organization_id: before.organizationId};
+ if (!canCorrectWaterFilterFlush(facility, actor?.memberships)) {
+  return denied(bundle, 'Nur Betriebsleitung und Geschäftsführung korrigieren Spülprotokolle.');
+ }
+ const error = waterFilterFlushCorrectionDraftError(draft, before);
+ if (error) return denied(bundle, error);
+ let result;
+ try {
+  result = await db.rpc('tageswerk_correct_water_filter_flush', waterFilterFlushCorrectionArgs(flushId, draft));
+ } catch (caught) {
+  return denied(bundle, storageMessage(caught));
+ }
+ if (result?.error) return denied(bundle, storageMessage(result.error));
+ const payload = Array.isArray(result?.data) ? result.data[0] : result?.data;
+ if (!payload || payload.ok !== true) return denied(bundle, 'Die Korrektur wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const flush = loaded.ok ? loaded.bundle.waterFilterFlushes.find(item => item.id === flushId) : null;
+ if (!flush || !(flush.correctionCount > 0)) return denied(bundle, 'Die Korrektur wurde nicht bestätigt.');
+ return {ok: true, id: flush.id, bundle: loaded.bundle, flush, correctionId: payload.correction_id};
 }

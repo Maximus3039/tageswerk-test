@@ -26,7 +26,10 @@ export function emptyOperations() {
   waterMeasures: [],
   waterRoundDrafts: [],
   waterFacilitySlots: [],
-  waterRoundSlots: []
+  waterRoundSlots: [],
+  waterFilters: [],
+  waterFilterFlushes: [],
+  waterFilterFlushCorrections: []
  };
 }
 
@@ -52,7 +55,10 @@ function copy(bundle) {
   waterMeasures: [...(source.waterMeasures || [])],
   waterRoundDrafts: [...(source.waterRoundDrafts || [])],
   waterFacilitySlots: [...(source.waterFacilitySlots || [])],
-  waterRoundSlots: [...(source.waterRoundSlots || [])]
+  waterRoundSlots: [...(source.waterRoundSlots || [])],
+  waterFilters: [...(source.waterFilters || [])],
+  waterFilterFlushes: [...(source.waterFilterFlushes || [])],
+  waterFilterFlushCorrections: [...(source.waterFilterFlushCorrections || [])]
  };
 }
 

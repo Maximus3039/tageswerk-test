@@ -12,7 +12,10 @@ export const opsUi = {
  temperatureInstalled: false,
  materialsInstalled: false,
  waterInstalled: false,
+ waterFiltersInstalled: false,
  selectedWaterPoolId: '',
+ selectedWaterFilterId: '',
+ selectedFlushId: '',
  waterSettingsOpen: false,
  temperatureSettingsOpen: false,
  waterRoundNotice: '',
@@ -103,9 +106,11 @@ export async function refreshFromDatabase(announce) {
  opsUi.temperatureInstalled = loaded.temperatureInstalled === true;
  opsUi.materialsInstalled = loaded.materialsInstalled === true;
  opsUi.waterInstalled = loaded.waterInstalled === true;
+ opsUi.waterFiltersInstalled = loaded.waterFiltersInstalled === true;
  state.temperatureInstalled = opsUi.temperatureInstalled;
  state.materialsInstalled = opsUi.materialsInstalled;
  state.waterInstalled = opsUi.waterInstalled;
+ state.waterFiltersInstalled = opsUi.waterFiltersInstalled;
  if (!loaded.ok) {
   if (!state.operationPreview) state.operationPreview = emptyOperations();
   if (announce) say('error', loaded.error);

@@ -40,6 +40,11 @@ import {
  saveWaterAcknowledgement,
  saveWaterCheck,
  saveWaterFacilitySlots,
+ saveWaterFilter,
+ saveWaterFilterActive,
+ saveWaterFilterChange,
+ saveWaterFilterFlush,
+ saveWaterFilterFlushCorrection,
  saveWaterMeasure,
  saveWaterParameter,
  saveWaterParameterAdd,
@@ -49,6 +54,15 @@ import {
  saveWaterRound,
  saveWaterRoundDraft
 } from './operations-store.js';
+import {
+ canCorrectWaterFilterFlush,
+ canManageWaterFilters,
+ canReadWaterFilterFlushHistory,
+ canRecordWaterFilterFlush,
+ filtersForPool,
+ flushCorrectionMark,
+ flushesForFacility
+} from './water-filters.js';
 import {
  actor,
  amountLabel,
@@ -1051,6 +1065,202 @@ export function renderWater(host, current) {
  renderWaterAlerts(host, current, data, visible, pools);
  if (!opsUi.followUpAlertId) renderWaterRound(host, current, data);
  if (history) renderWaterHistory(host, current, data, visible);
+ renderWaterFilters(host, current, data);
 }
 
+function toLocalInputValue(iso) {
+ if (!iso) return '';
+ const date = new Date(iso);
+ if (Number.isNaN(date.getTime())) return '';
+ const pad = value => String(value).padStart(2, '0');
+ return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fromLocalInputValue(value) {
+ if (!value) return '';
+ const date = new Date(value);
+ if (Number.isNaN(date.getTime())) return '';
+ return date.toISOString();
+}
+
+function filterName(data, filterId) {
+ return (data.waterFilters || []).find(item => item.id === filterId)?.name || 'Filter';
+}
+
+function poolName(data, poolId) {
+ return (data.waterPools || []).find(item => item.id === poolId)?.name || 'Becken';
+}
+
+function renderWaterFilters(host, current, data) {
+ if (!opsUi.waterFiltersInstalled) {
+  const note = document.createElement('p');
+  note.className = 'help';
+  note.textContent = 'Filterspülungen sind in der Datenbank noch nicht installiert.';
+  host.append(note);
+  return;
+ }
+
+ const person = actor();
+ const manage = canManageWaterFilters(current, person.memberships);
+ const record = canRecordWaterFilterFlush(current, person.memberships);
+ const history = canReadWaterFilterFlushHistory(current, person.memberships);
+ const correct = canCorrectWaterFilterFlush(current, person.memberships);
+ const pools = (data.waterPools || []).filter(pool => pool.facilityId === current.id);
+ const filters = (data.waterFilters || []).filter(filter => filter.facilityId === current.id);
+ const flushes = flushesForFacility(data.waterFilterFlushes || [], current.id);
+
+ const section = document.createElement('section');
+ section.className = 'water-filters';
+ const heading = document.createElement('h2');
+ heading.textContent = 'Filterspülungen';
+ section.append(heading);
+
+ if (manage) {
+  const manageBox = document.createElement('div');
+  manageBox.className = 'water-settings';
+  const title = document.createElement('h3');
+  title.textContent = 'Filterverwaltung';
+  manageBox.append(title);
+  const pool = select(pools.map(item => ({value: item.id, label: item.name})));
+  const name = input();
+  name.placeholder = 'Filterbezeichnung';
+  manageBox.append(labeled('Becken', pool), labeled('Neuer Filter', name));
+  manageBox.append(button('Filter anlegen', '', () => commit(() => saveWaterFilter(database(), bundle(), current, {poolId: pool.value, name: name.value}, person, context()))));
+  for (const filter of filters.sort((left, right) => String(left.name).localeCompare(String(right.name), 'de'))) {
+   const row = document.createElement('div');
+   row.className = 'item';
+   const rename = input(filter.name);
+   row.append(labeled(`${poolName(data, filter.poolId)} · ${filter.active === false ? 'deaktiviert' : 'aktiv'}`, rename));
+   row.append(button('Umbenennen', 'secondary', () => commit(() => saveWaterFilterChange(database(), bundle(), filter.id, {name: rename.value}, person, context()))));
+   row.append(button(filter.active === false ? 'Reaktivieren' : 'Deaktivieren', 'secondary', () => commit(() => saveWaterFilterActive(database(), bundle(), filter.id, filter.active === false, person, context()))));
+   manageBox.append(row);
+  }
+  section.append(manageBox);
+ }
+
+ if (record) {
+  const capture = document.createElement('div');
+  capture.className = 'water-readings';
+  const title = document.createElement('h3');
+  title.textContent = 'Spülung erfassen';
+  capture.append(title);
+  const pool = select([{value: '', label: 'Becken wählen'}].concat(pools.filter(item => item.active !== false).map(item => ({value: item.id, label: item.name}))));
+  const filter = select([{value: '', label: 'Filter wählen'}]);
+  const paintFilters = () => {
+   const options = filtersForPool(filters, pool.value).map(item => ({value: item.id, label: item.name}));
+   filter.replaceChildren();
+   for (const option of [{value: '', label: 'Filter wählen'}].concat(options)) {
+    const node = document.createElement('option');
+    node.value = option.value;
+    node.textContent = option.label;
+    filter.append(node);
+   }
+  };
+  pool.addEventListener('change', paintFilters);
+  paintFilters();
+  const when = input();
+  when.type = 'datetime-local';
+  when.value = toLocalInputValue(new Date().toISOString());
+  const note = input();
+  note.placeholder = 'Optionale Bemerkung';
+  capture.append(labeled('Becken', pool), labeled('Filter', filter), labeled('Zeitpunkt (Nachtrag optional)', when), labeled('Bemerkung', note));
+  capture.append(button('Spülung speichern', '', () => commit(() => saveWaterFilterFlush(database(), bundle(), current, {
+   filterId: filter.value,
+   flushedAt: fromLocalInputValue(when.value) || new Date().toISOString(),
+   note: note.value
+  }, person, new Date().toISOString(), context()))));
+  section.append(capture);
+ }
+
+ if (history) {
+  const historyBox = document.createElement('div');
+  historyBox.className = 'water-history';
+  const title = document.createElement('h3');
+  title.textContent = 'Spülhistorie';
+  historyBox.append(title);
+  if (!flushes.length) {
+   const empty = document.createElement('p');
+   empty.className = 'help';
+   empty.textContent = 'Noch keine Spülungen dokumentiert.';
+   historyBox.append(empty);
+  } else {
+   const table = document.createElement('table');
+   table.className = 'water-table';
+   const head = document.createElement('tr');
+   for (const label of ['Zeitpunkt', 'Becken', 'Filter', 'Erfasst von', 'Bemerkung', 'Korrektur']) {
+    const cell = document.createElement('th');
+    cell.textContent = label;
+    head.append(cell);
+   }
+   table.append(head);
+   for (const flush of flushes) {
+    const row = document.createElement('tr');
+    if (opsUi.selectedFlushId === flush.id) row.classList.add('is-selected');
+    const values = [
+     berlinLocal(new Date(flush.flushedAt)),
+     poolName(data, flush.poolId),
+     filterName(data, flush.filterId),
+     flush.recordedName || 'Mitarbeiter',
+     flush.note || '—',
+     flushCorrectionMark(flush) || '—'
+    ];
+    for (const value of values) {
+     const cell = document.createElement('td');
+     cell.textContent = value;
+     row.append(cell);
+    }
+    if (correct) {
+     row.style.cursor = 'pointer';
+     row.onclick = () => {
+      opsUi.selectedFlushId = flush.id;
+      renderPanel();
+     };
+    }
+    table.append(row);
+   }
+   historyBox.append(table);
+  }
+  section.append(historyBox);
+ }
+
+ if (correct && opsUi.selectedFlushId) {
+  const flush = flushes.find(item => item.id === opsUi.selectedFlushId);
+  if (flush) {
+   const box = document.createElement('div');
+   box.className = 'manage';
+   const title = document.createElement('h3');
+   title.textContent = 'Spülung korrigieren';
+   box.append(title);
+   const help = document.createElement('p');
+   help.className = 'help';
+   help.textContent = 'Die Originalwerte bleiben im Korrekturprotokoll erhalten. Eine Begründung ist Pflicht.';
+   box.append(help);
+   const activeFilters = filters.filter(item => item.active !== false);
+   const filter = select(activeFilters.map(item => ({value: item.id, label: `${poolName(data, item.poolId)} · ${item.name}`})), flush.filterId);
+   const when = input();
+   when.type = 'datetime-local';
+   when.value = toLocalInputValue(flush.flushedAt);
+   const note = input(flush.note || '');
+   const reason = input();
+   reason.placeholder = 'Begründung der Korrektur';
+   box.append(labeled('Filter', filter), labeled('Spülzeitpunkt', when), labeled('Bemerkung', note), labeled('Begründung', reason));
+   const actions = document.createElement('div');
+   actions.className = 'row';
+   actions.append(button('Korrektur speichern', '', () => commit(() => saveWaterFilterFlushCorrection(database(), bundle(), flush.id, {
+    filterId: filter.value,
+    flushedAt: fromLocalInputValue(when.value),
+    note: note.value,
+    reason: reason.value
+   }, person, context()))));
+   actions.append(button('Abbrechen', 'secondary', () => {
+    opsUi.selectedFlushId = '';
+    renderPanel();
+   }));
+   box.append(actions);
+   section.append(box);
+  }
+ }
+
+ host.append(section);
+}
 

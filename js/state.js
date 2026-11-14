@@ -17,5 +17,6 @@ export const state = {
   operationPreview: null,
   temperatureInstalled: false,
   materialsInstalled: false,
-  waterInstalled: false
+  waterInstalled: false,
+  waterFiltersInstalled: false
 };
