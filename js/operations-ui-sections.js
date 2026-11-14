@@ -64,16 +64,60 @@ export function renderReports(host, current) {
  incidents.placeholder = 'Was war heute besonders?';
  const handover = area();
  handover.placeholder = 'Was muss die nächste Schicht wissen?';
+ const weatherPreview = area();
+ weatherPreview.readOnly = true;
+ weatherPreview.placeholder = 'Noch kein Wettersnapshot übernommen.';
  const defect = select([{value: '', label: 'Keinen Mangel verknüpfen'}, ...defectsFor(current.id).map(row => ({value: row.id, label: row.title}))]);
+ let weatherSnapshot = '';
+ const loadWeather = button('Wetter für Bericht laden', 'secondary', async () => {
+  loadWeather.disabled = true;
+  try {
+   const {weatherForFacility, weatherReportLine} = await import('./weather.js');
+   const result = await weatherForFacility(current);
+   if (!result.ok) {
+    say('error', result.error);
+    return;
+   }
+   weatherSnapshot = weatherReportLine(result.weather, result.location);
+   weatherPreview.value = weatherSnapshot;
+   say('ok', 'Wettersnapshot geladen. Er wird beim Speichern unveränderlich in den Bericht übernommen.');
+  } catch (error) {
+   say('error', error?.message || 'Wetter konnte nicht geladen werden.');
+  } finally {
+   loadWeather.disabled = false;
+  }
+ });
  const save = button('Tagesbericht speichern', '', () => commit(async () => {
-  const saved = await saveDailyReport(database(), bundle(), {facility: current, reportDate: date.value, incidents: incidents.value, handover: handover.value}, actor(), new Date().toISOString(), context());
+  const weatherText = String(weatherSnapshot || weatherPreview.value || '').trim();
+  const body = String(incidents.value || '').trim();
+  const mergedIncidents = weatherText
+   ? (body ? `${weatherText}\n\n${body}` : weatherText)
+   : body;
+  const saved = await saveDailyReport(database(), bundle(), {
+   facility: current,
+   reportDate: date.value,
+   incidents: mergedIncidents,
+   handover: handover.value,
+   weatherSummary: weatherText,
+   weatherSource: weatherText ? 'Open-Meteo' : '',
+   weatherKind: weatherText ? 'forecast' : '',
+   weatherObservedAt: weatherText ? new Date().toISOString() : null
+  }, actor(), new Date().toISOString(), context());
   const chosen = defectsFor(current.id).find(row => row.id === defect.value);
   if (!saved.ok || !chosen) return saved;
   const linked = await saveReportDefect(database(), saved.bundle, saved.id, chosen, actor(), context());
   if (!linked.ok) return {...saved, warning: linked.error};
   return linked;
  }));
- host.append(labeled('Datum', date), labeled('Besondere Vorkommnisse', incidents), labeled('Hinweis für die nächste Schicht', handover), labeled('Vorhandenen Mangel verknüpfen', defect), save);
+ host.append(
+  labeled('Datum', date),
+  labeled('Wettersnapshot (Prognose zum Speicherzeitpunkt)', weatherPreview),
+  loadWeather,
+  labeled('Besondere Vorkommnisse', incidents),
+  labeled('Hinweis für die nächste Schicht', handover),
+  labeled('Vorhandenen Mangel verknüpfen', defect),
+  save
+ );
  renderDayFigures(host, current);
  const filterDate = input('');
  filterDate.type = 'date';
@@ -82,10 +126,13 @@ export function renderReports(host, current) {
  for (const report of filterDailyReports(data.reports, {facilityId: current.id, date: host.dataset.filter || ''})) {
   const lines = [
    `${report.facilityName} · ${report.authorName} · ${new Date(report.createdAt).toLocaleString('de-DE')}`,
+   report.weatherSummary
+    ? `Wetter (eingefroren): ${report.weatherSummary}${report.weatherSource ? ` · ${report.weatherSource}` : ''}${report.weatherKind ? ` · ${report.weatherKind === 'observed' ? 'Beobachtung' : 'Prognose'}` : ''}`
+    : null,
    `Vorkommnisse: ${report.incidents || 'Keine'}`,
    `Nächste Schicht: ${report.handover || 'Kein Hinweis'}`,
    report.defectIds.length ? `Verknüpfte Mängel: ${report.defectIds.length}` : 'Kein Mangel verknüpft.'
-  ];
+  ].filter(Boolean);
   for (const revision of report.revisions) lines.push(`Nachtrag ${new Date(revision.editedAt).toLocaleString('de-DE')} · ${revision.editorName}: ${revision.changeNote}`);
   const row = item(report.reportDate, lines, false);
   const note = input();

@@ -103,6 +103,7 @@ export function createDailyReport(bundle, draft, actor, now) {
  if (!canUse(draft.facility, actor)) return {ok: false, error: 'Keine Berechtigung für diesen Betrieb.', bundle};
  const exists = (bundle?.reports || []).some(report => report.facilityId === draft.facility.id && report.reportDate === draft.reportDate);
  if (exists) return {ok: false, error: 'Für diesen Tag liegt bereits ein Bericht vor. Änderungen werden als Nachtrag gespeichert.', bundle};
+ const weatherSummary = String(draft.weatherSummary || '').trim().slice(0, 1000);
  const report = {
   id: newId(),
   facilityId: draft.facility.id,
@@ -111,6 +112,10 @@ export function createDailyReport(bundle, draft, actor, now) {
   reportDate: draft.reportDate,
   incidents: text(draft.incidents, 4000),
   handover: text(draft.handover, 4000),
+  weatherSummary,
+  weatherSource: weatherSummary ? String(draft.weatherSource || '').trim().slice(0, 200) : '',
+  weatherKind: weatherSummary ? (draft.weatherKind === 'observed' ? 'observed' : 'forecast') : '',
+  weatherObservedAt: weatherSummary ? (draft.weatherObservedAt || now) : null,
   authorId: actor.userId,
   authorName: actor.name || 'Mitarbeiter',
   createdAt: now,

@@ -152,6 +152,10 @@ function mapReport(row, context, actor, revisions, defectIds) {
   reportDate: String(row.report_date || '').slice(0, 10),
   incidents: row.incidents || '',
   handover: row.handover || '',
+  weatherSummary: row.weather_summary || '',
+  weatherSource: row.weather_source || '',
+  weatherKind: row.weather_kind || '',
+  weatherObservedAt: row.weather_observed_at || null,
   authorId: row.created_by,
   authorName: personName(context, row.created_by, actor),
   createdAt: row.created_at,
@@ -739,16 +743,36 @@ function sameHistory(before, after, pointId) {
 export async function saveDailyReport(db, bundle, draft, actor, now, context) {
  const local = createDailyReport(bundle, draft, actor, now);
  if (!local.ok) return denied(bundle, local.error);
+ const basePayload = {
+  facility_id: draft.facility.id,
+  report_date: draft.reportDate,
+  incidents: local.report.incidents,
+  handover: local.report.handover
+ };
+ const weatherPayload = String(draft.weatherSummary || '').trim()
+  ? {
+   weather_summary: String(draft.weatherSummary || '').trim().slice(0, 1000),
+   weather_source: String(draft.weatherSource || '').trim().slice(0, 200),
+   weather_kind: draft.weatherKind === 'observed' ? 'observed' : 'forecast',
+   weather_observed_at: draft.weatherObservedAt || now
+  }
+  : null;
  let result;
  try {
-  result = await db.insert('daily_reports', {
-   facility_id: draft.facility.id,
-   report_date: draft.reportDate,
-   incidents: local.report.incidents,
-   handover: local.report.handover
-  });
+  result = await db.insert('daily_reports', weatherPayload ? {...basePayload, ...weatherPayload} : basePayload);
+  if (result?.error && weatherPayload && /weather_|schema cache|PGRST204|Could not find/i.test(String(result.error.message || result.error.code || ''))) {
+   result = await db.insert('daily_reports', basePayload);
+  }
  } catch (error) {
-  return denied(bundle, storageMessage(error));
+  if (weatherPayload && /weather_|schema cache|PGRST204|Could not find/i.test(String(error?.message || error?.code || ''))) {
+   try {
+    result = await db.insert('daily_reports', basePayload);
+   } catch (retryError) {
+    return denied(bundle, storageMessage(retryError));
+   }
+  } else {
+   return denied(bundle, storageMessage(error));
+  }
  }
  const saved = confirmed(result);
  if (!saved.ok || !owned(saved.data, draft.facility, actor)) return denied(bundle, saved.error || 'Die Speicherung wurde nicht bestätigt.');
