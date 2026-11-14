@@ -8,7 +8,8 @@ const migrations = [
  'tageswerk_3_3_water_hygiene.sql',
  'tageswerk_3_4_technician_role.sql',
  'tageswerk_3_4_invitation_role.sql',
- 'tageswerk_3_4_management_guard.sql'
+ 'tageswerk_3_4_management_guard.sql',
+ 'tageswerk_3_5_8_water_filter_flushes.sql'
 ].map(name => ({
  name,
  sql: readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')
@@ -34,10 +35,14 @@ test('facility_id in Unterabfragen bleibt einer Tabelle zugeordnet', () => {
  assert.match(water, /pool\.facility_id = water_checks\.facility_id/);
  assert.match(water, /alert\.facility_id = water_alert_measures\.facility_id/);
  assert.match(water, /alert\.organization_id = water_alert_measures\.organization_id/);
+ const filters = migrations[6].sql;
+ assert.match(filters, /pool\.facility_id = water_filters\.facility_id/);
+ assert.match(filters, /filter_row\.facility_id = water_filter_flushes\.facility_id/);
+ assert.match(filters, /filter_row\.organization_id = water_filter_flushes\.organization_id/);
 });
 
 test('ersetzte Funktionen behalten Zeilenumbrüche und Zeilenkommentare', () => {
- const dynamic = migrations.slice(3);
+ const dynamic = migrations.slice(3, 6);
  for (const migration of dynamic) {
   assert.doesNotMatch(migration.sql, /updated\s*:=\s*replace\(\s*definition/, migration.name);
   assert.doesNotMatch(migration.sql, /EXECUTE\s+definition\b/, migration.name);
