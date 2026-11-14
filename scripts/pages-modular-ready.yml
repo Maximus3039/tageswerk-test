@@ -59,8 +59,8 @@ jobs:
           js/auth.js
           js/dashboard.js
           js/defects-store.js
-/defects-ui.js
-/defects.js
+          js/defects-ui.js
+          js/defects.js
           js/labels.js
           js/meter-import-profiles.js
           js/meter-import-review.js
