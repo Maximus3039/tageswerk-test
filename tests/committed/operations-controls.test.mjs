@@ -2259,4 +2259,59 @@ test('Wasserhistorie filtert nach Berlin-Zeiträumen inklusive Sommer- und Winte
  assert.equal(berlinInstant('2026-03-29', '08:00').startsWith('2026-03-29T'), true);
  assert.equal(berlinDay(berlinInstant('2026-03-29', '08:00')), '2026-03-29');
  assert.equal(berlinDay(berlinInstant('2026-10-25', '08:00')), '2026-10-25');
+ assert.deepEqual(waterHistoryPeriodWindow('7', new Date('2026-01-02T12:00:00.000Z')), {from: '2025-12-27', to: '2026-01-02'});
+ assert.deepEqual(waterHistoryPeriodWindow('30', new Date('2026-01-05T12:00:00.000Z')), {from: '2025-12-07', to: '2026-01-05'});
+ assert.deepEqual(waterHistoryPeriodWindow('today', new Date('2026-03-01T12:00:00.000Z')), {from: '2026-03-01', to: '2026-03-01'});
+ assert.equal(berlinDay('2025-12-31T23:30:00+01:00'), '2025-12-31');
+ assert.equal(berlinDay('2026-01-01T00:00:00+01:00'), '2026-01-01');
+ assert.equal(berlinDay('2026-07-01T00:30:00+02:00'), '2026-07-01');
+ assert.equal(addCalendarDays('2025-12-31', 1), '2026-01-01');
+ assert.equal(addCalendarDays('2026-01-31', 1), '2026-02-01');
+});
+
+test('Offene Wasserwarnungen bleiben unabhängig vom Historienzeitraum sichtbar', () => {
+ const memberships = [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'technician'}];
+ const bundle = {
+  waterPools: [
+   {id: 'pool-a', facilityId: 'fac', organizationId: 'org', name: 'Kinderbecken'},
+   {id: 'pool-b', facilityId: 'fac', organizationId: 'org', name: 'Schwimmerbecken'}
+  ],
+  waterChecks: [
+   {id: 'c-old', facilityId: 'fac', organizationId: 'org', poolId: 'pool-a', measuredAt: '2026-09-01T08:00:00+02:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '8.2', minLimit: '6.5', maxLimit: '7.6'}]},
+   {id: 'c-today', facilityId: 'fac', organizationId: 'org', poolId: 'pool-b', measuredAt: '2026-11-14T08:00:00+01:00', recordedBy: 'u1', recordedName: 'Max', readings: [{parameterCode: 'ph', value: '7.1'}]},
+   {id: 'c-follow', facilityId: 'fac', organizationId: 'org', poolId: 'pool-a', measuredAt: '2026-09-02T08:00:00+02:00', recordedBy: 'u1', recordedName: 'Max', followUpAlertId: 'alert-old', readings: [{parameterCode: 'ph', value: '7.2', minLimit: '6.5', maxLimit: '7.6'}]}
+  ],
+  waterAlerts: [
+   {id: 'alert-old', checkId: 'c-old', poolId: 'pool-a', facilityId: 'fac', organizationId: 'org', parameterCode: 'ph', value: '8.2', minLimit: '6.5', maxLimit: '7.6', unit: '', measuredAt: '2026-09-01T08:00:00+02:00', status: 'open', acknowledgementNote: ''},
+   {id: 'alert-ack', checkId: 'c-old', poolId: 'pool-a', facilityId: 'fac', organizationId: 'org', parameterCode: 'free_chlorine', value: '0.1', minLimit: '0.3', maxLimit: '0.6', unit: 'mg/l', measuredAt: '2026-09-01T08:00:00+02:00', status: 'acknowledged', acknowledgedAt: '2026-09-01T09:00:00+02:00', acknowledgedName: 'Max', acknowledgementNote: 'Kenntnisnahme'},
+   {id: 'alert-foreign', checkId: 'c-x', poolId: 'pool-x', facilityId: 'other', organizationId: 'org', parameterCode: 'ph', value: '9', status: 'open', measuredAt: '2026-09-01T08:00:00+02:00'}
+  ],
+  waterMeasures: [
+   {id: 'm1', alertId: 'alert-old', facilityId: 'fac', organizationId: 'org', measureText: 'Frischwasser', recordedAt: '2026-09-01T10:00:00+02:00', recordedName: 'Max'},
+   {id: 'm2', alertId: 'alert-old', facilityId: 'fac', organizationId: 'org', measureText: 'Dosierung', recordedAt: '2026-09-01T11:00:00+02:00', recordedName: 'Max'}
+  ]
+ };
+ const visible = waterRowsForMember(bundle, memberships, '2026-11-14T12:00:00.000Z', 'u1');
+ assert.equal(visible.alerts.some(item => item.id === 'alert-old' && item.status === 'open'), true);
+ assert.equal(visible.alerts.some(item => item.id === 'alert-ack' && item.status === 'acknowledged'), true);
+ assert.equal(visible.alerts.some(item => item.id === 'alert-foreign'), false);
+ const today = waterHistoryPeriodWindow('today', new Date('2026-11-14T12:00:00.000Z'));
+ const historyIds = waterHistoryRows({...bundle, waterChecks: visible.checks}, 'fac', today).map(row => row.id);
+ assert.deepEqual(historyIds, ['c-today']);
+ assert.equal(historyIds.includes('c-old'), false);
+ assert.equal(visible.alerts.filter(item => item.status === 'open').map(item => item.id).includes('alert-old'), true);
+ assert.equal(visible.measures.filter(item => item.alertId === 'alert-old').length, 2);
+ assert.equal(visible.checks.filter(item => item.followUpAlertId === 'alert-old').length, 1);
+ assert.equal(visible.alerts.find(item => item.id === 'alert-ack').status, 'acknowledged');
+ assert.notEqual(visible.alerts.find(item => item.id === 'alert-ack').status, 'resolved');
+ const screen = operationsUiFiles('operations-ui-water.js');
+ assert.match(screen, /renderWaterAlerts\(host, current, data, visible, pools\)/);
+ assert.doesNotMatch(screen, /renderWaterAlerts\([^\n]*from\.value/);
+ assert.match(screen, /Die Abweichung gilt damit nicht als behoben/);
+ assert.equal(waterHistoryRole({id: 'fac', organization_id: 'org'}, [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'facility_manager'}]), true);
+ assert.equal(waterHistoryRole({id: 'fac', organization_id: 'org'}, [{is_active: true, organization_id: 'org', facility_id: null, role: 'company_admin'}]), true);
+ assert.equal(waterHistoryRole({id: 'fac', organization_id: 'org'}, [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'employee'}]), false);
+ const employeeView = waterRowsForMember(bundle, [{is_active: true, organization_id: 'org', facility_id: 'fac', role: 'employee'}], '2026-11-14T12:00:00.000Z', 'u1');
+ assert.equal(employeeView.alerts.length, 0);
+ assert.equal(employeeView.checks.length, 0);
 });

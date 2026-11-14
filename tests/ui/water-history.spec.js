@@ -23,12 +23,14 @@ function supabaseMock() {
  const weekOld = addCalendarDays(today, -3);
  const monthOld = addCalendarDays(today, -20);
  const outside = addCalendarDays(today, -40);
+ const oldAlertDay = addCalendarDays(today, -45);
  const todayMorning = berlinIso(today, '08:00');
  const todayLater = berlinIso(today, '09:00');
  const yesterdayIso = berlinIso(yesterday, '08:00');
  const weekIso = berlinIso(weekOld, '08:00');
  const monthIso = berlinIso(monthOld, '08:00');
  const outsideIso = berlinIso(outside, '08:00');
+ const oldAlertIso = berlinIso(oldAlertDay, '08:00');
  const ackAt = berlinIso(today, '08:05');
  return `const tables = {
  organizations: [{id: 'org', name: 'Freizeitpark'}],
@@ -77,6 +79,11 @@ function supabaseMock() {
    id: 'check-follow', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-kinder',
    measured_at: '${yesterdayIso}', recorded_by: 'user-1', note: 'Nachkontrolle', follow_up_alert_id: 'alert-chlor',
    readings: [{parameter_code: 'free_chlorine', value: '0.35', unit: 'mg/l', min_limit: '0.30', max_limit: '0.60'}]
+  },
+  {
+   id: 'check-old-alert', organization_id: 'org', facility_id: 'fac', pool_id: 'pool-schwimmer',
+   measured_at: '${oldAlertIso}', recorded_by: 'user-1', note: '',
+   readings: [{parameter_code: 'ph', value: '8.50', unit: '', min_limit: '6.50', max_limit: '7.60'}]
   }
  ],
  water_alerts: [
@@ -90,6 +97,12 @@ function supabaseMock() {
    id: 'alert-chlor', check_id: 'check-kinder', pool_id: 'pool-kinder', organization_id: 'org', facility_id: 'fac',
    parameter_code: 'free_chlorine', value_amount: '0.10', min_value: '0.30', max_value: '0.60', unit: 'mg/l',
    measured_at: '${todayMorning}', recorded_by: 'user-1', status: 'open',
+   acknowledged_by: null, acknowledged_at: null, acknowledgement_note: ''
+  },
+  {
+   id: 'alert-old', check_id: 'check-old-alert', pool_id: 'pool-schwimmer', organization_id: 'org', facility_id: 'fac',
+   parameter_code: 'ph', value_amount: '8.50', min_value: '6.50', max_value: '7.60', unit: '',
+   measured_at: '${oldAlertIso}', recorded_by: 'user-1', status: 'open',
    acknowledged_by: null, acknowledged_at: null, acknowledgement_note: ''
   }
  ],
@@ -182,16 +195,20 @@ test('Messwerte wechseln zwischen Becken und Uhrzeit und markieren nur gespeiche
  expect(marked.color).toBe('rgb(26, 18, 8)');
 
  const alerts = page.locator('#water-alerts');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Quittierung ist keine Behebung');
+ await expect(alerts.locator('.water-alert.is-open')).toHaveCount(2);
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Quittierung ist keine Behebung');
+ await expect(alerts.locator('[data-alert-id="alert-old"]')).toContainText('Offene Warnung: pH-Wert 8.50');
+ await expect(alerts.locator('[data-alert-id="alert-old"]')).toContainText('Schwimmerbecken');
  await expect(alerts.locator('.water-alert.is-acknowledged')).toContainText(/Die Abweichung gilt damit nicht als behoben/);
+ await expect(history).not.toContainText('8.50');
  await expect(alerts.getByText('Maßnahme (freiwillig)').first()).toBeVisible();
- await expect(alerts.getByText('Quittierung (freiwillig)')).toBeVisible();
+ await expect(alerts.getByText('Quittierung (freiwillig)').first()).toBeVisible();
  await expect(alerts.getByText('Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.')).toBeVisible();
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Frischwasser nachgefüllt');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Dosierung geprüft');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Wiederholungsmessungen (1)');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('0.35');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Frischwasser nachgefüllt');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Dosierung geprüft');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Wiederholungsmessungen (1)');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('0.35');
 
  const viewport = page.viewportSize();
  for (const button of [poolButton, timeButton, history.getByRole('button', {name: 'Heute'}), history.getByRole('button', {name: 'Letzte 7 Tage'})]) {
@@ -203,7 +220,8 @@ test('Messwerte wechseln zwischen Becken und Uhrzeit und markieren nur gespeiche
 
  await page.getByRole('button', {name: 'Maßnahme speichern'}).first().click();
  await expect(page.locator('#operations-message')).toHaveText('Eine Maßnahme wird freiwillig erst ab 3 Zeichen gespeichert. Die Messung und die offene Warnung bleiben unverändert.');
- await expect(alerts.locator('.water-alert.is-open')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
+ await expect(alerts.locator('[data-alert-id="alert-chlor"]')).toContainText('Offene Warnung: Freies Chlor 0.10 mg/l');
+ await expect(alerts.locator('[data-alert-id="alert-old"]')).toBeVisible();
  await expect(kinder.locator('td.is-breach')).toHaveCount(2);
 
  await history.getByRole('button', {name: 'Letzte 7 Tage'}).click();
