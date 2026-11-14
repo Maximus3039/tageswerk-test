@@ -1,0 +1,49 @@
+/* Tageswerk 3.6.0 Designsystem – Tokens */
+:root{
+ --tw-bg:#0b1220;
+ --tw-bg-elevated:#121c2e;
+ --tw-bg-card:#152338;
+ --tw-bg-card-soft:#182941;
+ --tw-bg-input:#0d1726;
+ --tw-border:#2f4660;
+ --tw-border-strong:#3f5d7c;
+ --tw-text:#e8f1fa;
+ --tw-text-muted:#9fb4c9;
+ --tw-accent:#e1bf48;
+ --tw-accent-soft:rgba(225,191,72,.16);
+ --tw-accent-glow:rgba(225,191,72,.35);
+ --tw-blue:#4ea1ff;
+ --tw-blue-soft:rgba(78,161,255,.14);
+ --tw-blue-glow:rgba(78,161,255,.28);
+ --tw-success:#6fd39a;
+ --tw-warning:#e7a35a;
+ --tw-danger:#ef7f7a;
+ --tw-radius-sm:4px;
+ --tw-radius:8px;
+ --tw-radius-lg:14px;
+ --tw-shadow:0 10px 30px rgba(0,0,0,.28);
+ --tw-shadow-glow:0 0 0 1px rgba(78,161,255,.18),0 12px 36px rgba(0,0,0,.35);
+ --tw-font:"Segoe UI","DIN Alternate","Helvetica Neue",Arial,sans-serif;
+ --tw-font-display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
+ --tw-space-1:4px;
+ --tw-space-2:8px;
+ --tw-space-3:12px;
+ --tw-space-4:16px;
+ --tw-space-5:24px;
+ --tw-space-6:32px;
+ --tw-touch:48px;
+ --tw-header-h:72px;
+ --tw-nav-h:64px;
+ color-scheme:dark;
+ font-family:var(--tw-font);
+ background:
+  radial-gradient(1200px 600px at 10% -10%,rgba(78,161,255,.12),transparent 55%),
+  radial-gradient(900px 500px at 100% 0%,rgba(225,191,72,.08),transparent 50%),
+  linear-gradient(180deg,#0d1626 0%,var(--tw-bg) 40%,#0a101a 100%);
+ color:var(--tw-text);
+}
+
+@media (prefers-reduced-motion:reduce){
+ :root{--tw-motion:0}
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}

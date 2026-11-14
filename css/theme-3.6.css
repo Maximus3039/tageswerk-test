@@ -1,0 +1,185 @@
+/* Tageswerk 3.6.0 – Futuristisches Theme auf dem Designsystem */
+@import url('./tokens.css');
+
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:transparent;color:var(--tw-text)}
+header{
+ border-bottom:1px solid var(--tw-border);
+ background:linear-gradient(180deg,rgba(18,28,46,.96),rgba(15,23,38,.92));
+ backdrop-filter:blur(10px);
+ padding:18px clamp(16px,4vw,56px);
+ box-shadow:0 8px 24px rgba(0,0,0,.25);
+}
+h1{margin:0;font-family:var(--tw-font-display);font-size:clamp(22px,3vw,30px);letter-spacing:.04em}
+h1 span{color:var(--tw-accent);text-shadow:0 0 18px var(--tw-accent-glow)}
+small,.muted,.help{color:var(--tw-text-muted)}
+main{max-width:1280px;margin:auto;padding:28px 16px calc(110px + env(safe-area-inset-bottom))}
+
+.card,.metric,.task-card,.water-filter-card,.water-alert,.manage,.alert-box,.dash-panel{
+ border:1px solid var(--tw-border);
+ background:linear-gradient(160deg,var(--tw-bg-card),var(--tw-bg-card-soft));
+ border-radius:var(--tw-radius);
+ box-shadow:var(--tw-shadow);
+}
+.card{padding:var(--tw-space-5);margin:0 0 var(--tw-space-4);position:relative;overflow:hidden}
+.card::before{
+ content:"";position:absolute;inset:0 auto 0 0;width:3px;
+ background:linear-gradient(180deg,var(--tw-blue),var(--tw-accent));opacity:.85
+}
+.card:focus-within{box-shadow:var(--tw-shadow-glow)}
+
+h2{margin:0 0 var(--tw-space-4);font-size:1.15rem;letter-spacing:.02em}
+label{display:block;margin:14px 0 6px;font-size:.92rem;color:var(--tw-text-muted)}
+input,select,textarea{
+ display:block;width:100%;padding:13px 14px;min-height:var(--tw-touch);
+ background:var(--tw-bg-input);border:1px solid var(--tw-border-strong);
+ color:var(--tw-text);border-radius:var(--tw-radius-sm);font-size:16px;
+ transition:border-color .15s ease,box-shadow .15s ease
+}
+input:focus,select:focus,textarea:focus{
+ outline:none;border-color:var(--tw-blue);box-shadow:0 0 0 3px var(--tw-blue-soft)
+}
+button{
+ border:0;background:linear-gradient(180deg,#f0d36a,var(--tw-accent));
+ color:#101826;padding:12px 18px;margin-top:16px;min-height:var(--tw-touch);
+ font-size:16px;font-weight:750;cursor:pointer;border-radius:var(--tw-radius-sm);
+ box-shadow:0 6px 16px rgba(225,191,72,.22);transition:transform .12s ease,filter .12s ease
+}
+button:hover{filter:brightness(1.05)}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.55;cursor:wait;filter:none;transform:none}
+button.secondary{
+ background:linear-gradient(180deg,#2d4d6c,#25445f);color:var(--tw-text);
+ box-shadow:0 6px 16px rgba(0,0,0,.2)
+}
+button.link{background:transparent;box-shadow:none;color:var(--tw-blue);text-decoration:underline;min-height:auto;padding:8px 0}
+
+.side-nav button,.bottom-nav button{
+ background:transparent;color:var(--tw-text-muted);box-shadow:none;border:1px solid transparent
+}
+.side-nav button{border-radius:var(--tw-radius-sm);padding:12px 14px}
+.side-nav button:hover,.bottom-nav button:hover{color:var(--tw-text);border-color:var(--tw-border)}
+.side-nav .active,.bottom-nav .active,.navbtn.active{
+ background:linear-gradient(180deg,#f0d36a,var(--tw-accent))!important;color:#101826!important;
+ box-shadow:0 0 18px var(--tw-accent-glow)
+}
+
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.metric{padding:18px;position:relative}
+.metric strong{font-size:2rem;display:block;margin:6px 0;letter-spacing:.02em}
+.metric span{color:var(--tw-text-muted);font-size:.85rem}
+.metric.critical{border-color:rgba(239,127,122,.55);box-shadow:0 0 0 1px rgba(239,127,122,.2),var(--tw-shadow)}
+
+.home-greeting{margin:10px 0 0;font-size:clamp(1.6rem,4vw,2rem);color:var(--tw-accent);text-shadow:0 0 20px var(--tw-accent-glow)}
+.home-facility{margin:4px 0 14px;font-size:1.2rem}
+.quick-grid,.capture-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.quick-grid button,.capture-actions button,.task-card{margin-top:0;min-height:56px;white-space:normal}
+.task-card{background:var(--tw-bg-elevated);border-color:var(--tw-border)}
+.task-card:hover{border-color:var(--tw-blue);box-shadow:0 0 0 1px var(--tw-blue-soft)}
+
+.dash-board{display:grid;gap:var(--tw-space-4)}
+.dash-panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px}
+.dash-panel{padding:16px;min-width:0}
+.dash-panel h3{margin:0 0 10px;font-size:1rem;color:var(--tw-blue)}
+.dash-panel .panel-value{font-size:1.6rem;font-weight:750;margin:0}
+.dash-panel .panel-meta{margin:6px 0 0;color:var(--tw-text-muted);font-size:.9rem}
+.weather-card{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
+.weather-icon{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:var(--tw-blue-soft);border:1px solid var(--tw-border);font-size:1.8rem;box-shadow:0 0 24px var(--tw-blue-glow)}
+.weather-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.weather-facts span{display:block;color:var(--tw-text-muted);font-size:.78rem}
+.weather-facts strong{font-size:.95rem}
+
+.sparkline{display:flex;align-items:flex-end;gap:4px;height:72px;margin-top:10px}
+.sparkline i{display:block;flex:1;min-width:4px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--tw-blue),rgba(78,161,255,.25));box-shadow:0 0 8px var(--tw-blue-glow)}
+.sparkline i.is-estimate{background:linear-gradient(180deg,var(--tw-warning),rgba(231,163,90,.2))}
+.sparkline i.is-empty{background:rgba(255,255,255,.06);box-shadow:none;min-height:4px}
+
+.stats-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:8px 0 14px}
+.stats-toolbar label{margin:0;flex:1 1 140px}
+.stats-toolbar select,.stats-toolbar input{margin:0}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat-chip{padding:14px;border:1px solid var(--tw-border);border-radius:var(--tw-radius-sm);background:var(--tw-bg-elevated)}
+.stat-chip strong{display:block;font-size:1.25rem;margin-top:4px}
+.stat-chip .delta-up{color:var(--tw-danger)}
+.stat-chip .delta-down{color:var(--tw-success)}
+.stat-chip .delta-flat{color:var(--tw-text-muted)}
+.estimate-badge{display:inline-block;margin-top:6px;padding:2px 8px;border:1px solid var(--tw-warning);color:var(--tw-warning);border-radius:999px;font-size:.75rem}
+
+.defect .badge,.water-filter-card .badge{border-radius:var(--tw-radius-sm)}
+.water-filter-card.is-active{border-left:3px solid var(--tw-success)}
+.water-filter-card.is-inactive{border-left:3px solid var(--tw-warning)}
+.notice{border-left:4px solid var(--tw-accent);background:rgba(225,191,72,.08)}
+.ok{color:var(--tw-success)}.error{color:var(--tw-danger)}
+
+@keyframes tw-fade-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.view>.card,.dash-panel{animation:tw-fade-up .35s ease both}
+
+@media(max-width:850px){
+ .quick-grid,.capture-actions{grid-template-columns:1fr}
+ .quick-grid button,.capture-actions button,button,.card button{min-height:52px}
+ .weather-facts{grid-template-columns:1fr}
+ .stats-toolbar{flex-direction:column;align-items:stretch}
+ .bottom-nav{background:rgba(14,22,36,.96);backdrop-filter:blur(12px);border-top:1px solid var(--tw-accent)}
+ .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(min-width:851px){
+ .dash-hero{display:grid;grid-template-columns:1.4fr .9fr;gap:16px;align-items:stretch}
+}
+
+/* Tabellen, Dialoge, Status */
+table{width:100%;border-collapse:collapse;background:var(--tw-bg-elevated);border:1px solid var(--tw-border);border-radius:var(--tw-radius);overflow:hidden}
+th,td{padding:12px 14px;border-bottom:1px solid var(--tw-border);text-align:left;vertical-align:top}
+th{color:var(--tw-blue);font-weight:650;background:rgba(78,161,255,.06)}
+tr:last-child td{border-bottom:0}
+@media(max-width:700px){
+ .table-scroll,table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+dialog,.modal,.overlay-card{
+ background:var(--tw-bg-card);color:var(--tw-text);border:1px solid var(--tw-border-strong);
+ border-radius:var(--tw-radius);box-shadow:var(--tw-shadow-glow);padding:var(--tw-space-5)
+}
+.toast,.notice-banner{border:1px solid var(--tw-border);background:var(--tw-bg-elevated);box-shadow:var(--tw-shadow)}
+
+/* Mängel */
+.defect,.defect-card{
+ border:1px solid var(--tw-border);border-radius:var(--tw-radius);padding:16px;
+ background:linear-gradient(160deg,var(--tw-bg-card),var(--tw-bg-card-soft));
+ box-shadow:var(--tw-shadow);margin:0 0 12px;position:relative
+}
+.defect-card.priority-critical{border-color:rgba(239,127,122,.55);box-shadow:0 0 0 1px rgba(239,127,122,.22),var(--tw-shadow)}
+.defect-card.priority-high{border-color:rgba(231,163,90,.45)}
+.defect-badges{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.defect-badges .badge,.badge{
+ display:inline-flex;align-items:center;padding:4px 10px;border-radius:var(--tw-radius-sm);
+ border:1px solid var(--tw-border);background:var(--tw-bg-elevated);font-size:.78rem;color:var(--tw-text)
+}
+.badge.priority-critical{border-color:var(--tw-danger);color:var(--tw-danger)}
+.badge.priority-high{border-color:var(--tw-warning);color:var(--tw-warning)}
+.badge.status-open{border-color:var(--tw-blue);color:var(--tw-blue)}
+.badge.status-in_progress{border-color:var(--tw-accent);color:var(--tw-accent)}
+.badge.status-pending_review{border-color:var(--tw-warning);color:var(--tw-warning)}
+.badge.status-resolved{border-color:var(--tw-success);color:var(--tw-success)}
+.badge.muted-badge{color:var(--tw-text-muted)}
+.defect-section h3{color:var(--tw-blue);margin:18px 0 10px}
+.dash-row{padding:12px;border:1px solid transparent;border-radius:var(--tw-radius-sm);cursor:pointer}
+.dash-row:hover,.dash-row:focus{border-color:var(--tw-border);background:rgba(78,161,255,.06);outline:none}
+
+/* Wasserfilter */
+.water-filter-overview,.water-filter-cards{display:grid;gap:12px}
+.water-filter-cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
+.water-filter-card{padding:14px;position:relative}
+.water-filter-card .badge{margin-top:8px}
+
+/* Mobile Navigation & Betriebswechsel */
+#dashboard-facility,#consumption-facility,#defect-facility-filter{
+ font-size:16px;min-height:var(--tw-touch)
+}
+@media(max-width:850px){
+ header{padding:14px 14px 12px}
+ main{padding:16px 12px calc(120px + env(safe-area-inset-bottom))}
+ .card{padding:16px}
+ .home-greeting{font-size:1.45rem}
+ .defect-card .manage,.water-filter-card{padding-top:4px}
+ .bottom-nav{gap:4px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+ .bottom-nav button{margin:0;min-height:52px;font-size:.78rem}
+}
