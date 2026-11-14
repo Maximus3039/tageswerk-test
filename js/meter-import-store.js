@@ -1,3 +1,4 @@
+import {supabase} from './supabase.js';
 import {reviewRows,seriesKey} from './meter-import-review.js';
 
 const FORMAT="tageswerk-pruefstand";
@@ -454,4 +455,57 @@ async function runHistoricalCommit({decision,facilityId,rpc}){
  return {ok:true,called:true,result:normalized,message:"",refresh:commitRefreshesConsumption(normalized)};
 }
 
-export {FORMAT,VERSION,IMPORT_LIMIT,recordId,sha256Hex,buildSnapshot,matchSnapshot,validClock,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimeForRow,historicalTimesForFacility,normalizeHistoricalTimes,importStandText,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,normalizeCommitResult,commitErrorMessage,commitRefreshesConsumption,runHistoricalCommit};
+async function loadInactiveStock(meters){
+ const inactive=(meters||[]).filter(meter=>meter.is_active===false);
+ const counts=new Map();
+ if(!inactive.length)return {counts,known:true};
+ const results=await Promise.all(inactive.map(async meter=>{
+  const {count,error}=await supabase.from("utility_meter_readings").select("id",{count:"exact",head:true}).eq("meter_id",meter.id).is("voided_at",null).neq("reading_type","correction");
+  return {id:meter.id,count,error};
+ }));
+ if(results.some(result=>result.error))return {counts,known:false};
+ results.forEach(result=>counts.set(result.id,result.count||0));
+ return {counts,known:true};
+}
+
+function fetchImportMappings(facilityId){
+ return supabase.from("utility_meter_import_mappings").select("id,facility_id,excel_schluessel,excel_bezeichnung,excel_verbrauchsart,excel_einheit,meter_id,altbestand_bestaetigt,revoked_at").eq("facility_id",facilityId).is("revoked_at",null);
+}
+
+function revokeImportMappingRow({id,facilityId}){
+ return supabase.from("utility_meter_import_mappings").update({revoked_at:new Date().toISOString()}).eq("id",id).eq("facility_id",facilityId).is("revoked_at",null).select("id");
+}
+
+function insertImportMappingRow(row){
+ return supabase.from("utility_meter_import_mappings").insert(row).select("id");
+}
+
+async function loadEffectContext(facilityId,effects,meters){
+ const ids=[...new Set(effects.map(row=>row.reading_id).filter(Boolean))];
+ if(!ids.length)return {effects,note:""};
+ const chunks=[];
+ for(let index=0;index<ids.length;index+=100)chunks.push(ids.slice(index,index+100));
+ try{
+  const results=await Promise.all(chunks.map(chunk=>supabase.from("utility_meter_consumption").select("reading_id,meter_id,reading_at,unit").eq("facility_id",facilityId).in("reading_id",chunk)));
+  if(results.some(result=>result.error))return {effects,note:"Die Zählerbezeichnungen der Verbrauchsänderungen konnten nicht geladen werden. Die Verbrauchswerte stammen aus der Vorschau."};
+  const byId=new Map(results.flatMap(result=>result.data||[]).map(row=>[row.reading_id,row]));
+  return {effects:effects.map(row=>{
+   const found=byId.get(row.reading_id);
+   if(!found)return row;
+   const meter=(meters||[]).find(item=>item.id===found.meter_id);
+   return {...row,meter:meter?.label||"",reading_at:found.reading_at,unit:found.unit||""};
+  }),note:""};
+ }catch{
+  return {effects,note:"Die Zählerbezeichnungen der Verbrauchsänderungen konnten nicht geladen werden. Die Verbrauchswerte stammen aus der Vorschau."};
+ }
+}
+
+function previewHistoricalImport(facilityId,payload){
+ return supabase.rpc("tageswerk_preview_historical_import",{p_facility_id:facilityId,p_payload:payload});
+}
+
+function commitHistoricalImport(decision,facilityId){
+ return runHistoricalCommit({decision,facilityId,rpc:(name,args)=>supabase.rpc(name,args)});
+}
+
+export {FORMAT,VERSION,IMPORT_LIMIT,recordId,sha256Hex,buildSnapshot,matchSnapshot,validClock,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimeForRow,historicalTimesForFacility,normalizeHistoricalTimes,importStandText,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,normalizeCommitResult,commitErrorMessage,commitRefreshesConsumption,runHistoricalCommit,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport};

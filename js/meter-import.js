@@ -1,9 +1,8 @@
 import {PROFILES,convertTageszeitZweizeilig,notable,READING_COLUMNS,METER_COLUMNS} from './meter-import-profiles.js';
 import {needsReview,reviewRows,canMerge,dateSpan,reviewReadingsCsv,reviewMetersCsv} from './meter-import-review.js';
-import {sha256Hex,buildSnapshot,matchSnapshot,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimesForFacility,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,commitErrorMessage,runHistoricalCommit} from './meter-import-store.js';
+import {sha256Hex,buildSnapshot,matchSnapshot,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimesForFacility,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,commitErrorMessage,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport} from './meter-import-store.js';
 import {isManager} from './permissions.js';
 import {state} from './state.js';
-import {supabase} from './supabase.js';
 import {fetchFacilityMeters,loadFacilityMeters} from './meters.js';
 import {mediumNames,unitNames} from './labels.js';
 
@@ -162,22 +161,9 @@ function renderImportMeters(meters,noteText){
  }
 }
 
-async function loadInactiveStock(meters){
- const inactive=(meters||[]).filter(meter=>meter.is_active===false);
- const counts=new Map();
- if(!inactive.length)return {counts,known:true};
- const results=await Promise.all(inactive.map(async meter=>{
-  const {count,error}=await supabase.from("utility_meter_readings").select("id",{count:"exact",head:true}).eq("meter_id",meter.id).is("voided_at",null).neq("reading_type","correction");
-  return {id:meter.id,count,error};
- }));
- if(results.some(result=>result.error))return {counts,known:false};
- results.forEach(result=>counts.set(result.id,result.count||0));
- return {counts,known:true};
-}
-
 async function loadMappingContext(facilityId,seq){
  const [maps,stock]=await Promise.all([
-  supabase.from("utility_meter_import_mappings").select("id,facility_id,excel_schluessel,excel_bezeichnung,excel_verbrauchsart,excel_einheit,meter_id,altbestand_bestaetigt,revoked_at").eq("facility_id",facilityId).is("revoked_at",null),
+  fetchImportMappings(facilityId),
   loadInactiveStock(facilityMeterRows)
  ]);
  if(seq!==meterLoadSeq||importFacilityId()!==facilityId)return;
@@ -422,11 +408,11 @@ async function storeMapping(excel,selectedMeterId,confirmChange,altbestandChecke
  message.textContent="Zuordnung wird gespeichert …";
  try{
   if(plan.action==="replace"){
-   const lifted=await supabase.from("utility_meter_import_mappings").update({revoked_at:new Date().toISOString()}).eq("id",saved.id).eq("facility_id",facility.id).is("revoked_at",null).select("id");
+   const lifted=await revokeImportMappingRow({id:saved.id,facilityId:facility.id});
    if(lifted.error)throw lifted.error;
    if(!lifted.data?.length)throw new Error("Die gespeicherte Zuordnung wurde zwischenzeitlich geändert. Die Liste wird neu geladen.");
   }
-  const inserted=await supabase.from("utility_meter_import_mappings").insert({
+  const inserted=await insertImportMappingRow({
    facility_id:facility.id,
    organization_id:facility.organization_id,
    excel_schluessel:excel.zaehler_schluessel,
@@ -435,7 +421,7 @@ async function storeMapping(excel,selectedMeterId,confirmChange,altbestandChecke
    excel_einheit:excel.einheit,
    meter_id:plan.meter.id,
    altbestand_bestaetigt:plan.altbestand
-  }).select("id");
+  });
   if(inserted.error)throw inserted.error;
   mappingFlash=plan.action==="replace"?"Die bisherige Zuordnung wurde aufgehoben und die neue Zuordnung gespeichert.":"Zuordnung gespeichert.";
   await loadMappingContext(facility.id,meterLoadSeq);
@@ -461,7 +447,7 @@ async function revokeMapping(saved,confirmChange,message){
  message.className="help";
  message.textContent="Zuordnung wird aufgehoben …";
  try{
-  const lifted=await supabase.from("utility_meter_import_mappings").update({revoked_at:new Date().toISOString()}).eq("id",saved.id).eq("facility_id",facility.id).is("revoked_at",null).select("id");
+  const lifted=await revokeImportMappingRow({id:saved.id,facilityId:facility.id});
   if(lifted.error)throw lifted.error;
   if(!lifted.data?.length)throw new Error("Die gespeicherte Zuordnung wurde zwischenzeitlich geändert. Die Liste wird neu geladen.");
   mappingFlash="Die Zuordnung wurde aufgehoben.";
@@ -725,26 +711,6 @@ function renderServerPreview(){
  renderCommit();
 }
 
-async function loadEffectContext(facilityId,effects){
- const ids=[...new Set(effects.map(row=>row.reading_id).filter(Boolean))];
- if(!ids.length)return {effects,note:""};
- const chunks=[];
- for(let index=0;index<ids.length;index+=100)chunks.push(ids.slice(index,index+100));
- try{
-  const results=await Promise.all(chunks.map(chunk=>supabase.from("utility_meter_consumption").select("reading_id,meter_id,reading_at,unit").eq("facility_id",facilityId).in("reading_id",chunk)));
-  if(results.some(result=>result.error))return {effects,note:"Die Zählerbezeichnungen der Verbrauchsänderungen konnten nicht geladen werden. Die Verbrauchswerte stammen aus der Vorschau."};
-  const byId=new Map(results.flatMap(result=>result.data||[]).map(row=>[row.reading_id,row]));
-  return {effects:effects.map(row=>{
-   const found=byId.get(row.reading_id);
-   if(!found)return row;
-   const meter=facilityMeterRows.find(item=>item.id===found.meter_id);
-   return {...row,meter:meter?.label||"",reading_at:found.reading_at,unit:found.unit||""};
-  }),note:""};
- }catch{
-  return {effects,note:"Die Zählerbezeichnungen der Verbrauchsänderungen konnten nicht geladen werden. Die Verbrauchswerte stammen aus der Vorschau."};
- }
-}
-
 async function startHistoricalPreview(){
  if(previewBusy)return;
  const facility=state.accessibleFacilities.find(item=>item.id===importFacilityId());
@@ -766,12 +732,12 @@ async function startHistoricalPreview(){
  commitResult=null;
  renderImportPreparation(plan);
  try{
-  const {data,error}=await supabase.rpc("tageswerk_preview_historical_import",{p_facility_id:facilityId,p_payload:plan.payload});
+  const {data,error}=await previewHistoricalImport(facilityId,plan.payload);
   if(!acceptPreviewResponse({sentKey:key,currentKey:importPlanKey,sentSeq:seq,currentSeq:previewSeq}))return;
   if(error)throw error;
   const normalized=normalizePreviewResult(typeof data==="string"?JSON.parse(data):data);
   if(!normalized.ok)throw new Error(normalized.message);
-  const context=await loadEffectContext(facilityId,normalized.effects);
+  const context=await loadEffectContext(facilityId,normalized.effects,facilityMeterRows);
   if(!acceptPreviewResponse({sentKey:key,currentKey:importPlanKey,sentSeq:seq,currentSeq:previewSeq}))return;
   commitConfirmed=false;
   commitResult=null;
@@ -872,7 +838,7 @@ async function startHistoricalCommit(){
  commitResult=null;
  renderCommit();
  try{
-  const outcome=await runHistoricalCommit({decision,facilityId,rpc:(name,args)=>supabase.rpc(name,args)});
+  const outcome=await commitHistoricalImport(decision,facilityId);
   if(!acceptPreviewResponse({sentKey:key,currentKey:importPlanKey,sentSeq:seq,currentSeq:commitSeq}))return;
   if(!outcome.ok){
    commitResult={key,ok:false,message:outcome.message};
