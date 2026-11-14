@@ -53,6 +53,8 @@ test('Korrekturen lassen Originale unverändert und Statuswechsel werden protoko
  assert.match(migration, /tageswerk_water_filter_cap_arm/);
  assert.match(migration, /tageswerk_water_filter_cap_consume/);
  assert.match(migration, /GRANT UPDATE \(name\) ON TABLE public\.water_filters/);
+ assert.match(migration, /REVOKE UPDATE ON TABLE public\.water_filters FROM PUBLIC/);
+ assert.match(migration, /REVOKE UPDATE ON TABLE public\.water_filters FROM anon/);
  assert.match(migration, /Dokumentierte Filterspülungen bleiben unverändert\. Korrekturen werden gesondert protokolliert/);
  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.tageswerk_correct_water_filter_flush/);
  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.tageswerk_set_water_filter_active/);
@@ -62,8 +64,25 @@ test('Korrekturen lassen Originale unverändert und Statuswechsel werden protoko
  assert.match(pruefung, /Keine GUC-Autorisierung/);
  assert.match(pruefung, /Korrektur belässt Originale/);
  assert.match(pruefung, /Client ohne UPDATE auf active/);
+ assert.match(pruefung, /kein tabellenweites UPDATE/);
+ assert.match(pruefung, /aclexplode\(cls\.relacl\)/);
+ assert.doesNotMatch(pruefung, /has_table_privilege\('authenticated', to_regclass\('public\.water_filters'\), 'UPDATE'\)/);
  assert.match(verhalten, /GUC setzt active nicht frei/);
  assert.match(verhalten, /Keine Lost-Update/);
+});
+
+test('Rechte-Diagnose und Hotfix sind vorbereitet', () => {
+ const diagnose = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_extensions_rechte_diagnose.sql', import.meta.url), 'utf8');
+ const hotfix = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_extensions_rechte_hotfix.sql', import.meta.url), 'utf8');
+ assert.match(diagnose, /Lesende Diagnose/);
+ assert.match(diagnose, /has_column_privilege/);
+ assert.match(diagnose, /aclexplode/);
+ assert.match(diagnose, /information_schema/);
+ assert.doesNotMatch(diagnose, /\b(INSERT INTO|UPDATE |DELETE FROM|GRANT |REVOKE )\b/i);
+ assert.match(hotfix, /Nicht ohne ausdrückliche Freigabe ausführen/);
+ assert.match(hotfix, /REVOKE UPDATE ON TABLE public\.water_filters FROM PUBLIC/);
+ assert.match(hotfix, /GRANT UPDATE \(name\) ON TABLE public\.water_filters TO authenticated/);
+ assert.match(hotfix, /Hotfix unvollständig/);
 });
 
 test('last_flushed folgt der gültigen Fassung über Effective-Funktion', () => {

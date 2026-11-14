@@ -620,7 +620,10 @@ GRANT SELECT ON TABLE public.water_filter_flush_corrections TO authenticated;
 GRANT SELECT ON TABLE public.water_filter_status_events TO authenticated;
 
 -- Defense in Depth: Clients dürfen Filter umbenennen, aber nicht active/last_* setzen.
+REVOKE UPDATE ON TABLE public.water_filters FROM PUBLIC;
+REVOKE UPDATE ON TABLE public.water_filters FROM anon;
 REVOKE UPDATE ON TABLE public.water_filters FROM authenticated;
+GRANT SELECT, INSERT ON TABLE public.water_filters TO authenticated;
 GRANT UPDATE (name) ON TABLE public.water_filters TO authenticated;
 
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_flush_correction() FROM PUBLIC, anon, authenticated;

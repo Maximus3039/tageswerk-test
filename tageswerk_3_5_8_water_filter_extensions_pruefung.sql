@@ -144,14 +144,28 @@ FROM (
   UNION ALL
   SELECT 90, 'Client ohne UPDATE auf active/last_*',
     CASE
-      WHEN has_table_privilege('authenticated', to_regclass('public.water_filters'), 'UPDATE')
-       AND has_column_privilege('authenticated', to_regclass('public.water_filters'), 'name', 'UPDATE')
-       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'active', 'UPDATE')
-       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'last_flushed_at', 'UPDATE')
-       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'last_flushed_by', 'UPDATE')
+      -- Maßgeblich sind Spaltenrechte. has_table_privilege(UPDATE) ist bei rein
+      -- spaltenweisem GRANT mehrdeutig und war als Pflichtbedingung fehleranfällig.
+      -- Zusätzlich darf kein tabellenweites UPDATE an authenticated/PUBLIC/anon hängen.
+      WHEN has_column_privilege('authenticated', 'public.water_filters', 'name', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', 'public.water_filters', 'active', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', 'public.water_filters', 'last_flushed_at', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', 'public.water_filters', 'last_flushed_by', 'UPDATE')
+       AND NOT EXISTS (
+         SELECT 1
+         FROM pg_class AS cls
+         CROSS JOIN LATERAL aclexplode(cls.relacl) AS acl
+         WHERE cls.oid = 'public.water_filters'::regclass
+           AND acl.privilege_type = 'UPDATE'
+           AND (
+             acl.grantee = 0
+             OR acl.grantee = 'authenticated'::regrole
+             OR acl.grantee = 'anon'::regrole
+           )
+       )
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Nur name ist für authenticated updatebar.'
+    'Nur name ist für authenticated updatebar; kein tabellenweites UPDATE.'
   UNION ALL
   SELECT 100, 'Caps und Cap-Funktionen ohne Client-Zugriff',
     CASE
