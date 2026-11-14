@@ -1,7 +1,7 @@
 # Design- und UX-Überarbeitung 3.6.0 v2
 
 **Branch:** `entwicklung/tageswerk-3.6.0`  
-**Commit:** siehe `git log -1` nach Abschluss  
+**Commit:** `0cbde89`  
 **Pages-Pin:** unverändert `240a2e8` (3.5.7)  
 **Kein Push / keine DB-Änderungen**
 
