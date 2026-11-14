@@ -30,7 +30,8 @@ BEGIN
     RAISE EXCEPTION 'tageswerk_meter_role fehlt.';
   END IF;
   IF to_regclass('public.water_filter_flush_corrections') IS NOT NULL
-     OR to_regclass('public.water_filter_status_events') IS NOT NULL THEN
+     OR to_regclass('public.water_filter_status_events') IS NOT NULL
+     OR to_regclass('public.tageswerk_water_filter_caps') IS NOT NULL THEN
     RAISE EXCEPTION 'Filter-Erweiterungen sind bereits installiert. Diese Datei nicht erneut ausführen.';
   END IF;
   IF to_regprocedure('public.tageswerk_correct_water_filter_flush(uuid,uuid,timestamptz,text,text)') IS NOT NULL
@@ -39,6 +40,87 @@ BEGIN
   END IF;
 END;
 $guard$;
+
+-- Interne Schreibfreigabe für Status/last_*: nicht per set_config umgehbar.
+-- Freigabe gilt nur innerhalb der aktuellen Transaktion (xid8).
+-- authenticated hat kein Recht auf diese Tabelle; nur SECURITY-DEFINER-Owner schreibt.
+CREATE TABLE public.tageswerk_water_filter_caps (
+  xact_id xid8 PRIMARY KEY,
+  allow_status boolean NOT NULL DEFAULT false,
+  allow_last_flush boolean NOT NULL DEFAULT false,
+  set_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+REVOKE ALL ON TABLE public.tageswerk_water_filter_caps FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.tageswerk_water_filter_cap_arm(
+  p_allow_status boolean,
+  p_allow_last_flush boolean
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $tageswerk$
+DECLARE
+  current_xact xid8 := pg_catalog.pg_current_xact_id();
+BEGIN
+  DELETE FROM public.tageswerk_water_filter_caps AS caps
+  WHERE pg_catalog.pg_xact_status(caps.xact_id) IS DISTINCT FROM 'in progress';
+
+  INSERT INTO public.tageswerk_water_filter_caps AS caps (
+    xact_id,
+    allow_status,
+    allow_last_flush,
+    set_at
+  ) VALUES (
+    current_xact,
+    coalesce(p_allow_status, false),
+    coalesce(p_allow_last_flush, false),
+    clock_timestamp()
+  )
+  ON CONFLICT (xact_id) DO UPDATE
+  SET allow_status = caps.allow_status OR EXCLUDED.allow_status,
+      allow_last_flush = caps.allow_last_flush OR EXCLUDED.allow_last_flush,
+      set_at = EXCLUDED.set_at;
+END;
+$tageswerk$;
+
+CREATE OR REPLACE FUNCTION public.tageswerk_water_filter_cap_consume(p_kind text)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $tageswerk$
+DECLARE
+  consumed boolean := false;
+  current_xact xid8 := pg_catalog.pg_current_xact_id();
+BEGIN
+  IF p_kind = 'status' THEN
+    UPDATE public.tageswerk_water_filter_caps
+    SET allow_status = false,
+        set_at = clock_timestamp()
+    WHERE xact_id = current_xact
+      AND allow_status IS TRUE
+    RETURNING true INTO consumed;
+  ELSIF p_kind = 'last_flush' THEN
+    UPDATE public.tageswerk_water_filter_caps
+    SET allow_last_flush = false,
+        set_at = clock_timestamp()
+    WHERE xact_id = current_xact
+      AND allow_last_flush IS TRUE
+    RETURNING true INTO consumed;
+  ELSE
+    RAISE EXCEPTION 'Unbekannte Schreibfreigabe.';
+  END IF;
+  RETURN coalesce(consumed, false);
+END;
+$tageswerk$;
+
+REVOKE ALL ON FUNCTION public.tageswerk_water_filter_cap_arm(boolean, boolean)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_water_filter_cap_consume(text)
+  FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Korrekturhistorie: Originale bleiben stehen, Korrekturen sind eigene Zeilen
@@ -146,9 +228,11 @@ END;
 $tageswerk$;
 
 -- active nur über Statusfunktion; last_* nur über Neuberechnung/Trigger.
+-- SECURITY DEFINER: liest interne Caps; set_config ist keine Autorisierung.
 CREATE OR REPLACE FUNCTION public.tageswerk_protect_water_filter()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = ''
 AS $tageswerk$
 BEGIN
@@ -164,15 +248,12 @@ BEGIN
     RAISE EXCEPTION 'Die Zuordnung eines Filters bleibt unverändert.';
   END IF;
   IF NEW.active IS DISTINCT FROM OLD.active
-     AND coalesce(pg_catalog.current_setting('tageswerk.water_filter_status_change', true), '')
-         IS DISTINCT FROM '1' THEN
+     AND public.tageswerk_water_filter_cap_consume('status') IS NOT TRUE THEN
     RAISE EXCEPTION 'Der Betriebszustand eines Filters wird nur über die vorgesehene Funktion geändert.';
   END IF;
   IF (NEW.last_flushed_at IS DISTINCT FROM OLD.last_flushed_at
       OR NEW.last_flushed_by IS DISTINCT FROM OLD.last_flushed_by)
-     AND pg_catalog.pg_trigger_depth() <= 1
-     AND coalesce(pg_catalog.current_setting('tageswerk.water_filter_last_flush_refresh', true), '')
-         IS DISTINCT FROM '1' THEN
+     AND public.tageswerk_water_filter_cap_consume('last_flush') IS NOT TRUE THEN
     RAISE EXCEPTION 'Die letzte Spülung wird nur durch Spülprotokolle gesetzt.';
   END IF;
   RETURN NEW;
@@ -238,7 +319,14 @@ BEGIN
     RAISE EXCEPTION 'Der Filter fehlt.';
   END IF;
 
-  PERFORM pg_catalog.set_config('tageswerk.water_filter_last_flush_refresh', '1', true);
+  -- Filterzeile sperren: parallele Korrekturen/Inserts serialisieren die Neuberechnung.
+  PERFORM 1
+  FROM public.water_filters
+  WHERE id = p_filter_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Der Filter wurde nicht gefunden.';
+  END IF;
 
   SELECT
     effective.flushed_at,
@@ -249,6 +337,8 @@ BEGIN
   WHERE effective.filter_id = p_filter_id
   ORDER BY effective.flushed_at DESC, effective.recorded_at DESC, effective.flush_id DESC
   LIMIT 1;
+
+  PERFORM public.tageswerk_water_filter_cap_arm(false, true);
 
   IF latest.flushed_at IS NULL THEN
     UPDATE public.water_filters AS filter_row
@@ -490,7 +580,7 @@ BEGIN
   )
   RETURNING id INTO event_id;
 
-  PERFORM pg_catalog.set_config('tageswerk.water_filter_status_change', '1', true);
+  PERFORM public.tageswerk_water_filter_cap_arm(true, false);
 
   UPDATE public.water_filters
   SET active = p_active
@@ -529,12 +619,19 @@ REVOKE ALL ON TABLE public.water_filter_status_events FROM PUBLIC, anon;
 GRANT SELECT ON TABLE public.water_filter_flush_corrections TO authenticated;
 GRANT SELECT ON TABLE public.water_filter_status_events TO authenticated;
 
+-- Defense in Depth: Clients dürfen Filter umbenennen, aber nicht active/last_* setzen.
+REVOKE UPDATE ON TABLE public.water_filters FROM authenticated;
+GRANT UPDATE (name) ON TABLE public.water_filters TO authenticated;
+
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_flush_correction() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_status_event() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_protect_water_filter_flush() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_water_filter_cap_arm(boolean, boolean) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.tageswerk_water_filter_cap_consume(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_refresh_water_filter_last_flush(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.tageswerk_apply_water_filter_last_flush() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.tageswerk_water_filter_caps FROM PUBLIC, anon, authenticated;
 
 REVOKE ALL ON FUNCTION public.tageswerk_water_filter_flush_effective(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.tageswerk_water_filter_flush_effective(uuid) TO authenticated;

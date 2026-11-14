@@ -101,19 +101,28 @@ FROM (
     END,
     'Revisionssichere Korrektur mit Sperre und Rollenprüfung.'
   UNION ALL
-  SELECT 70, 'Statuswechsel nur über Funktion',
+  SELECT 70, 'Statuswechsel nur über Funktion und Caps',
     CASE
-      WHEN position(
-             $q$water_filter_status_change$q$
+      WHEN to_regclass('public.tageswerk_water_filter_caps') IS NOT NULL
+       AND position(
+             $q$tageswerk_water_filter_cap_consume$q$
              IN pg_get_functiondef('public.tageswerk_protect_water_filter()'::regprocedure)
            ) > 0
        AND position(
-             $q$water_filter_status_events$q$
+             $q$set_config$q$
+             IN pg_get_functiondef('public.tageswerk_protect_water_filter()'::regprocedure)
+           ) = 0
+       AND position(
+             $q$tageswerk_water_filter_cap_arm$q$
              IN pg_get_functiondef('public.tageswerk_set_water_filter_active(uuid,boolean,text)'::regprocedure)
            ) > 0
+       AND position(
+             $q$set_config$q$
+             IN pg_get_functiondef('public.tageswerk_set_water_filter_active(uuid,boolean,text)'::regprocedure)
+           ) = 0
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'active-Wechsel protokolliert und geschützt.'
+    'Keine GUC-Autorisierung; interne Caps + Statusprotokoll.'
   UNION ALL
   SELECT 80, 'Schutz der Originale und Historieneinträge',
     CASE
@@ -132,5 +141,48 @@ FROM (
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Originale und Protokolle sind manipulationsgeschützt.'
+  UNION ALL
+  SELECT 90, 'Client ohne UPDATE auf active/last_*',
+    CASE
+      WHEN has_table_privilege('authenticated', to_regclass('public.water_filters'), 'UPDATE')
+       AND has_column_privilege('authenticated', to_regclass('public.water_filters'), 'name', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'active', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'last_flushed_at', 'UPDATE')
+       AND NOT has_column_privilege('authenticated', to_regclass('public.water_filters'), 'last_flushed_by', 'UPDATE')
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Nur name ist für authenticated updatebar.'
+  UNION ALL
+  SELECT 100, 'Caps und Cap-Funktionen ohne Client-Zugriff',
+    CASE
+      WHEN NOT has_table_privilege('authenticated', to_regclass('public.tageswerk_water_filter_caps'), 'SELECT')
+       AND NOT has_table_privilege('authenticated', to_regclass('public.tageswerk_water_filter_caps'), 'INSERT')
+       AND NOT has_function_privilege(
+             'authenticated',
+             'public.tageswerk_water_filter_cap_arm(boolean,boolean)',
+             'EXECUTE'
+           )
+       AND NOT has_function_privilege(
+             'authenticated',
+             'public.tageswerk_water_filter_cap_consume(text)',
+             'EXECUTE'
+           )
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Interne Freigabe nicht durch Clients steuerbar.'
+  UNION ALL
+  SELECT 110, 'Neuberechnung sperrt Filterzeile',
+    CASE
+      WHEN position(
+             $q$FOR UPDATE$q$
+             IN pg_get_functiondef('public.tageswerk_refresh_water_filter_last_flush(uuid)'::regprocedure)
+           ) > 0
+       AND position(
+             $q$set_config$q$
+             IN pg_get_functiondef('public.tageswerk_refresh_water_filter_last_flush(uuid)'::regprocedure)
+           ) = 0
+      THEN 'bereit' ELSE 'stoppen'
+    END,
+    'Atomare last_flushed-Neuberechnung ohne GUC.'
 ) AS checks
 ORDER BY sortierung;

@@ -190,6 +190,22 @@ BEGIN
     ),
     'Direkter active-UPDATE gesperrt'
   );
+  PERFORM set_config('tageswerk.water_filter_status_change', '1', true);
+  PERFORM public.tageswerk_test_expect(
+    public.tageswerk_test_fails(
+      $sql$UPDATE public.water_filters SET active = false WHERE id = 'f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f2'$sql$
+    ),
+    'GUC setzt active nicht frei'
+  );
+  PERFORM set_config('tageswerk.water_filter_last_flush_refresh', '1', true);
+  PERFORM public.tageswerk_test_expect(
+    public.tageswerk_test_fails(
+      $sql$UPDATE public.water_filters
+         SET last_flushed_at = now(), last_flushed_by = auth.uid()
+         WHERE id = 'f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f1'$sql$
+    ),
+    'GUC setzt last_flushed nicht frei'
+  );
   PERFORM public.tageswerk_test_expect(
     public.tageswerk_test_fails(
       $sql$UPDATE public.water_filter_flush_corrections SET reason = 'manipuliert'$sql$
@@ -207,6 +223,26 @@ BEGIN
       format($sql$DELETE FROM public.water_filter_flushes WHERE id = %L::uuid$sql$, flush_id)
     ),
     'Löschen von Spülungen bleibt verboten'
+  );
+
+  -- Gleichzeitigkeit: zweite Korrektur sieht die erste (FOR UPDATE serialisiert).
+  corrected := public.tageswerk_correct_water_filter_flush(
+    flush_id,
+    filter_b,
+    now() - interval '15 minutes',
+    'nach Sperre',
+    'Parallele Korrektur serialisiert'
+  );
+  PERFORM public.tageswerk_test_expect(coalesce((corrected ->> 'ok')::boolean, false), 'Weitere Korrektur nach Sperre');
+  PERFORM public.tageswerk_test_expect(
+    (
+      SELECT previous_note = 'zweite Korrektur'
+      FROM public.water_filter_flush_corrections
+      WHERE flush_id = flush_id
+      ORDER BY corrected_at DESC, id DESC
+      LIMIT 1
+    ),
+    'Keine Lost-Update: previous_* zeigt vorherige gültige Fassung'
   );
 
   RESET ROLE;

@@ -49,13 +49,21 @@ test('Korrekturen lassen Originale unverändert und Statuswechsel werden protoko
  assert.match(migration, /Originaleintrag bleibt unverändert/);
  assert.match(migration, /old_active/);
  assert.match(migration, /new_active/);
- assert.match(migration, /water_filter_status_change/);
+ assert.match(migration, /tageswerk_water_filter_caps/);
+ assert.match(migration, /tageswerk_water_filter_cap_arm/);
+ assert.match(migration, /tageswerk_water_filter_cap_consume/);
+ assert.match(migration, /GRANT UPDATE \(name\) ON TABLE public\.water_filters/);
  assert.match(migration, /Dokumentierte Filterspülungen bleiben unverändert\. Korrekturen werden gesondert protokolliert/);
  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.tageswerk_correct_water_filter_flush/);
  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.tageswerk_set_water_filter_active/);
  assert.match(migration, /REVOKE ALL ON FUNCTION public\.tageswerk_refresh_water_filter_last_flush/);
- assert.match(pruefung, /Statuswechsel nur über Funktion/);
+ assert.doesNotMatch(migration, /set_config\('tageswerk\.water_filter_status_change'/);
+ assert.doesNotMatch(migration, /set_config\('tageswerk\.water_filter_last_flush_refresh'/);
+ assert.match(pruefung, /Keine GUC-Autorisierung/);
  assert.match(pruefung, /Korrektur belässt Originale/);
+ assert.match(pruefung, /Client ohne UPDATE auf active/);
+ assert.match(verhalten, /GUC setzt active nicht frei/);
+ assert.match(verhalten, /Keine Lost-Update/);
 });
 
 test('last_flushed folgt der gültigen Fassung über Effective-Funktion', () => {

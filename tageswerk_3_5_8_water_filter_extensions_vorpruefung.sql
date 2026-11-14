@@ -15,6 +15,7 @@ FROM (
     CASE
       WHEN to_regclass('public.water_filter_flush_corrections') IS NULL
        AND to_regclass('public.water_filter_status_events') IS NULL
+       AND to_regclass('public.tageswerk_water_filter_caps') IS NULL
       THEN 'bereit' ELSE 'stoppen'
     END,
     'Phase B1 ist nicht wiederholbar.'
