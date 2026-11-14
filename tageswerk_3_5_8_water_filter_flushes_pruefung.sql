@@ -162,13 +162,23 @@ FROM (
   UNION ALL
   SELECT 110, 'Mitarbeiter ohne Historie, Leitung ohne Mitarbeiter-Verwaltungslücke',
     CASE
-      WHEN position('''technician'', ''facility_manager'', ''company_admin''' IN coalesce(flush_select.qual, '')) > 0
-       AND position('employee' IN coalesce(filter_select.qual, '')) > 0
-       AND position('active IS TRUE' IN coalesce(filter_select.qual, '')) > 0
-       AND position('''company_admin'', ''facility_manager''' IN coalesce(filter_insert.with_check, '')) > 0
+      -- pg_policies speichert IN-Listen oft als = ANY (ARRAY[…]); keine exakte Komma-Kette verlangen.
+      WHEN coalesce(flush_select.qual, '') ILIKE '%technician%'
+       AND coalesce(flush_select.qual, '') ILIKE '%facility_manager%'
+       AND coalesce(flush_select.qual, '') ILIKE '%company_admin%'
+       AND coalesce(flush_select.qual, '') NOT ILIKE '%employee%'
+       AND coalesce(filter_select.qual, '') ILIKE '%employee%'
+       AND (
+         coalesce(filter_select.qual, '') ILIKE '%active IS TRUE%'
+         OR coalesce(filter_select.qual, '') ILIKE '%active = true%'
+       )
+       AND coalesce(filter_insert.with_check, '') ILIKE '%company_admin%'
+       AND coalesce(filter_insert.with_check, '') ILIKE '%facility_manager%'
+       AND coalesce(filter_insert.with_check, '') NOT ILIKE '%technician%'
+       AND coalesce(filter_insert.with_check, '') !~* $$=\s*'employee'|ANY\s*\(.*'employee'$$
       THEN 'bereit' ELSE 'stoppen'
     END,
-    'Histororie nur Techniker/Leitung/Admin; Mitarbeiter nur aktive Filter; Verwaltung nur Leitung/Admin.'
+    'Historie nur Techniker/Leitung/Admin; Mitarbeiter nur aktive Filter; Verwaltung nur Leitung/Admin.'
   FROM (SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = 'water_filter_flushes' AND policyname = 'water_filter_flushes_select') AS flush_select
   CROSS JOIN (SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = 'water_filters' AND policyname = 'water_filters_select') AS filter_select
   CROSS JOIN (SELECT with_check FROM pg_policies WHERE schemaname = 'public' AND tablename = 'water_filters' AND policyname = 'water_filters_insert') AS filter_insert

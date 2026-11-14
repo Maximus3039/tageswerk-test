@@ -6,6 +6,7 @@ const migration = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flush
 const pruefung = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_pruefung.sql', import.meta.url), 'utf8');
 const verhalten = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_verhalten.sql', import.meta.url), 'utf8');
 const vorpruefung = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_vorpruefung.sql', import.meta.url), 'utf8');
+const diagnose = readFileSync(new URL('../../tageswerk_3_5_8_water_filter_flushes_rls_diagnose.sql', import.meta.url), 'utf8');
 
 test('Filterspülungs-Migration bleibt vorbereitet und nicht wiederholbar', () => {
  assert.match(migration, /Nicht ohne ausdrückliche Freigabe ausführen/);
@@ -62,11 +63,22 @@ test('Prüfskripte decken Schema und Verhalten ab ohne Produktivzwang', () => {
  assert.match(pruefung, /24 Stunden/);
  assert.match(pruefung, /Mitarbeiter ohne Historie/);
  assert.match(pruefung, /Kein EXECUTE für authenticated/);
+ assert.match(pruefung, /ILIKE '%technician%'/);
+ assert.match(pruefung, /ILIKE '%facility_manager%'/);
+ assert.match(pruefung, /ILIKE '%company_admin%'/);
+ assert.match(pruefung, /NOT ILIKE '%employee%'/);
+ assert.match(pruefung, /active = true%/);
+ assert.doesNotMatch(pruefung, /position\(''technician'', ''facility_manager'', ''company_admin'''/);
  assert.match(vorpruefung, /Vorprüfung vor tageswerk_3_5_8_water_filter_flushes/);
  assert.match(vorpruefung, /Ausschließlich lesend/);
  assert.match(vorpruefung, /Keine Namenskonflikte Tabellen/);
  assert.match(vorpruefung, /technician/);
  assert.doesNotMatch(vorpruefung, /INSERT INTO|UPDATE |DELETE FROM|DROP /i);
+ assert.match(diagnose, /Lesende Diagnose/);
+ assert.match(diagnose, /Schreibt nichts/);
+ assert.match(diagnose, /fehlschlag_der_prueflogik/);
+ assert.match(diagnose, /= ANY \(ARRAY/);
+ assert.doesNotMatch(diagnose, /INSERT INTO|UPDATE |DELETE FROM|DROP POLICY|CREATE POLICY/i);
  assert.match(verhalten, /NICHT in der Produktivdatenbank/);
  assert.match(verhalten, /tageswerk\.integration_test/);
  assert.match(verhalten, /Nachtrag außerhalb 24 Stunden/);
