@@ -24,10 +24,17 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(index, /theme-3\.6\.css/);
  assert.match(index, /dash-weather/);
  assert.match(index, /dash-analytics/);
+ assert.match(index, /dash-command/);
+ assert.match(index, /login-brand/);
+ assert.match(index, /defect-composer/);
+ assert.match(index, /module-grid/);
  assert.match(index, /Tageswerk 3\.6\.0/);
  assert.match(tokens, /--tw-accent/);
  assert.match(tokens, /--tw-blue/);
  assert.match(theme, /dash-hero/);
+ assert.match(theme, /kpi-strip/);
+ assert.match(theme, /module-card/);
+ assert.match(theme, /defect-composer/);
  assert.match(theme, /weather-card/);
  assert.match(theme, /sparkline/);
  assert.match(dashboard, /renderWeatherPanel/);

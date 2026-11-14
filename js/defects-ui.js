@@ -277,8 +277,22 @@ async function defectCard(defect){
  return card;
 }
 
-el('defect-form')?.addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').className='error';el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;document.body.dataset.saving='1';el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await getCurrentUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await insertDefectRow(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;delete document.body.dataset.saving;el('save-defect').disabled=!state.accessibleFacilities.length}});
+function setDefectComposerOpen(open){
+ const composer=el('defect-composer');
+ if(!composer)return;
+ composer.classList.toggle('hidden',!open);
+ composer.setAttribute('aria-hidden',open?'false':'true');
+ if(open){
+  el('defect-title')?.focus();
+ }else if(el('defect-message')){
+  el('defect-message').textContent='';
+  el('defect-message').className='help';
+ }
+}
+el('open-defect-form')?.addEventListener('click',()=>setDefectComposerOpen(true));
+el('close-defect-form')?.addEventListener('click',()=>setDefectComposerOpen(false));
+el('defect-form')?.addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').className='error';el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;document.body.dataset.saving='1';el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await getCurrentUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await insertDefectRow(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';setDefectComposerOpen(false);await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;delete document.body.dataset.saving;el('save-defect').disabled=!state.accessibleFacilities.length}});
 el('refresh-defects')?.addEventListener('click',loadDefects);
 el('defect-filter')?.addEventListener('change',()=>{el('nav-mine').classList.toggle('active',el('defect-filter').value==='mine');el('nav-all').classList.toggle('active',el('defect-filter').value!=='mine');paintDefects()});
 el('defect-facility-filter')?.addEventListener('change',()=>{state.defectFacilityFilter=resolveDefectFacilityFilter(el('defect-facility-filter').value,state.accessibleFacilities);el('defect-facility-filter').value=state.defectFacilityFilter;paintDefects()});
-for(const [id,mode] of [['nav-mine','mine'],['nav-all','all']])el(id)?.addEventListener('click',()=>{el('defect-filter').value=mode;el('defect-filter').dispatchEvent(new Event('change'));el('defect-list').scrollIntoView({behavior:'smooth',block:'start'})});
+for(const [id,mode] of [['nav-mine','mine'],['nav-all','open']])el(id)?.addEventListener('click',()=>{el('defect-filter').value=mode;el('defect-filter').dispatchEvent(new Event('change'));el('defect-list').scrollIntoView({behavior:'smooth',block:'start'})});

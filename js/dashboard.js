@@ -167,7 +167,7 @@ async function renderWeatherPanel() {
  lastWeatherLine = weatherReportLine(weather, result.location);
  box.replaceChildren();
  const layout = document.createElement('div');
- layout.className = 'weather-card';
+ layout.className = 'weather-card compact';
  const icon = document.createElement('div');
  icon.className = 'weather-icon';
  icon.textContent = weather.icon;
@@ -184,10 +184,10 @@ async function renderWeatherPanel() {
  const facts = document.createElement('div');
  facts.className = 'weather-facts';
  const entries = [
-  ['Höchst', weather.max != null ? `${weather.max} °C` : '—'],
-  ['Tiefst', weather.min != null ? `${weather.min} °C` : '—'],
-  ['Regenwahrsch.', weather.rainChance != null ? `${weather.rainChance} %` : '—'],
-  ['Wind', weather.wind != null ? `${weather.wind} km/h` : '—']
+  ['Max', weather.max != null ? `${weather.max}°` : '—'],
+  ['Min', weather.min != null ? `${weather.min}°` : '—'],
+  ['Regen', weather.rainChance != null ? `${weather.rainChance}%` : '—'],
+  ['Wind', weather.wind != null ? `${weather.wind}` : '—']
  ];
  for (const [label, value] of entries) {
   const cell = document.createElement('div');
@@ -207,7 +207,7 @@ async function renderWeatherPanel() {
  }
  const source = document.createElement('p');
  source.className = 'help';
- source.textContent = `${weather.source} · ${weather.kind === 'forecast' ? 'Prognose' : 'Beobachtung'} · Standort ${result.location.source === 'facility' ? 'hinterlegt' : 'per Ortsname geschätzt'}`;
+ source.textContent = `${weather.source} · ${result.location.source === 'facility' ? 'Standort ok' : 'geschätzt'}`;
  box.append(source);
 }
 
