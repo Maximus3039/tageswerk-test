@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
+
+function operationsUiFiles(...names) {
+ return names.map(name => readFileSync(new URL(`../../js/${name}`, import.meta.url), 'utf8')).join('\n');
+}
 import {
  acknowledgeTemperatureAlert,
  createMaterial,
@@ -128,21 +132,21 @@ test('Negative Temperaturgrenzen und Messwerte bleiben zulässig', () => {
  const warmer = recordTemperature(freezer.bundle, freezer.point.id, {value: '−17,9'}, employee, now);
  assert.equal(warmer.alert.status, 'open');
  assert.equal(warmer.alert.valueC, '-17.9');
- const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
- const temperatureUi = ui.slice(ui.indexOf('function renderTemperature'), ui.indexOf('function choice'));
+ const ui = operationsUiFiles('operations-ui.js', 'operations-ui-shared.js', 'operations-ui-temperature.js');
+ const temperatureUi = readFileSync(new URL('../../js/operations-ui-temperature.js', import.meta.url), 'utf8');
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\)\)/);
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.minC\)\)/);
  assert.match(temperatureUi, /configureTemperatureInput\(input\(\), String\(point\.maxC\)\)/);
  assert.doesNotMatch(temperatureUi, /inputMode = 'decimal'/);
- assert.match(ui, /let temperatureSettingsOpen = false/);
+ assert.match(ui, /temperatureSettingsOpen: false/);
  assert.ok(temperatureUi.indexOf('⚙ Einstellungen') > temperatureUi.indexOf('if (isManager(current))'));
- assert.match(temperatureUi, /setAttribute\('aria-expanded', temperatureSettingsOpen \? 'true' : 'false'\)/);
+ assert.match(temperatureUi, /setAttribute\('aria-expanded', opsUi\.temperatureSettingsOpen \? 'true' : 'false'\)/);
  assert.match(temperatureUi, /setAttribute\('aria-controls', 'temperature-settings'\)/);
  assert.match(temperatureUi, /settings\.append\(button\('Messstelle speichern'/);
  assert.match(temperatureUi, /row\.append\(labeled\('Gemessener Wert °C', value\)/);
  assert.match(temperatureUi, /saveTemperaturePointActive/);
- assert.match(ui, /if \(name === 'temperature'\) temperatureSettingsOpen = false/);
- assert.match(ui, /if \(tab\.dataset\.operation === 'temperature'\) temperatureSettingsOpen = false/);
+ assert.match(ui, /if \(name === 'temperature'\) opsUi\.temperatureSettingsOpen = false/);
+ assert.match(ui, /if \(tab\.dataset\.operation === 'temperature'\) opsUi\.temperatureSettingsOpen = false/);
 });
 
 test('Die Wasserübersicht trennt gespeicherte Werte, fehlende Werte und den Rundenstatus', () => {
@@ -191,8 +195,8 @@ test('Die Wasserübersicht trennt gespeicherte Werte, fehlende Werte und den Run
  assert.deepEqual(table.map(row => row.poolName), ['Kinder', 'Schwimmer']);
  assert.equal(table[0].values.temperature, '28.0');
  assert.equal(table[0].values.ph, '7.20');
- const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
- const waterUi = ui.slice(ui.indexOf('function renderWater('), ui.indexOf('function renderStock'));
+ const ui = operationsUiFiles('operations-ui-water.js');
+ const waterUi = ui;
  assert.ok(waterUi.indexOf('⚙ Einstellungen') > waterUi.indexOf('if (isManager(current))'));
  assert.match(ui, /Zurück zur Eingabe/);
  assert.match(ui, /Kontrollrunde speichern/);
@@ -1160,7 +1164,7 @@ test('Messhistorie, Kontrollrunde und Einladung bleiben in den vorbereiteten Reg
  const loadSlice = roundSource.slice(roundSource.indexOf('export function loadWaterRound'), roundSource.indexOf('export function storeWaterRound'));
  assert.doesNotMatch(loadSlice, /sessionStorage/);
  const appSource = readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
- const roundUi = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const roundUi = operationsUiFiles('operations-ui-water.js');
  assert.match(appSource, /clearLocalWaterDrafts\(\)/);
  assert.match(roundUi, /Kontrollrunde fortsetzen/);
  assert.match(roundUi, /Kontrollrunde verwerfen/);
@@ -1545,13 +1549,13 @@ test('Kontrollrunde abschließen bleibt je Rolle bestätigt und übersteht einen
  assert.equal(logged[0].length, 3);
  assert.doesNotMatch(logged.map(entry => entry.join(' ')).join('\n'), /8,20|person@example.com|parameter_code/);
 
- const ui = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const ui = operationsUiFiles('operations-ui-water.js');
  const handler = ui.slice(ui.indexOf("button('Kontrollrunde speichern'"), ui.indexOf('card.append(actions);', ui.indexOf("button('Kontrollrunde speichern'")));
  const confirmed = handler.slice(handler.indexOf('if (result?.ok)'), handler.indexOf('} else {'));
  assert.match(confirmed, /clearWaterRound/);
  assert.match(confirmed, /Endgültig abgeschlossen/);
  assert.doesNotMatch(handler.slice(0, handler.indexOf('if (result?.ok)')), /Endgültig abgeschlossen/);
- assert.match(handler, /waterRoundError = result\?\.error/);
+ assert.match(handler, /opsUi\.waterRoundError = result\?\.error/);
  assert.match(handler, /if \(!result\?\.ok\) renderPanel\(\)/);
  assert.equal(waterRoundFailureMessage({code: '42501', message: 'permission denied for table water_checks'}), 'Keine Berechtigung für diese Kontrollrunde. Die erfassten Werte bleiben im Entwurf.');
 
@@ -2100,7 +2104,7 @@ test('Mehrere Wasserhygiene-Kontrollrunden pro Tag bleiben eindeutig zugeordnet'
  const closeSql = readFileSync(new URL('../../tageswerk_3_4_2_water_round_close.sql', import.meta.url), 'utf8');
  assert.equal(closeSql.includes('water_round_slots'), false);
  assert.equal(closeSql.includes('tageswerk_record_scheduled_water_round'), false);
- const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const screen = operationsUiFiles('operations-ui-water.js');
  assert.match(screen, /Kontrollrunden heute/);
  assert.match(screen, /Zusatzkontrolle starten/);
  assert.match(screen, /Kontrollzeiten speichern/);
@@ -2155,7 +2159,7 @@ test('Eine Zusatzkontrolle wählt Becken aus und behält eingegebene Werte', asy
  }}, {...base, selectedPoolIds: [first.pool.id, secondPool.pool.id]});
  assert.equal(draft.ok, true, draft.error);
  assert.deepEqual(progress.selectedPoolIds, [first.pool.id, secondPool.pool.id]);
- const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const screen = operationsUiFiles('operations-ui-water.js');
  assert.match(screen, /type = 'checkbox'/);
  assert.match(screen, /Becken für die Zusatzkontrolle/);
  assert.match(screen, /Diese Becken werden kontrolliert/);
@@ -2182,7 +2186,7 @@ test('Messwerte lassen sich nach Becken gruppieren und nur mit gespeicherten Gre
  assert.deepEqual(groups.map(group => group.poolName), ['Kinderbecken', 'Schwimmerbecken']);
  assert.deepEqual(groups[1].rows.map(row => row.measuredAt), ['2', '0']);
  assert.equal(rows[0].values.ph.value, '7.20');
- const screen = readFileSync(new URL('../../js/operations-ui.js', import.meta.url), 'utf8');
+ const screen = operationsUiFiles('operations-ui-water.js');
  assert.match(screen, /Nach Becken/);
  assert.match(screen, /Nach Uhrzeit/);
  assert.match(screen, /tageswerk-water-history-view/);
