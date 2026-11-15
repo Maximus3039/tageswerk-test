@@ -9,14 +9,18 @@ async function openApp(page) {
  await page.goto('/');
 }
 
-test('Nexus V4 Marke und Betriebs-Spotlight sind vorhanden', async ({page}) => {
+test('Nexus V4 Marke und Betriebs-Spotlight sind vorhanden', async ({page}, testInfo) => {
  await openApp(page);
  await page.evaluate(() => {
   document.querySelector('#app')?.classList.remove('hidden');
   document.querySelector('#login')?.classList.add('hidden');
  });
  await expect(page.locator('body.nexus-v4')).toHaveCount(1);
- await expect(page.locator('.nexus-brand-row')).toBeVisible();
+ if (testInfo.project.name === 'smartphone') {
+  await expect(page.locator('.nexus-brand-row')).toBeHidden();
+ } else {
+  await expect(page.locator('.nexus-brand-row')).toBeVisible();
+ }
  await expect(page.locator('#facility-spotlight')).toBeVisible();
  await expect(page.locator('.facility-select-wrap #dashboard-facility')).toBeVisible();
  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

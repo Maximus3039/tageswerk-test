@@ -191,11 +191,10 @@ export function mountOperations() {
  const card = el('operations-card');
  if (!opener || !card || opener.dataset.bound) return;
  opener.dataset.bound = '1';
+ opener.classList.toggle('active', !card.classList.contains('hidden'));
  opener.addEventListener('click', async () => {
-  const opening = card.classList.contains('hidden');
-  show('operations-card', opening);
-  opener.classList.toggle('active', opening);
-  if (!opening) return;
+  show('operations-card', true);
+  opener.classList.add('active');
   opsUi.temperatureSettingsOpen = false;
   await openOperations();
   card.scrollIntoView({behavior: 'smooth', block: 'start'});

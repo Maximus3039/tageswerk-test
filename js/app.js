@@ -7,7 +7,7 @@ import {PASSWORD_RESET_REDIRECT,PASSWORD_SAVED_MESSAGE,EMAIL_INVALID_MESSAGE,cal
 import {loadFacilityMeters} from './meters.js';
 import {syncMeterImportAccess} from './meter-import.js';
 import {onCapture, onOpenNotice, onOpenTask, toggleCapture} from './mobile.js';
-import {focusNotice, mountOperations, showOperationSection} from './operations-ui.js';
+import {focusNotice, mountOperations, openOperations, showOperationSection} from './operations-ui.js';
 import {clearLocalWaterDrafts} from './operations-controls.js';
 import {inviteFacilityOptions,loadInvitations,setStaffActions,staffFacilityOptions} from './staff-ui.js';
 import {loadDefects,populateDefectFacilityFilter} from './defects-ui.js';
@@ -183,6 +183,13 @@ el('form').addEventListener('submit',async e=>{e.preventDefault();el('submit').d
 function navigate(view){if(view==='capture'){toggleCapture();return}toggleCapture(false);state.currentView=view;const defects=view==='defects'||view==='tasks'||view==='report';const names=['dashboard','agenda','notices','defects','more'];for(const name of names)show('view-'+name,name==='defects'?defects:name===view);
  el('report-panel').classList.toggle('hidden',view==='tasks');el('defects-panel').classList.toggle('hidden',view==='report');
  if(view==='tasks'){el('defect-filter').value='mine';loadDefects()}else if(view==='defects'){el('defect-filter').value='all';loadDefects()}
+ if(view==='more'){
+  const card=el('operations-card');
+  if(card&&!card.classList.contains('hidden')){
+   el('open-operations')?.classList.add('active');
+   if(!state.operationPreview)openOperations();
+  }
+ }
  for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('active',b.dataset.view===view);
  window.scrollTo({top:0,behavior:'smooth'});
 }

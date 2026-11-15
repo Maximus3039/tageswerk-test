@@ -16,11 +16,13 @@ test('Nexus V4.1 komprimiert den Kopf und führt die Betriebsauswahl im Spotligh
   document.querySelector('#login')?.classList.add('hidden');
  });
  await expect(page.locator('body.nexus-v41')).toHaveCount(1);
- await expect(page.locator('.nexus-command-head')).toBeVisible();
- await expect(page.locator('#facility-spotlight .facility-select-wrap #dashboard-facility')).toBeVisible();
+ await expect(page.locator('.facility-select-wrap #dashboard-facility')).toBeVisible();
  await expect(page.locator('#home-facility')).toHaveClass(/sr-only/);
  if (testInfo.project.name === 'smartphone') {
+  await expect(page.locator('.nexus-command-head')).toBeHidden();
   await expect(page.locator('.nexus-kicker')).toBeHidden();
+ } else {
+  await expect(page.locator('.nexus-command-head')).toBeVisible();
  }
  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
  expect(overflow).toBeLessThanOrEqual(1);
