@@ -1,42 +1,45 @@
-/* Tageswerk Nexus V4 – Design-Tokens */
+/* Tageswerk Nexus V4.1 – Design-Tokens */
 :root{
  --nexus-bg:#03070f;
  --nexus-bg-mid:#07101c;
  --nexus-bg-deep:#010409;
  --nexus-surface:rgba(10,22,38,.78);
  --nexus-surface-strong:rgba(12,26,44,.9);
- --nexus-border:rgba(0,229,255,.34);
- --nexus-border-soft:rgba(0,229,255,.16);
+ --nexus-border:rgba(0,229,255,.38);
+ --nexus-border-soft:rgba(0,229,255,.18);
  --nexus-cyan:#00e5ff;
  --nexus-cyan-bright:#7af3ff;
- --nexus-glow:rgba(0,229,255,.42);
- --nexus-glow-soft:rgba(0,229,255,.16);
+ --nexus-glow:rgba(0,229,255,.48);
+ --nexus-glow-soft:rgba(0,229,255,.18);
  --nexus-accent:#ffd84a;
- --nexus-accent-glow:rgba(255,216,74,.4);
+ --nexus-accent-glow:rgba(255,216,74,.45);
  --nexus-blue:var(--nexus-cyan);
  --nexus-blue-bright:var(--nexus-cyan-bright);
  --nexus-text:#eef8ff;
  --nexus-text-muted:#8fb0c8;
  --nexus-success:#39e6a0;
- --nexus-success-glow:rgba(57,230,160,.35);
+ --nexus-success-glow:rgba(57,230,160,.38);
  --nexus-warning:#ffb347;
  --nexus-danger:#ff5d6c;
- --nexus-danger-glow:rgba(255,93,108,.4);
- --nexus-grid:rgba(0,229,255,.05);
+ --nexus-danger-glow:rgba(255,93,108,.45);
+ --nexus-grid:rgba(0,229,255,.055);
  --nexus-radius:16px;
  --nexus-radius-sm:10px;
+ --nexus-specular:linear-gradient(125deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 18%,transparent 42%);
  --nexus-shadow:0 14px 36px rgba(0,0,0,.45);
  --nexus-shadow-card:
-  0 0 0 1px rgba(0,229,255,.22),
-  0 0 18px rgba(0,229,255,.12),
-  0 12px 28px rgba(0,0,0,.42),
-  inset 0 1px 0 rgba(180,245,255,.12);
- --nexus-shadow-tile:
-  0 0 0 1px rgba(0,229,255,.35),
-  0 0 22px rgba(0,229,255,.18),
-  0 10px 24px rgba(0,0,0,.4),
+  0 0 0 1px rgba(0,229,255,.26),
+  0 0 22px rgba(0,229,255,.14),
+  0 14px 30px rgba(0,0,0,.45),
   inset 0 1px 0 rgba(200,250,255,.16),
-  inset 0 -10px 24px rgba(0,40,70,.35);
+  inset 0 -12px 28px rgba(0,30,55,.28);
+ --nexus-shadow-tile:
+  0 0 0 1px rgba(0,229,255,.42),
+  0 0 28px rgba(0,229,255,.22),
+  0 12px 26px rgba(0,0,0,.45),
+  inset 0 1px 0 rgba(220,255,255,.22),
+  inset 0 -14px 28px rgba(0,35,65,.42),
+  inset 0 0 24px rgba(0,229,255,.06);
  --nexus-font:"Segoe UI","DIN Alternate","Helvetica Neue",Arial,sans-serif;
  --nexus-font-display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
  --nexus-touch:48px;
