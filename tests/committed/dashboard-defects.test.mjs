@@ -127,3 +127,15 @@ test('Bestehende Berechtigungsgrenzen bleiben in der Mängel-Ladung erhalten', (
  assert.match(store, /tageswerk_archive_defect/);
  assert.match(store, /tageswerk_restore_archived_defect/);
 });
+
+test('Dashboard-Kennzahlen trennen open, in_progress, pending_review und resolved', () => {
+ const dashboard = readFileSync(new URL('../../js/dashboard.js', import.meta.url), 'utf8');
+ assert.match(dashboard, /status === 'open'/);
+ assert.match(dashboard, /status === 'in_progress'/);
+ assert.match(dashboard, /status === 'pending_review'/);
+ assert.match(dashboard, /status === 'resolved'/);
+ assert.match(dashboard, /priority === 'critical' && isActiveDefect/);
+ assert.match(dashboard, /assigned_to === state\.currentUser\?\.id && isActiveDefect/);
+ // „Offen“-Kachel zählt nur status open, nicht alle aktiven Vorgänge
+ assert.doesNotMatch(dashboard, /\['open',\s*count\(item => isActiveDefect/);
+});
