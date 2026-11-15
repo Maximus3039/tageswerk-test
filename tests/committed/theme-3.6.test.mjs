@@ -75,6 +75,10 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(dashboard, /paintNexusStatus/);
  assert.match(dashboard, /facility-spotlight-status/);
  assert.match(dashboard, /membershipAllowsMeterReading/);
+ // V4.3 Desktop: Nav/Actions nebeneinander; Mobil: 2-Spalten-Grid
+ assert.match(theme, /body\.nexus-v43 \.nexus-defects-toolbar \.defects-nav button[\s\S]*?width:auto/);
+ assert.match(theme, /@media\(max-width:850px\)[\s\S]*nexus-defects-toolbar \.defects-nav[\s\S]*grid-template-columns:1fr 1fr/);
+ assert.match(index, /Mandantentrennung aktiv/);
 });
 
 test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => {

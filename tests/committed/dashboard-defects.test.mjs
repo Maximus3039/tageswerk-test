@@ -42,10 +42,13 @@ const sample = [
 
 test('Aktive Statuswerte sind open, in_progress und pending_review', () => {
  assert.deepEqual(openStatuses(), ['open', 'in_progress', 'pending_review']);
+ assert.equal(openStatuses().includes('new'), false);
+ assert.equal(openStatuses().includes('closed'), false);
  assert.equal(isActiveDefect(defect({status: 'open'})), true);
  assert.equal(isActiveDefect(defect({status: 'in_progress'})), true);
  assert.equal(isActiveDefect(defect({status: 'pending_review'})), true);
  assert.equal(isActiveDefect(defect({status: 'resolved'})), false);
+ assert.equal(isActiveDefect(defect({status: 'closed'})), false);
  assert.equal(isActiveDefect(defect({status: 'open', archived_at: '2026-11-01T00:00:00.000Z'})), false);
 });
 
