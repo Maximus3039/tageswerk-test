@@ -263,12 +263,17 @@ function paintFacilitySpotlight() {
  const box = el('facility-spotlight');
  if (!box) return;
  const selected = el('dashboard-facility');
- const facilityId = selected?.value && selected.value !== 'all' ? selected.value : state.accessibleFacilities[0]?.id;
- const facility = state.accessibleFacilities.find(item => item.id === facilityId) || null;
+ const isAll = !selected?.value || selected.value === 'all';
+ const facilityId = isAll ? null : selected.value;
+ const facility = facilityId ? state.accessibleFacilities.find(item => item.id === facilityId) || null : null;
  const nameNode = el('facility-spotlight-name');
  const media = el('facility-spotlight-media');
  const statusHost = el('facility-spotlight-status');
- if (nameNode) nameNode.textContent = facility?.name || selected?.selectedOptions?.[0]?.textContent || 'Kein Betrieb';
+ if (nameNode) {
+  nameNode.textContent = isAll
+   ? (selected?.selectedOptions?.[0]?.textContent || 'Alle berechtigten Betriebe')
+   : (facility?.name || selected?.selectedOptions?.[0]?.textContent || 'Kein Betrieb');
+ }
  const image = facility?.image_url || facility?.photo_url || facility?.cover_url || '';
  if (media) {
   if (image) {
@@ -282,7 +287,7 @@ function paintFacilitySpotlight() {
  if (statusHost && !statusHost.childElementCount) {
   const chip = document.createElement('span');
   chip.className = 'nexus-chip status-idle';
-  chip.textContent = facility ? 'Berechtigter Betrieb' : 'Betriebsauswahl';
+  chip.textContent = isAll ? 'Alle berechtigten Betriebe' : (facility ? 'Berechtigter Betrieb' : 'Betriebsauswahl');
   statusHost.append(chip);
  }
 }

@@ -831,3 +831,157 @@ body.nexus-v42 .quick-grid{margin-top:8px}
  body.nexus-v42 .facility-spotlight-body{padding:12px 14px}
  body.nexus-v42 .facility-spotlight-name{font-size:1.15rem}
 }
+
+/* ========== NEXUS V4.3 – Feinschliff ========== */
+body.nexus-v43 .facility-select-in-spotlight{
+ margin:4px 0 8px;padding:0;border:0;background:transparent;box-shadow:none
+}
+body.nexus-v43 .facility-select-in-spotlight .app-filter{
+ min-height:44px;margin:0;padding:8px 36px 8px 10px;font-size:1.02rem;font-weight:750;
+ border:1px solid rgba(0,229,255,.45);border-radius:var(--nexus-radius-sm);
+ background:
+  linear-gradient(180deg,rgba(8,24,42,.95),rgba(4,12,24,.92));
+ color:var(--nexus-text);
+ box-shadow:inset 0 1px 0 rgba(200,250,255,.14),0 0 14px rgba(0,229,255,.1);
+ appearance:none;-webkit-appearance:none;
+ background-image:
+  linear-gradient(45deg,transparent 50%,var(--nexus-cyan-bright) 50%),
+  linear-gradient(135deg,var(--nexus-cyan-bright) 50%,transparent 50%),
+  linear-gradient(180deg,rgba(8,24,42,.95),rgba(4,12,24,.92));
+ background-position:
+  calc(100% - 18px) calc(50% - 2px),
+  calc(100% - 12px) calc(50% - 2px),
+  0 0;
+ background-size:6px 6px,6px 6px,100% 100%;
+ background-repeat:no-repeat
+}
+body.nexus-v43 .facility-select-in-spotlight .app-filter:focus{
+ outline:none;border-color:var(--nexus-cyan-bright);
+ box-shadow:0 0 0 3px var(--nexus-glow-soft),0 0 16px rgba(0,229,255,.16)
+}
+body.nexus-v43 .facility-spotlight{
+ box-shadow:var(--nexus-shadow-tile);
+ background:
+  var(--nexus-specular),
+  radial-gradient(120% 90% at 0% 0%,rgba(122,243,255,.12),transparent 42%),
+  linear-gradient(145deg,rgba(0,48,70,.58),rgba(6,16,30,.94))
+}
+body.nexus-v43 .facility-spotlight-label{letter-spacing:.14em}
+
+body.nexus-v43 .nexus-defects-toolbar{
+ display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;
+ margin:0 0 10px
+}
+body.nexus-v43 .nexus-defects-toolbar .defects-nav,
+body.nexus-v43 .nexus-defects-toolbar .defects-actions{
+ display:flex;flex-wrap:wrap;gap:8px;align-items:center;width:auto
+}
+body.nexus-v43 .nexus-defects-toolbar .defects-nav button,
+body.nexus-v43 .nexus-defects-toolbar .defects-actions button{
+ width:auto;margin:0;min-height:44px
+}
+body.nexus-v43 #defects-panel > .filterbar{
+ display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;align-items:end;margin:0 0 8px
+}
+body.nexus-v43 #defects-panel > .filterbar label{margin:0}
+body.nexus-v43 #defects-panel > .compact-title{
+ margin:0 0 8px;font-size:.95rem;display:flex;align-items:center;gap:8px
+}
+body.nexus-v43 #defect-count.pill{
+ display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;padding:2px 7px;
+ border-radius:999px;border:1px solid var(--nexus-border);font-size:.75rem;
+ color:var(--nexus-cyan-bright);background:rgba(0,229,255,.08)
+}
+
+body.nexus-v43 .defect-card,
+body.nexus-v43 .defect{
+ position:relative;padding:10px 12px 10px 14px;margin:0 0 8px;
+ border-radius:var(--nexus-radius-sm);
+ border:1px solid var(--nexus-border-soft);
+ background:
+  var(--nexus-specular),
+  linear-gradient(165deg,rgba(12,28,48,.92),rgba(6,14,26,.88));
+ box-shadow:var(--nexus-shadow-card)
+}
+body.nexus-v43 .defect-card::before,
+body.nexus-v43 .defect::before{
+ content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;
+ background:var(--nexus-cyan)
+}
+body.nexus-v43 .defect-card.priority-critical::before,
+body.nexus-v43 .defect.priority-critical::before{background:var(--nexus-danger);box-shadow:0 0 10px var(--nexus-danger-glow)}
+body.nexus-v43 .defect-card.priority-high::before,
+body.nexus-v43 .defect.priority-high::before{background:var(--nexus-warning)}
+body.nexus-v43 .defect-card .help,
+body.nexus-v43 .defect .help{
+ margin:0 0 4px;font-size:.72rem;letter-spacing:.02em;color:var(--nexus-text-muted)
+}
+body.nexus-v43 .defect-card > strong,
+body.nexus-v43 .defect > strong{
+ display:block;margin:0 0 6px;font-size:1rem;line-height:1.25;font-weight:750
+}
+body.nexus-v43 .defect-badges{margin:0;gap:5px}
+body.nexus-v43 .defect-badges .badge.priority-critical,
+body.nexus-v43 .badge.priority-critical{border-color:var(--nexus-danger);color:var(--nexus-danger)}
+body.nexus-v43 .defect-badges .badge.status-in_progress,
+body.nexus-v43 .badge.status-in_progress{border-color:var(--nexus-accent);color:var(--nexus-accent)}
+body.nexus-v43 .defect-badges .badge.status-resolved,
+body.nexus-v43 .badge.status-resolved{border-color:var(--nexus-success);color:var(--nexus-success)}
+body.nexus-v43 .defect-badges .badge.status-open,
+body.nexus-v43 .badge.status-open{border-color:var(--nexus-cyan);color:var(--nexus-cyan-bright)}
+
+body.nexus-v43 .card,
+body.nexus-v43 .dash-panel,
+body.nexus-v43 .nexus-kpi-card,
+body.nexus-v43 .neon-tile.module-card{
+ border-radius:var(--nexus-radius)
+}
+body.nexus-v43 button.secondary,
+body.nexus-v43 .navbtn:not(.active):not(.primary-action){
+ border-color:rgba(0,229,255,.28)
+}
+body.nexus-v43 button.primary-action,
+body.nexus-v43 #open-defect-form{
+ box-shadow:0 0 16px var(--nexus-accent-glow),0 6px 14px rgba(0,0,0,.28)
+}
+
+body.nexus-v43 #operations-facility{
+ margin-top:4px
+}
+body.nexus-v43 label[for="operations-facility"]{
+ margin-top:10px;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--nexus-cyan-bright)
+}
+
+@media(max-width:850px){
+ body.nexus-v43 .facility-spotlight{margin:0 0 8px}
+ body.nexus-v43 .facility-spotlight-body{padding:8px 10px}
+ body.nexus-v43 .facility-select-in-spotlight .app-filter{
+  min-height:42px;font-size:.98rem;padding:7px 34px 7px 9px
+ }
+ body.nexus-v43 .nexus-defects-toolbar{
+  display:grid;gap:6px;margin-bottom:8px
+ }
+ body.nexus-v43 .nexus-defects-toolbar .defects-nav,
+ body.nexus-v43 .nexus-defects-toolbar .defects-actions{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%
+ }
+ body.nexus-v43 .nexus-defects-toolbar .defects-nav button,
+ body.nexus-v43 .nexus-defects-toolbar .defects-actions button{
+  width:100%;min-height:44px
+ }
+ body.nexus-v43 #defects-panel > .filterbar{grid-template-columns:1fr;gap:6px}
+}
+@media(max-width:390px){
+ body.nexus-v43 .facility-select-in-spotlight .app-filter{font-size:.92rem}
+ body.nexus-v43 .defect-card > strong,
+ body.nexus-v43 .defect > strong{font-size:.95rem}
+}
+@media(min-width:851px){
+ body.nexus-v43 #defects-panel > .filterbar{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:end;grid-template-columns:none
+ }
+ body.nexus-v43 #defects-panel > .filterbar label{min-width:140px;flex:1 1 180px}
+ body.nexus-v43 #defects-panel > .filterbar select{min-height:44px}
+ body.nexus-v43 .facility-select-in-spotlight .app-filter{font-size:1.1rem;min-height:46px}
+ body.nexus-v43 .nexus-defects-toolbar{gap:10px;margin-bottom:12px}
+}

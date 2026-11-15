@@ -16,25 +16,24 @@ test('Nexus V4.2 hat kompakte Dashboard-Struktur und Module zuerst', async ({pag
   document.querySelector('#login')?.classList.add('hidden');
  });
  await expect(page.locator('body.nexus-v42')).toHaveCount(1);
- await expect(page.locator('.facility-select-primary #dashboard-facility')).toBeVisible();
+ await expect(page.locator('#facility-spotlight #dashboard-facility')).toBeVisible();
  await expect(page.locator('#facility-spotlight')).toBeVisible();
  const order = await page.evaluate(() => {
   const greeting = document.querySelector('#home-greeting');
-  const select = document.querySelector('.facility-select-primary');
   const spot = document.querySelector('#facility-spotlight');
   const kpi = document.querySelector('.kpi-strip.nexus-kpi');
   const today = document.querySelector('#home-today');
   const pos = node => node.getBoundingClientRect().top;
   return {
    greeting: pos(greeting),
-   select: pos(select),
    spot: pos(spot),
    kpi: pos(kpi),
-   today: pos(today)
+   today: pos(today),
+   selectInSpot: Boolean(document.querySelector('#facility-spotlight #dashboard-facility'))
   };
  });
- expect(order.greeting).toBeLessThan(order.select);
- expect(order.select).toBeLessThan(order.spot);
+ expect(order.selectInSpot).toBe(true);
+ expect(order.greeting).toBeLessThan(order.spot);
  expect(order.spot).toBeLessThan(order.kpi);
  expect(order.kpi).toBeLessThan(order.today);
  if (testInfo.project.name === 'smartphone') {

@@ -34,9 +34,11 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(index, /nexus-v4/);
  assert.match(index, /nexus-v41/);
  assert.match(index, /nexus-v42/);
+ assert.match(index, /nexus-v43/);
  assert.match(index, /facility-spotlight/);
- assert.match(index, /facility-select-primary/);
+ assert.match(index, /facility-select-in-spotlight/);
  assert.match(index, /more-modules-card/);
+ assert.match(index, /nexus-defects-toolbar/);
  assert.match(index, /nexus-command-head/);
  assert.match(index, /class="nexus/);
  assert.match(index, /Tageswerk 3\.6\.0/);
@@ -52,7 +54,9 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(theme, /body\.nexus-v4/);
  assert.match(theme, /body\.nexus-v41/);
  assert.match(theme, /body\.nexus-v42/);
- assert.match(theme, /facility-select-primary/);
+ assert.match(theme, /body\.nexus-v43/);
+ assert.match(theme, /facility-select-in-spotlight/);
+ assert.match(theme, /nexus-defects-toolbar/);
  assert.match(theme, /facility-spotlight/);
  assert.match(theme, /neon-tile/);
  assert.match(theme, /--nexus-specular/);
