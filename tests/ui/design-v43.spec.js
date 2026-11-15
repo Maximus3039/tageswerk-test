@@ -52,3 +52,17 @@ test('Mängel-Toolbar folgt der kompakten Nexus-Struktur', async ({page}, testIn
   expect(layout.sideBySide).toBe(true);
  }
 });
+
+test('Sicherheitsnotice und Mängel-Erfassung bleiben nach Design-Freeze sichtbar', async ({page}) => {
+ await openApp(page);
+ await page.evaluate(() => {
+  document.querySelector('#app')?.classList.remove('hidden');
+  document.querySelector('#login')?.classList.add('hidden');
+  document.querySelector('#view-dashboard')?.classList.add('hidden');
+  document.querySelector('#view-defects')?.classList.remove('hidden');
+ });
+ await expect(page.locator('.notice')).toContainText('Mandantentrennung aktiv');
+ await expect(page.locator('.notice')).toContainText('noch nicht vollständig nachgewiesen');
+ await expect(page.locator('#open-defect-form')).toBeVisible();
+ await expect(page.locator('#defect-facility-filter')).toBeVisible();
+});

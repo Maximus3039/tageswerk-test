@@ -2,6 +2,7 @@
 
 **Branch:** `entwicklung/tageswerk-3.6.0`  
 **Design-Freeze NEXUS V4.3:** `7f199d9a5f80a113ead44334a97452e7cbd12b7d`  
+**Bestandsaufnahme/Systemprüfung:** `b06b3b52bcbf9033fcd1759f55cd3d5cbb938079` (+ Folgelauf Tests/Notice)  
 **Produktiv:** 3.5.7 · Pages-Pin: `240a2e85dee772857bd14cd6206818e33175e56e` (unverändert)  
 **Dieser Auftrag:** kein Push, kein Deployment, keine produktiven SQL-Läufe, keine RLS-/Auth-Architekturänderung ohne Freigabe
 
