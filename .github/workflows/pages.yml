@@ -27,8 +27,8 @@ jobs:
       - name: Geprüften Release holen
         uses: actions/checkout@v4
         with:
-          # 3.6.0 Release. Rollback 3.5.7: 240a2e85dee772857bd14cd6206818e33175e56e
-          ref: 67711f85113018cebd80a56f5bad1d0a5b815328
+          # 3.6.1 Release. Rollback 3.6.0: 67711f85113018cebd80a56f5bad1d0a5b815328
+          ref: 4f6563e5ca541ef640bc13983b0a824e77e6f776
 
       - name: Node.js einrichten
         uses: actions/setup-node@v4
@@ -91,7 +91,7 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
           diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
-          grep -q '<title>Tageswerk 3.6.0</title>' dist/index.html
+          grep -q '<title>Tageswerk 3.6.1</title>' dist/index.html
           grep -q 'src="./js/app.js"' dist/index.html
           grep -q 'href="./css/app.css"' dist/index.html
           grep -q 'href="./css/theme-3.6.css"' dist/index.html
@@ -99,9 +99,9 @@ jobs:
           grep -q "register('./service-worker.js')" dist/index.html
           test -f dist/css/tokens.css
           test -f dist/js/nexus-icons.js
-          grep -q '"name": "Tageswerk 3.6.0"' dist/manifest.webmanifest
+          grep -q '"name": "Tageswerk 3.6.1"' dist/manifest.webmanifest
           grep -q '"start_url": "./"' dist/manifest.webmanifest
-          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.0'" dist/service-worker.js
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.1'" dist/service-worker.js
           grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
           if grep -R -E -n 'gamvnzggcrrlnyoknllu|test\.tageswerk\.local' dist; then
             exit 1
