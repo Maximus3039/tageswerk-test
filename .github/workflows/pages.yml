@@ -27,6 +27,7 @@ jobs:
       - name: Geprüften Release holen
         uses: actions/checkout@v4
         with:
+          # Live bleibt 3.5.7, bis der Pin nach Freigabe auf den 3.6.0-Release-Commit gesetzt wird.
           ref: 240a2e85dee772857bd14cd6206818e33175e56e
 
       - name: Node.js einrichten
@@ -44,11 +45,14 @@ jobs:
           find dist -type f -printf '%P\n' | sort > /tmp/pages-actual.txt
           cat > /tmp/pages-expected.txt <<'EOF'
           css/app.css
+          css/theme-3.6.css
+          css/tokens.css
           icon-192.png
           icon-512.png
           index.html
           js/app.js
           js/auth.js
+          js/consumption-analytics.js
           js/dashboard.js
           js/defects-store.js
           js/defects-ui.js
@@ -63,6 +67,7 @@ jobs:
           js/meters-ui.js
           js/meters.js
           js/mobile.js
+          js/nexus-icons.js
           js/operations-controls.js
           js/operations-store.js
           js/operations-ui-figures.js
@@ -78,21 +83,29 @@ jobs:
           js/state.js
           js/supabase.js
           js/utils.js
+          js/water-filters.js
+          js/weather.js
           manifest.webmanifest
           service-worker.js
           vendor/xlsx.full.min.js
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
           diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
-          grep -q '<title>Tageswerk 3.5.7</title>' dist/index.html
+          grep -q '<title>Tageswerk 3.6.0</title>' dist/index.html
           grep -q 'src="./js/app.js"' dist/index.html
           grep -q 'href="./css/app.css"' dist/index.html
+          grep -q 'href="./css/theme-3.6.css"' dist/index.html
           grep -q 'href="./manifest.webmanifest"' dist/index.html
           grep -q "register('./service-worker.js')" dist/index.html
-          grep -q '"name": "Tageswerk 3.5.7"' dist/manifest.webmanifest
+          test -f dist/css/tokens.css
+          test -f dist/js/nexus-icons.js
+          grep -q '"name": "Tageswerk 3.6.0"' dist/manifest.webmanifest
           grep -q '"start_url": "./"' dist/manifest.webmanifest
-          grep -q "SHELL_CACHE = 'tageswerk-shell-3.5.7'" dist/service-worker.js
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.0'" dist/service-worker.js
           grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
+          if grep -R -E -n 'gamvnzggcrrlnyoknllu|test\.tageswerk\.local' dist; then
+            exit 1
+          fi
           if grep -R -E -n 'service_role|sb_secret_' dist; then
             exit 1
           fi

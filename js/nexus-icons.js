@@ -15,6 +15,26 @@ const icons = {
  defect: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 1 21h22L12 2Zm0 4.6 7 12.1H5l7-12.1ZM11 10h2v5h-2v-5Zm0 6h2v2h-2v-2Z"/></svg>'
 };
 
+const navLabels = {
+ dashboard: 'Start',
+ agenda: 'Aufgaben',
+ capture: 'Erfassen',
+ notices: 'Hinweise',
+ defects: 'Mängel',
+ tasks: 'Meine Mängel',
+ more: 'Mehr'
+};
+
+function ensureIconHost(button) {
+ let host = button.querySelector(':scope > .nexus-ico');
+ if (!host) {
+  host = document.createElement('span');
+  host.className = 'nexus-ico';
+  host.setAttribute('aria-hidden', 'true');
+ }
+ return host;
+}
+
 export function decorateNavIcons() {
  const map = {
   dashboard: 'dashboard',
@@ -22,20 +42,19 @@ export function decorateNavIcons() {
   capture: 'capture',
   notices: 'notices',
   more: 'more',
-  defects: 'defect'
+  defects: 'defect',
+  tasks: 'tasks'
  };
  for (const [view, icon] of Object.entries(map)) {
   for (const button of document.querySelectorAll(`[data-view="${view}"]`)) {
-   const old = button.querySelector('span:not(.nexus-ico)');
-   if (old) old.remove();
-   let host = button.querySelector('.nexus-ico');
-   if (!host) {
-    host = document.createElement('span');
-    host.className = 'nexus-ico';
-    button.prepend(host);
-   }
+   const host = ensureIconHost(button);
    host.innerHTML = icons[icon];
    host.dataset.icon = icon;
+   const label = document.createElement('span');
+   label.className = 'nexus-nav-label';
+   label.textContent = navLabels[view] || (button.textContent || '').replace(/^[⌂📋＋🔔⚒▤☰\s]+/u, '').trim();
+   // Genau ein Icon + eine Beschriftung (keine Legacy-Emojis/Textknoten)
+   button.replaceChildren(host, label);
   }
  }
 }

@@ -22,6 +22,13 @@ export function isManager(facility){
  return (state.myMemberships||[]).some(membership=>membershipCoversFacility(facility,membership,false));
 }
 
+/** RPC list_facility_employees liefert kein is_active; Boolean der RPC hat Vorrang, sonst Membership, sonst true. */
+export function mergedStaffActive(rpcActive,existingActive){
+ if(typeof rpcActive==='boolean')return rpcActive;
+ if(typeof existingActive==='boolean')return existingActive;
+ return true;
+}
+
 export async function loadPermissionData(){
  const [members,people]=await Promise.all([
   supabase.from('memberships').select('user_id,organization_id,facility_id,role,is_active'),
@@ -41,7 +48,16 @@ export async function loadPermissionData(){
    const orgByFacility=new Map(state.accessibleFacilities.map(f=>[f.id,f.organization_id]));
    for(const p of data||[]){
     const index=state.staff.findIndex(m=>m.user_id===p.user_id&&m.facility_id===p.facility_id&&m.role===p.role);
-    const record={user_id:p.user_id,organization_id:orgByFacility.get(p.facility_id),facility_id:p.facility_id,role:p.role,name:p.full_name||profiles.get(p.user_id)||'Mitarbeiter '+p.user_id.slice(0,8),email:p.email,is_active:p.is_active};
+    const previous=index>=0?state.staff[index]:null;
+    const record={
+     user_id:p.user_id,
+     organization_id:orgByFacility.get(p.facility_id)??previous?.organization_id,
+     facility_id:p.facility_id,
+     role:p.role,
+     name:p.full_name||profiles.get(p.user_id)||'Mitarbeiter '+p.user_id.slice(0,8),
+     email:p.email,
+     is_active:mergedStaffActive(p.is_active,previous?.is_active)
+    };
     if(index>=0)state.staff[index]={...state.staff[index],...record};else state.staff.push(record);
    }
   }

@@ -9,12 +9,32 @@ const files = [
  'service-worker.js',
  'icon-192.png',
  'icon-512.png',
- 'css/app.css',
  'vendor/xlsx.full.min.js'
 ];
 
-for (const name of fs.readdirSync(path.join(root, 'js'))) {
+const cssDir = path.join(root, 'css');
+for (const name of fs.readdirSync(cssDir).sort()) {
+ if (name.endsWith('.css')) files.push(`css/${name}`);
+}
+
+const jsDir = path.join(root, 'js');
+for (const name of fs.readdirSync(jsDir).sort()) {
  if (name.endsWith('.js')) files.push(`js/${name}`);
+}
+
+const required = [
+ 'css/app.css',
+ 'css/theme-3.6.css',
+ 'css/tokens.css',
+ 'js/nexus-icons.js',
+ 'js/consumption-analytics.js',
+ 'js/weather.js',
+ 'js/water-filters.js',
+ 'js/permissions.js',
+ 'js/supabase.js'
+];
+for (const relative of required) {
+ if (!files.includes(relative)) throw new Error(`Pflicht-Veröffentlichungsdatei fehlt in der Liste: ${relative}`);
 }
 
 fs.rmSync(dist, {recursive: true, force: true});
@@ -42,4 +62,23 @@ const walk = directory => {
 };
 walk(dist);
 if (blocked.length) throw new Error(`Unzulässige Dateien im Veröffentlichungsordner: ${blocked.join(', ')}`);
+
+const html = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
+const refs = new Set();
+for (const match of html.matchAll(/(?:href|src)=["']\.\/([^"']+)["']/g)) refs.add(match[1]);
+const theme = fs.readFileSync(path.join(dist, 'css/theme-3.6.css'), 'utf8');
+for (const match of theme.matchAll(/@import url\(['"]\.\/([^'"]+)['"]\)/g)) refs.add(`css/${match[1]}`);
+const missingRefs = [...refs].filter(relative => !fs.existsSync(path.join(dist, relative)));
+if (missingRefs.length) {
+ throw new Error(`Referenzierte Dateien fehlen im Veröffentlichungsordner: ${missingRefs.join(', ')}`);
+}
+
+const supabase = fs.readFileSync(path.join(dist, 'js/supabase.js'), 'utf8');
+if (!supabase.includes('eqtrifscedpsngsysxvc.supabase.co')) {
+ throw new Error('Veröffentlichungspaket ist nicht mit dem produktiven Supabase-Projekt verbunden.');
+}
+if (supabase.includes('gamvnzggcrrlnyoknllu')) {
+ throw new Error('Veröffentlichungspaket enthält die Testprojekt-URL.');
+}
+
 console.log(`Veröffentlichung vorbereitet: ${files.length} Dateien in dist.`);

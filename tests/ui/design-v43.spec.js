@@ -62,7 +62,7 @@ test('Sicherheitsnotice und Mängel-Erfassung bleiben nach Design-Freeze sichtba
   document.querySelector('#view-defects')?.classList.remove('hidden');
  });
  await expect(page.locator('.notice')).toContainText('Mandantentrennung aktiv');
- await expect(page.locator('.notice')).toContainText('noch nicht vollständig nachgewiesen');
+ await expect(page.locator('.notice')).toContainText('Kernregeln für Mängel');
  await expect(page.locator('#open-defect-form')).toBeVisible();
  await expect(page.locator('#defect-facility-filter')).toBeVisible();
 });

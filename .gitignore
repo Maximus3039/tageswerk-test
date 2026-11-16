@@ -4,4 +4,8 @@ test-results/
 playwright-report/
 blob-report/
 dist/
+docs/security-compare-exports/
+js/supabase.js.abnahme-backup
+js/supabase.abnahme-active
+abnahme-local/
 tageswerk_2_9_*.sql

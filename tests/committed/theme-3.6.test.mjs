@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {existsSync, readFileSync, readdirSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
 import test from 'node:test';
 import {
  analyticsWindow,
@@ -56,6 +59,8 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(theme, /body\.nexus-v42/);
  assert.match(theme, /body\.nexus-v43/);
  assert.match(theme, /facility-select-in-spotlight/);
+ assert.match(theme, /color-scheme:\s*dark/);
+ assert.match(theme, /select option/);
  assert.match(theme, /nexus-defects-toolbar/);
  assert.match(theme, /facility-spotlight/);
  assert.match(theme, /neon-tile/);
@@ -79,6 +84,14 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(theme, /body\.nexus-v43 \.nexus-defects-toolbar \.defects-nav button[\s\S]*?width:auto/);
  assert.match(theme, /@media\(max-width:850px\)[\s\S]*nexus-defects-toolbar \.defects-nav[\s\S]*grid-template-columns:1fr 1fr/);
  assert.match(index, /Mandantentrennung aktiv/);
+ assert.match(index, /Kernregeln für Mängel/);
+ assert.match(index, /vollständige E-Mail-Versand von Einladungen ist noch nicht nachgewiesen/);
+ assert.match(pages, /css\/theme-3\.6\.css/);
+ assert.match(pages, /css\/tokens\.css/);
+ assert.match(pages, /js\/nexus-icons\.js/);
+ assert.match(pages, /Tageswerk 3\.6\.0/);
+ assert.match(pages, /tageswerk-shell-3\.6\.0/);
+ assert.match(pages, /ref: 240a2e85dee772857bd14cd6206818e33175e56e/);
 });
 
 test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => {
@@ -103,6 +116,24 @@ test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => 
  assert.equal(percentChange(110n, 100n), 10);
  assert.equal(formatDelta(12.34).tone, 'delta-up');
  assert.equal(sparkHeights([{total: 100n}, {total: 50n, estimated: 50n, measured: null}]).length, 2);
+});
+
+test('Pages-Paket 3.6.0 enthält Design-CSS, Nexus-Icons und Produktiv-Supabase', () => {
+ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+ const result = spawnSync(process.execPath, ['scripts/prepare-netlify.mjs'], {cwd: root, encoding: 'utf8'});
+ assert.equal(result.status, 0, result.stderr || result.stdout);
+ const dist = path.join(root, 'dist');
+ for (const relative of ['css/theme-3.6.css', 'css/tokens.css', 'js/nexus-icons.js', 'js/weather.js', 'js/water-filters.js']) {
+  assert.equal(existsSync(path.join(dist, relative)), true, relative);
+ }
+ const distHtml = readFileSync(path.join(dist, 'index.html'), 'utf8');
+ assert.match(distHtml, /theme-3\.6\.css/);
+ assert.match(distHtml, /Tageswerk 3\.6\.0/);
+ const distSupabase = readFileSync(path.join(dist, 'js/supabase.js'), 'utf8');
+ assert.match(distSupabase, /eqtrifscedpsngsysxvc\.supabase\.co/);
+ assert.doesNotMatch(distSupabase, /gamvnzggcrrlnyoknllu/);
+ const cssNames = readdirSync(path.join(dist, 'css')).sort();
+ assert.deepEqual(cssNames, ['app.css', 'theme-3.6.css', 'tokens.css']);
 });
 
 test('Wetterzeile und Tagesbericht-Übernahme sind vorbereitet', () => {
