@@ -9,7 +9,8 @@ const migrations = [
  'tageswerk_3_4_technician_role.sql',
  'tageswerk_3_4_invitation_role.sql',
  'tageswerk_3_4_management_guard.sql',
- 'tageswerk_3_5_8_water_filter_flushes.sql'
+ 'tageswerk_3_5_8_water_filter_flushes.sql',
+ 'tageswerk_3_6_1_facility_alert_visibility.sql'
 ].map(name => ({
  name,
  sql: readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')
@@ -39,6 +40,9 @@ test('facility_id in Unterabfragen bleibt einer Tabelle zugeordnet', () => {
  assert.match(filters, /pool\.facility_id = water_filters\.facility_id/);
  assert.match(filters, /filter_row\.facility_id = water_filter_flushes\.facility_id/);
  assert.match(filters, /filter_row\.organization_id = water_filter_flushes\.organization_id/);
+ const hides = migrations[7].sql;
+ assert.match(hides, /alert\.facility_id = facility_alert_visibility\.facility_id/);
+ assert.match(hides, /alert\.organization_id = facility_alert_visibility\.organization_id/);
 });
 
 test('ersetzte Funktionen behalten Zeilenumbrüche und Zeilenkommentare', () => {

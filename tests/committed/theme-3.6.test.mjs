@@ -44,7 +44,7 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(index, /nexus-defects-toolbar/);
  assert.match(index, /nexus-command-head/);
  assert.match(index, /class="nexus/);
- assert.match(index, /Tageswerk 3\.6\.0/);
+ assert.match(index, /Tageswerk 3\.6\.1/);
  assert.match(tokens, /--nexus-bg/);
  assert.match(tokens, /--nexus-cyan/);
  assert.match(tokens, /--nexus-glow/);
@@ -118,7 +118,7 @@ test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => 
  assert.equal(sparkHeights([{total: 100n}, {total: 50n, estimated: 50n, measured: null}]).length, 2);
 });
 
-test('Pages-Paket 3.6.0 enthält Design-CSS, Nexus-Icons und Produktiv-Supabase', () => {
+test('Pages-Paket 3.6.1 enthält Design-CSS, Nexus-Icons und Produktiv-Supabase', () => {
  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
  const result = spawnSync(process.execPath, ['scripts/prepare-netlify.mjs'], {cwd: root, encoding: 'utf8'});
  assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -128,7 +128,7 @@ test('Pages-Paket 3.6.0 enthält Design-CSS, Nexus-Icons und Produktiv-Supabase'
  }
  const distHtml = readFileSync(path.join(dist, 'index.html'), 'utf8');
  assert.match(distHtml, /theme-3\.6\.css/);
- assert.match(distHtml, /Tageswerk 3\.6\.0/);
+ assert.match(distHtml, /Tageswerk 3\.6\.1/);
  const distSupabase = readFileSync(path.join(dist, 'js/supabase.js'), 'utf8');
  assert.match(distSupabase, /eqtrifscedpsngsysxvc\.supabase\.co/);
  assert.doesNotMatch(distSupabase, /gamvnzggcrrlnyoknllu/);

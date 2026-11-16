@@ -52,6 +52,10 @@ test('Fachmodule trennen Berichte, Kennzahlen, Wasser und Temperatur', () => {
  assert.match(byName['operations-ui-water.js'], /export function renderWater\(/);
  assert.match(byName['operations-ui-water.js'], /saveWaterRound\(/);
  assert.match(byName['operations-ui-water.js'], /saveWaterCheck\(/);
+ assert.match(byName['operations-ui-water.js'], /Warnung ausblenden/);
+ assert.match(byName['operations-ui-water.js'], /Ausgeblendete Warnungen/);
+ assert.match(byName['operations-ui-temperature.js'], /Warnung ausblenden/);
+ assert.match(byName['operations-ui-shared.js'], /Alte Warnungen ausblenden/);
  assert.match(byName['operations-ui-temperature.js'], /export function renderTemperature\(/);
  assert.match(byName['operations-ui-temperature.js'], /saveTemperatureReading\(/);
  assert.match(byName['operations-ui-sections.js'], /export function renderReports\(/);

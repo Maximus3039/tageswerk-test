@@ -282,6 +282,8 @@ body:has(#app:not(.hidden)) .notice-compact{font-size:.8rem;padding:6px 8px;marg
 .review{border:1px solid rgba(232,166,90,.4);background:rgba(232,166,90,.1);padding:8px 10px;border-radius:var(--nexus-radius-sm);color:var(--nexus-warning)}
 .ok{color:var(--nexus-success)}.error{color:var(--nexus-danger)}
 .item,.history{border-color:var(--nexus-border-soft);color:var(--nexus-text)}
+.alert-visibility-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:0 0 12px}
+.alert-visibility-bar .help{flex:1 1 100%;margin:0}
 .water-filter-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px}
 .water-filter-card.is-active{border-left:3px solid var(--nexus-success)}
 .water-filter-card.is-inactive{border-left:3px solid var(--nexus-warning)}

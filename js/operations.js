@@ -23,6 +23,7 @@ export function emptyOperations() {
   waterPoolParameters: [],
   waterChecks: [],
   waterAlerts: [],
+  alertVisibility: [],
   waterMeasures: [],
   waterRoundDrafts: [],
   waterFacilitySlots: [],
@@ -53,6 +54,7 @@ function copy(bundle) {
   waterPoolParameters: [...(source.waterPoolParameters || [])],
   waterChecks: [...(source.waterChecks || [])],
   waterAlerts: [...(source.waterAlerts || [])],
+  alertVisibility: [...(source.alertVisibility || [])],
   waterMeasures: [...(source.waterMeasures || [])],
   waterRoundDrafts: [...(source.waterRoundDrafts || [])],
   waterFacilitySlots: [...(source.waterFacilitySlots || [])],
@@ -1191,10 +1193,10 @@ export function operationMetrics(bundle, facilityIds, today, now) {
   inspectionsOverdue: (bundle?.runs || []).filter(run => inScope(run) && inspectionOverdue(run, now)).length,
   maintenanceOverdue: (bundle?.assets || []).filter(asset => inScope(asset) && assetOverdue(asset, now)).length,
   procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length,
-  temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
+  temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open' && alert.hidden !== true).length,
   temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && temperatureCheckDue(point, bundle?.temperatureReadings, now)).length,
   stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length,
-  waterOpen: (bundle?.waterAlerts || []).filter(alert => inScope(alert) && alert.status === 'open').length,
+  waterOpen: (bundle?.waterAlerts || []).filter(alert => inScope(alert) && alert.status === 'open' && alert.hidden !== true).length,
   waterMissing: (bundle?.waterPools || []).filter(pool => inScope(pool) && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).due).length
  };
 }

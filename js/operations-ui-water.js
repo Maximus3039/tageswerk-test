@@ -2,6 +2,7 @@ import {el} from './utils.js';
 import {state} from './state.js';
 import {isManager, waterHistoryRole} from './permissions.js';
 import {
+ alertIsHidden,
  beginWaterRound,
  clearWaterRound,
  loadWaterRound,
@@ -18,7 +19,8 @@ import {
  waterRoundTableRows,
  waterRoundPools,
  waterRoundProgress,
- waterRoundSelection
+ waterRoundSelection,
+ latestAlertVisibility
 } from './operations-controls.js';
 import {
  waterCatalog,
@@ -37,6 +39,7 @@ import {
 } from './operations.js';
 import {
  discardWaterRound,
+ saveFacilityAlertVisibility,
  saveWaterAcknowledgement,
  saveWaterCheck,
  saveWaterFacilitySlots,
@@ -86,6 +89,7 @@ import {
  labeled,
  missingNote,
  opsUi,
+ renderAlertVisibilityBar,
  renderPanel,
  say,
  select,
@@ -769,21 +773,34 @@ function alertLimitText(alert) {
 }
 
 function renderWaterAlerts(host, current, data, visible, pools) {
+ const hiddenView = (opsUi.alertView.water || 'active') === 'hidden';
  const alerts = visible.alerts
   .filter(item => pools.some(entry => entry.id === item.poolId))
+  .filter(item => alertIsHidden(data, 'water', item.id) === hiddenView)
   .slice()
   .sort((left, right) => Number(right.status === 'open') - Number(left.status === 'open') || String(right.measuredAt).localeCompare(String(left.measuredAt)));
- if (!alerts.length) return;
+ if (!alerts.length && !isManager(current)) return;
  const section = document.createElement('section');
  section.className = 'water-alerts';
  section.id = 'water-alerts';
  const heading = document.createElement('h3');
- heading.textContent = 'Grenzwertwarnungen';
+ heading.textContent = hiddenView ? 'Ausgeblendete Grenzwertwarnungen' : 'Grenzwertwarnungen';
  section.append(heading);
  const note = document.createElement('p');
  note.className = 'help';
- note.textContent = 'Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.';
+ note.textContent = hiddenView
+  ? 'Ausgeblendete Warnungen gelten betriebsweit. Messung, Maßnahmen und Warnungsstatus bleiben unverändert.'
+  : 'Die Messung ist gespeichert. Die Warnung bleibt sichtbar. Maßnahme und Quittierung sind freiwillig und heben die Abweichung nicht auf.';
  section.append(note);
+ renderAlertVisibilityBar(section, current, 'water');
+ if (!alerts.length) {
+  const empty = document.createElement('p');
+  empty.className = 'help';
+  empty.textContent = hiddenView ? 'Keine ausgeblendeten Warnungen.' : 'Keine aktiven Warnungen.';
+  section.append(empty);
+  host.append(section);
+  return;
+ }
  for (const alert of alerts) {
   const poolName = pools.find(entry => entry.id === alert.poolId)?.name || 'Becken';
   const name = waterParameterName(data, alert.parameterCode);
@@ -885,6 +902,20 @@ function renderWaterAlerts(host, current, data, visible, pools) {
    card.append(labeled('Quittierung (freiwillig)', acknowledgement));
    card.append(button('Warnung quittieren', 'secondary', () => commit(() => saveWaterAcknowledgement(database(), bundle(), alert.id, acknowledgement.value, actor(), new Date().toISOString(), context()))));
   }
+  if (isManager(current) && opsUi.alertHidesInstalled) {
+   if (hiddenView) {
+    const hide = latestAlertVisibility(data, 'water', alert.id);
+    if (hide?.action === 'hide') {
+     const audit = document.createElement('p');
+     audit.className = 'help';
+     audit.textContent = `Betriebsweit ausgeblendet ${new Date(hide.actedAt).toLocaleString('de-DE')} · ${hide.actedName}`;
+     card.append(audit);
+    }
+    card.append(button('Warnung wieder einblenden', 'secondary', () => commit(() => saveFacilityAlertVisibility(database(), bundle(), 'water', alert.id, 'restore', actor(), new Date().toISOString(), context()))));
+   } else {
+    card.append(button('Warnung ausblenden', 'secondary', () => commit(() => saveFacilityAlertVisibility(database(), bundle(), 'water', alert.id, 'hide', actor(), new Date().toISOString(), context()))));
+   }
+  }
   section.append(card);
  }
  host.append(section);
@@ -893,6 +924,7 @@ function renderWaterAlerts(host, current, data, visible, pools) {
 export function renderWater(host, current) {
  missingNote(host, opsUi.waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
+ if (opsUi.followUpAlertId && alertIsHidden(data, 'water', opsUi.followUpAlertId)) opsUi.followUpAlertId = '';
  const catalog = waterCatalog(data);
  let settings = null;
  if (isManager(current)) {

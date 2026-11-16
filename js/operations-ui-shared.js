@@ -1,8 +1,9 @@
 import {supabase} from './supabase.js';
 import {el} from './utils.js';
 import {state} from './state.js';
+import {isManager} from './permissions.js';
 import {emptyOperations} from './operations.js';
-import {loadOperations, supabaseOperationDb} from './operations-store.js';
+import {loadOperations, saveOldFacilityAlertHides, supabaseOperationDb} from './operations-store.js';
 
 export const markNames = {ok: 'In Ordnung', notable: 'Auffällig', unchecked: 'Nicht geprüft'};
 export const statusNames = {submitted: 'Gemeldet', approved: 'Genehmigt', rejected: 'Abgelehnt', open: 'Offen', completed: 'Abgeschlossen'};
@@ -27,6 +28,8 @@ export const opsUi = {
  waterRoundNotice: '',
  waterRoundError: '',
  followUpAlertId: '',
+ alertHidesInstalled: false,
+ alertView: {temperature: 'active', water: 'active'},
  waterDraftTimer: 0,
  waterDraftStatus: '',
  loading: null,
@@ -113,6 +116,7 @@ export async function refreshFromDatabase(announce) {
  opsUi.materialsInstalled = loaded.materialsInstalled === true;
  opsUi.waterInstalled = loaded.waterInstalled === true;
  opsUi.waterFiltersInstalled = loaded.waterFiltersInstalled === true;
+ opsUi.alertHidesInstalled = loaded.alertHidesInstalled === true;
  state.temperatureInstalled = opsUi.temperatureInstalled;
  state.materialsInstalled = opsUi.materialsInstalled;
  state.waterInstalled = opsUi.waterInstalled;
@@ -212,6 +216,32 @@ export function missingNote(host, ready, message) {
  note.className = 'help';
  note.textContent = message;
  host.append(note);
+}
+
+export function renderAlertVisibilityBar(host, current, source) {
+ if (!opsUi.alertHidesInstalled || !isManager(current)) return;
+ const bar = document.createElement('div');
+ bar.className = 'alert-visibility-bar';
+ const filter = select([
+  {value: 'active', label: 'Aktive Warnungen'},
+  {value: 'hidden', label: 'Ausgeblendete Warnungen'}
+ ], opsUi.alertView[source] || 'active');
+ filter.addEventListener('change', () => {
+  opsUi.alertView[source] = filter.value;
+  renderPanel('');
+ });
+ const days = select([
+  {value: '7', label: 'älter als 7 Tage'},
+  {value: '14', label: 'älter als 14 Tage'},
+  {value: '30', label: 'älter als 30 Tage'}
+ ], '7');
+ const help = document.createElement('p');
+ help.className = 'help';
+ help.textContent = 'Das Ausblenden gilt für alle Benutzer dieses Betriebs. Messung und Warnungsstatus bleiben unverändert.';
+ bar.append(labeled('Anzeige', filter), labeled('Sammelausblendung', days));
+ bar.append(button('Alte Warnungen ausblenden', 'secondary', () => commit(() => saveOldFacilityAlertHides(database(), bundle(), current, Number(days.value), actor(), new Date().toISOString(), context()))));
+ bar.append(help);
+ host.append(bar);
 }
 
 

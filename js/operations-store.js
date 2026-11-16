@@ -13,6 +13,10 @@ import {
 import {
  acknowledgeTemperatureAlert,
  acknowledgeWaterAlert,
+ alertIsHidden,
+ hideFacilityAlert,
+ hideOldFacilityAlerts,
+ restoreFacilityAlert,
  addWaterParameter,
  createMaterial,
  createTemperaturePoint,
@@ -176,7 +180,40 @@ function mapRevision(row, context, actor) {
  };
 }
 
+function mapAlertVisibility(loaded, actor, context) {
+ return (loaded.facility_alert_visibility || []).filter(row => visible(row, actor)).map(row => ({
+  id: row.id,
+  source: row.source,
+  alertId: row.alert_id,
+  facilityId: row.facility_id,
+  facilityName: facilityName(context, row.facility_id),
+  organizationId: row.organization_id,
+  action: row.action,
+  actedBy: row.acted_by,
+  actedName: personName(context, row.acted_by, actor),
+  actedAt: row.acted_at,
+  bulkDays: row.bulk_days == null ? null : Number(row.bulk_days)
+ }));
+}
+
+function decorateAlert(alert, events, source) {
+ const latest = events
+  .filter(item => item.source === source && item.alertId === alert.id)
+  .slice()
+  .sort((left, right) => String(right.actedAt).localeCompare(String(left.actedAt)) || String(right.id).localeCompare(String(left.id)))[0];
+ const hidden = latest?.action === 'hide';
+ return {
+  ...alert,
+  hidden,
+  hiddenBy: hidden ? latest.actedBy : null,
+  hiddenName: hidden ? latest.actedName : '',
+  hiddenAt: hidden ? latest.actedAt : null
+ };
+}
+
 function assemble(loaded, actor, context) {
+ const alertVisibility = mapAlertVisibility(loaded, actor, context);
+ const readingAt = new Map((loaded.temperature_readings || []).map(row => [row.id, row.measured_at]));
  const reports = (loaded.daily_reports || []).filter(row => visible(row, actor));
  const reportIds = new Set(reports.map(row => row.id));
  const revisions = new Map();
@@ -323,7 +360,7 @@ function assemble(loaded, actor, context) {
    recordedName: personName(context, row.recorded_by, actor),
    note: row.note || ''
   })).sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt))),
-  temperatureAlerts: (loaded.temperature_alerts || []).filter(row => visible(row, actor)).map(row => ({
+  temperatureAlerts: (loaded.temperature_alerts || []).filter(row => visible(row, actor)).map(row => decorateAlert({
    id: row.id,
    readingId: row.reading_id,
    pointId: row.point_id,
@@ -337,8 +374,9 @@ function assemble(loaded, actor, context) {
    acknowledgedBy: row.acknowledged_by || null,
    acknowledgedName: row.acknowledged_by ? personName(context, row.acknowledged_by, actor) : '',
    acknowledgedAt: row.acknowledged_at || null,
-   remark: row.remark || ''
-  })),
+   remark: row.remark || '',
+   measuredAt: readingAt.get(row.reading_id) || null
+  }, alertVisibility, 'temperature')),
   materials: (loaded.materials || []).filter(row => visible(row, actor)).map(row => ({
    id: row.id,
    facilityId: row.facility_id,
@@ -422,7 +460,7 @@ function assemble(loaded, actor, context) {
     maxLimit: entry.max_limit == null ? null : String(entry.max_limit)
    }))
   })).sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt))),
-  waterAlerts: (loaded.water_alerts || []).filter(row => visible(row, actor)).map(row => ({
+  waterAlerts: (loaded.water_alerts || []).filter(row => visible(row, actor)).map(row => decorateAlert({
    id: row.id,
    checkId: row.check_id,
    poolId: row.pool_id,
@@ -441,7 +479,8 @@ function assemble(loaded, actor, context) {
    acknowledgedName: row.acknowledged_by ? personName(context, row.acknowledged_by, actor) : '',
    acknowledgedAt: row.acknowledged_at || null,
    acknowledgementNote: row.acknowledgement_note || ''
-  })),
+  }, alertVisibility, 'water')),
+  alertVisibility,
   waterMeasures: (loaded.water_alert_measures || []).filter(row => visible(row, actor)).map(row => ({
    id: row.id,
    alertId: row.alert_id,
@@ -610,6 +649,7 @@ export async function loadOperations(db, actor, context) {
     materialsInstalled: false,
     waterInstalled: false,
     waterFiltersInstalled: false,
+    alertHidesInstalled: false,
     error: storageMessage(result.error),
     bundle: emptyOperations()
    };
@@ -625,6 +665,7 @@ export async function loadOperations(db, actor, context) {
    materialsInstalled: false,
    waterInstalled: false,
    waterFiltersInstalled: false,
+   alertHidesInstalled: false,
    error: temperature.error,
    bundle: assemble(loaded, actor, context)
   };
@@ -638,6 +679,7 @@ export async function loadOperations(db, actor, context) {
    materialsInstalled: false,
    waterInstalled: false,
    waterFiltersInstalled: false,
+   alertHidesInstalled: false,
    error: materials.error,
    bundle: assemble(loaded, actor, context)
   };
@@ -651,6 +693,7 @@ export async function loadOperations(db, actor, context) {
    materialsInstalled: materials.installed,
    waterInstalled: false,
    waterFiltersInstalled: false,
+   alertHidesInstalled: false,
    error: water.error,
    bundle: assemble(loaded, actor, context)
   };
@@ -664,6 +707,7 @@ export async function loadOperations(db, actor, context) {
    materialsInstalled: materials.installed,
    waterInstalled: water.installed,
    waterFiltersInstalled: false,
+   alertHidesInstalled: false,
    error: schedule.error,
    bundle: assemble(loaded, actor, context)
   };
@@ -682,7 +726,22 @@ export async function loadOperations(db, actor, context) {
    materialsInstalled: materials.installed,
    waterInstalled: water.installed,
    waterFiltersInstalled: false,
+   alertHidesInstalled: false,
    error: filters.error,
+   bundle: assemble(loaded, actor, context)
+  };
+ }
+ const hides = await readOptionalGroup(db, loaded, ['facility_alert_visibility']);
+ if (!hides.ok) {
+  return {
+   ok: false,
+   installed: true,
+   temperatureInstalled: temperature.installed,
+   materialsInstalled: materials.installed,
+   waterInstalled: water.installed,
+   waterFiltersInstalled: filters.installed,
+   alertHidesInstalled: false,
+   error: hides.error,
    bundle: assemble(loaded, actor, context)
   };
  }
@@ -693,6 +752,7 @@ export async function loadOperations(db, actor, context) {
   materialsInstalled: materials.installed,
   waterInstalled: water.installed,
   waterFiltersInstalled: filters.installed,
+  alertHidesInstalled: hides.installed,
   bundle: assemble(loaded, actor, context)
  };
 }
@@ -1666,6 +1726,75 @@ export async function saveWaterAcknowledgement(db, bundle, alertId, note, actor,
  const previous = (bundle?.waterChecks || []).find(item => item.id === alert.checkId);
  if (!check || JSON.stringify(check.readings) !== JSON.stringify(previous?.readings)) return denied(bundle, 'Die Quittierung wurde nicht bestätigt.');
  return {ok: true, id: alert.id, bundle: loaded.bundle, alert};
+}
+
+function visibilityPayload(event) {
+ return {
+  facility_id: event.facilityId,
+  source: event.source,
+  alert_id: event.alertId,
+  action: event.action,
+  bulk_days: event.bulkDays
+ };
+}
+
+function alertOf(bundle, source, alertId) {
+ return source === 'water'
+  ? (bundle?.waterAlerts || []).find(item => item.id === alertId)
+  : (bundle?.temperatureAlerts || []).find(item => item.id === alertId);
+}
+
+export async function saveFacilityAlertVisibility(db, bundle, source, alertId, action, actor, now, context) {
+ const local = action === 'restore'
+  ? restoreFacilityAlert(bundle, source, alertId, actor, now)
+  : hideFacilityAlert(bundle, source, alertId, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ const before = alertOf(bundle, source, alertId);
+ let result;
+ try {
+  result = await db.insert('facility_alert_visibility', visibilityPayload(local.event));
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ const saved = confirmed(result);
+ if (!saved.ok || saved.data.acted_by !== actor.userId || saved.data.action !== action || saved.data.alert_id !== alertId) {
+  return denied(bundle, saved.error || 'Die Ausblendung wurde nicht bestätigt.');
+ }
+ const loaded = await loadOperations(db, actor, context);
+ const after = loaded.ok ? alertOf(loaded.bundle, source, alertId) : null;
+ if (!after || alertIsHidden(loaded.bundle, source, alertId) !== (action === 'hide')) {
+  return denied(bundle, 'Die Ausblendung wurde nicht bestätigt.');
+ }
+ if (before && (after.status !== before.status || after.valueC !== before.valueC || after.value !== before.value)) {
+  return denied(bundle, 'Die Ausblendung wurde nicht bestätigt.');
+ }
+ return {ok: true, id: saved.data.id, bundle: loaded.bundle, event: local.event, alert: after};
+}
+
+export async function saveOldFacilityAlertHides(db, bundle, facility, days, actor, now, context) {
+ const local = hideOldFacilityAlerts(bundle, facility, days, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ if (!local.events.length) return {ok: true, id: facility.id, bundle, warning: 'Keine alten Warnungen zum Ausblenden.'};
+ for (const event of local.events) {
+  let result;
+  try {
+   result = await db.insert('facility_alert_visibility', visibilityPayload(event));
+  } catch (error) {
+   return denied(bundle, storageMessage(error));
+  }
+  const saved = confirmed(result);
+  if (!saved.ok || saved.data.acted_by !== actor.userId || saved.data.action !== 'hide') {
+   return denied(bundle, saved.error || 'Die Sammelausblendung wurde nicht bestätigt.');
+  }
+ }
+ const loaded = await loadOperations(db, actor, context);
+ if (!loaded.ok) return denied(bundle, loaded.error || 'Die Sammelausblendung wurde nicht bestätigt.');
+ for (const event of local.events) {
+  if (!alertIsHidden(loaded.bundle, event.source, event.alertId)) {
+   return denied(bundle, 'Die Sammelausblendung wurde nicht bestätigt.');
+  }
+ }
+ return {ok: true, id: local.events[0].id, bundle: loaded.bundle, events: local.events};
 }
 
 export async function saveWaterMeasure(db, bundle, alertId, measure, actor, now, context) {

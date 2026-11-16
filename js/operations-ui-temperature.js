@@ -2,11 +2,14 @@ import {el} from './utils.js';
 import {isManager} from './permissions.js';
 import {intervalNames} from './labels.js';
 import {
+ alertIsHidden,
  configureTemperatureInput,
+ latestAlertVisibility,
  missingTemperaturePoints,
  temperatureDefectDraft
 } from './operations-controls.js';
 import {
+ saveFacilityAlertVisibility,
  saveTemperatureAcknowledgement,
  saveTemperaturePoint,
  saveTemperaturePointActive,
@@ -26,6 +29,7 @@ import {
  labeled,
  missingNote,
  opsUi,
+ renderAlertVisibilityBar,
  say,
  select
 } from './operations-ui-shared.js';
@@ -42,6 +46,8 @@ function intervalLabel(point) {
 export function renderTemperature(host, current) {
  missingNote(host, opsUi.temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
+ renderAlertVisibilityBar(host, current, 'temperature');
+ const hiddenView = (opsUi.alertView.temperature || 'active') === 'hidden';
  let settings = null;
  if (isManager(current)) {
   settings = document.createElement('div');
@@ -107,13 +113,29 @@ export function renderTemperature(host, current) {
    line.textContent = `${new Date(reading.measuredAt).toLocaleString('de-DE')} · ${reading.recordedName}: ${amountLabel(reading.valueC)} °C${reading.note ? ` · ${reading.note}` : ''}`;
    row.append(line);
   }
-  for (const alert of data.temperatureAlerts.filter(item => item.pointId === point.id)) {
+  for (const alert of data.temperatureAlerts.filter(item => item.pointId === point.id && alertIsHidden(data, 'temperature', item.id) === hiddenView)) {
    const line = document.createElement('p');
    line.className = 'help';
    line.textContent = alert.status === 'open'
     ? `Offene Warnung: ${amountLabel(alert.valueC)} °C außerhalb von ${amountLabel(alert.minC)} bis ${amountLabel(alert.maxC)} °C`
     : `Quittiert ${new Date(alert.acknowledgedAt).toLocaleString('de-DE')} · ${alert.acknowledgedName}: ${alert.remark}`;
    row.append(line);
+   if (hiddenView) {
+    const hide = latestAlertVisibility(data, 'temperature', alert.id);
+    if (hide?.action === 'hide') {
+     const note = document.createElement('p');
+     note.className = 'help';
+     note.textContent = `Betriebsweit ausgeblendet ${new Date(hide.actedAt).toLocaleString('de-DE')} · ${hide.actedName}`;
+     row.append(note);
+    }
+    if (isManager(current) && opsUi.alertHidesInstalled) {
+     row.append(button('Warnung wieder einblenden', 'secondary', () => commit(() => saveFacilityAlertVisibility(database(), bundle(), 'temperature', alert.id, 'restore', actor(), new Date().toISOString(), context()))));
+    }
+    continue;
+   }
+   if (isManager(current) && opsUi.alertHidesInstalled) {
+    row.append(button('Warnung ausblenden', 'secondary', () => commit(() => saveFacilityAlertVisibility(database(), bundle(), 'temperature', alert.id, 'hide', actor(), new Date().toISOString(), context()))));
+   }
    if (alert.status !== 'open') continue;
    const remark = input();
    remark.placeholder = 'Bemerkung zur Quittierung';

@@ -193,7 +193,12 @@ export function recordTemperature(bundle, pointId, draft, actor, now) {
    acknowledgedBy: null,
    acknowledgedName: '',
    acknowledgedAt: null,
-   remark: ''
+   remark: '',
+   measuredAt: now,
+   hidden: false,
+   hiddenBy: null,
+   hiddenName: '',
+   hiddenAt: null
   };
   alerts = [alert, ...alerts];
  }
@@ -610,7 +615,11 @@ export function recordWaterCheck(bundle, poolId, draft, actor, now) {
    acknowledgedBy: null,
    acknowledgedName: '',
    acknowledgedAt: null,
-   acknowledgementNote: ''
+   acknowledgementNote: '',
+   hidden: false,
+   hiddenBy: null,
+   hiddenName: '',
+   hiddenAt: null
   };
   created.push(alert);
   alerts = [alert, ...alerts];
@@ -654,6 +663,128 @@ export function recordWaterMeasure(bundle, alertId, measure, actor, now) {
   recordedAt: now
  };
  return {ok: true, bundle: carry(bundle, {waterMeasures: [entry, ...(bundle?.waterMeasures || [])], waterAlerts: bundle?.waterAlerts || []}), measure: entry, alert};
+}
+
+export const alertHideBulkDays = [7, 14, 30];
+
+function alertsOf(bundle, source) {
+ return source === 'water' ? (bundle?.waterAlerts || []) : (bundle?.temperatureAlerts || []);
+}
+
+export function latestAlertVisibility(bundle, source, alertId) {
+ const events = (bundle?.alertVisibility || [])
+  .filter(item => item.source === source && item.alertId === alertId)
+  .slice()
+  .sort((left, right) => String(right.actedAt).localeCompare(String(left.actedAt)) || String(right.id).localeCompare(String(left.id)));
+ return events[0] || null;
+}
+
+export function alertIsHidden(bundle, source, alertId) {
+ const alert = alertsOf(bundle, source).find(item => item.id === alertId);
+ if (alert?.hidden === true) return true;
+ return latestAlertVisibility(bundle, source, alertId)?.action === 'hide';
+}
+
+export function canHideFacilityAlerts(facility, actor) {
+ return canManage(facility, actor);
+}
+
+function alertMeasuredAt(bundle, source, alert) {
+ if (alert?.measuredAt) return alert.measuredAt;
+ if (source !== 'temperature') return null;
+ return (bundle?.temperatureReadings || []).find(item => item.id === alert?.readingId)?.measuredAt || null;
+}
+
+function markAlertHidden(list, alertId, hidden, actor, now) {
+ return (list || []).map(item => item.id === alertId
+  ? {
+   ...item,
+   hidden,
+   hiddenBy: hidden ? actor.userId : null,
+   hiddenName: hidden ? (actor.name || 'Mitarbeiter') : '',
+   hiddenAt: hidden ? now : null
+  }
+  : item);
+}
+
+function visibilityEvent(alert, source, action, actor, now, bulkDays) {
+ return {
+  id: newId(),
+  source,
+  alertId: alert.id,
+  facilityId: alert.facilityId,
+  facilityName: alert.facilityName,
+  organizationId: alert.organizationId,
+  action,
+  actedBy: actor.userId,
+  actedName: actor.name || 'Mitarbeiter',
+  actedAt: now,
+  bulkDays: bulkDays || null
+ };
+}
+
+function withVisibility(bundle, events, source, alertId, hidden, actor, now) {
+ const patch = {
+  alertVisibility: events,
+  temperatureAlerts: source === 'temperature'
+   ? markAlertHidden(bundle?.temperatureAlerts, alertId, hidden, actor, now)
+   : bundle?.temperatureAlerts || [],
+  waterAlerts: source === 'water'
+   ? markAlertHidden(bundle?.waterAlerts, alertId, hidden, actor, now)
+   : bundle?.waterAlerts || []
+ };
+ return carry(bundle, patch);
+}
+
+export function hideFacilityAlert(bundle, source, alertId, actor, now, bulkDays) {
+ const alert = alertsOf(bundle, source).find(item => item.id === alertId);
+ if (!alert) return {ok: false, error: 'Die Warnung wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(alert), actor)) {
+  return {ok: false, error: 'Warnungen blendet die Betriebsleitung oder Geschäftsführung betriebsweit aus.', bundle};
+ }
+ if (alertIsHidden(bundle, source, alertId)) return {ok: false, error: 'Diese Warnung ist bereits ausgeblendet.', bundle};
+ if (bulkDays != null && !alertHideBulkDays.includes(Number(bulkDays))) {
+  return {ok: false, error: 'Bitte 7, 14 oder 30 Tage wählen.', bundle};
+ }
+ const event = visibilityEvent(alert, source, 'hide', actor, now, bulkDays);
+ return {ok: true, bundle: withVisibility(bundle, [event, ...(bundle?.alertVisibility || [])], source, alert.id, true, actor, now), event, alert};
+}
+
+export function restoreFacilityAlert(bundle, source, alertId, actor, now) {
+ const alert = alertsOf(bundle, source).find(item => item.id === alertId);
+ if (!alert) return {ok: false, error: 'Die Warnung wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(alert), actor)) {
+  return {ok: false, error: 'Warnungen blendet die Betriebsleitung oder Geschäftsführung betriebsweit aus.', bundle};
+ }
+ if (!alertIsHidden(bundle, source, alertId)) return {ok: false, error: 'Diese Warnung ist nicht ausgeblendet.', bundle};
+ const event = visibilityEvent(alert, source, 'restore', actor, now, null);
+ return {ok: true, bundle: withVisibility(bundle, [event, ...(bundle?.alertVisibility || [])], source, alert.id, false, actor, now), event, alert};
+}
+
+export function hideOldFacilityAlerts(bundle, facility, days, actor, now) {
+ const count = Number(days);
+ if (!alertHideBulkDays.includes(count)) return {ok: false, error: 'Bitte 7, 14 oder 30 Tage wählen.', bundle};
+ if (!canManage(facility, actor)) {
+  return {ok: false, error: 'Warnungen blendet die Betriebsleitung oder Geschäftsführung betriebsweit aus.', bundle};
+ }
+ const cutoff = new Date(now).getTime() - count * 24 * 60 * 60 * 1000;
+ let next = bundle;
+ const events = [];
+ const collect = source => {
+  for (const alert of alertsOf(next, source)) {
+   if (alert.facilityId !== facility.id) continue;
+   if (alertIsHidden(next, source, alert.id)) continue;
+   const measured = alertMeasuredAt(next, source, alert);
+   if (!measured || new Date(measured).getTime() > cutoff) continue;
+   const hidden = hideFacilityAlert(next, source, alert.id, actor, now, count);
+   if (!hidden.ok) continue;
+   next = hidden.bundle;
+   events.push(hidden.event);
+  }
+ };
+ collect('temperature');
+ collect('water');
+ return {ok: true, bundle: next, events, facility};
 }
 
 export function waterRoundPools(bundle, facilityId) {
@@ -861,7 +992,7 @@ export function facilityNotices(bundle, defects, options) {
   push({id: `procurement-open:${request.id}`, facilityId: request.facilityId, organizationId: request.organizationId, kind: 'procurement-open', title: request.title || 'Beschaffung', detail: 'Die Beschaffung ist noch nicht entschieden.', warn: false});
  }
  for (const alert of bundle?.temperatureAlerts || []) {
-  if (alert.status !== 'open') continue;
+  if (alert.status !== 'open' || alertIsHidden(bundle, 'temperature', alert.id)) continue;
   const point = (bundle?.temperaturePoints || []).find(item => item.id === alert.pointId);
   push({id: `temperature-warning:${alert.id}`, facilityId: alert.facilityId, organizationId: alert.organizationId, kind: 'temperature-warning', title: point?.name || 'Temperaturwarnung', detail: `${alert.valueC} °C außerhalb von ${alert.minC} bis ${alert.maxC} °C.`, warn: true});
  }
@@ -871,7 +1002,7 @@ export function facilityNotices(bundle, defects, options) {
   push({id: `temperature-missing:${point.id}`, facilityId: point.facilityId, organizationId: point.organizationId, kind: 'temperature-missing', title: point.name || 'Temperaturkontrolle', detail: daily ? 'Für heute liegt keine Messung vor.' : 'Die Kontrolle ist fällig.', warn: true});
  }
  for (const alert of waterView.alerts) {
-  if (alert.status !== 'open') continue;
+  if (alert.status !== 'open' || alertIsHidden(bundle, 'water', alert.id)) continue;
   const pool = poolOf(bundle, alert.poolId);
   const name = waterParameterName(bundle, alert.parameterCode);
   const range = alert.minLimit != null && alert.maxLimit != null
