@@ -17,4 +17,7 @@ Dieser Commit wird nicht geändert.
 
 ## Pin 3.6.0
 
-Nach dem Release-Commit wird `ref:` in `.github/workflows/pages.yml` auf den vollständigen 3.6.0-Commit gesetzt.
+| | |
+|--|--|
+| **Commit** | `67711f85113018cebd80a56f5bad1d0a5b815328` |
+| **Workflow** | `.github/workflows/pages.yml` `ref:` zeigt auf diesen SHA |

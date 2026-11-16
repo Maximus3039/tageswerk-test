@@ -91,7 +91,7 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(pages, /js\/nexus-icons\.js/);
  assert.match(pages, /Tageswerk 3\.6\.0/);
  assert.match(pages, /tageswerk-shell-3\.6\.0/);
- assert.match(pages, /ref: 240a2e85dee772857bd14cd6206818e33175e56e/);
+ assert.match(pages, /ref: 67711f85113018cebd80a56f5bad1d0a5b815328/);
 });
 
 test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => {
@@ -154,5 +154,5 @@ test('Wetterzeile und Tagesbericht-Übernahme sind vorbereitet', () => {
  assert.match(locationMigration, /ADD COLUMN latitude/);
  assert.match(weatherMigration, /weather_summary/);
  assert.match(weatherMigration, /Nicht ohne ausdrückliche Freigabe ausführen/);
- assert.match(pages, /ref: 240a2e85dee772857bd14cd6206818e33175e56e/);
+ assert.match(pages, /ref: 67711f85113018cebd80a56f5bad1d0a5b815328/);
 });

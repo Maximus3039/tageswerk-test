@@ -27,8 +27,8 @@ jobs:
       - name: Geprüften Release holen
         uses: actions/checkout@v4
         with:
-          # Live bleibt 3.5.7, bis der Pin nach Freigabe auf den 3.6.0-Release-Commit gesetzt wird.
-          ref: 240a2e85dee772857bd14cd6206818e33175e56e
+          # 3.6.0 Release. Rollback 3.5.7: 240a2e85dee772857bd14cd6206818e33175e56e
+          ref: 67711f85113018cebd80a56f5bad1d0a5b815328
 
       - name: Node.js einrichten
         uses: actions/setup-node@v4
