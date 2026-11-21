@@ -1195,7 +1195,7 @@ export function operationMetrics(bundle, facilityIds, today, now) {
   procurementOpen: (bundle?.requests || []).filter(request => inScope(request) && request.status === 'submitted').length,
   temperatureOpen: (bundle?.temperatureAlerts || []).filter(alert => inScope(alert) && alert.status === 'open' && alert.hidden !== true).length,
   temperatureMissing: (bundle?.temperaturePoints || []).filter(point => inScope(point) && temperatureCheckDue(point, bundle?.temperatureReadings, now)).length,
-  stockLow: (bundle?.materials || []).filter(material => inScope(material) && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length,
+  stockLow: (bundle?.materials || []).filter(material => inScope(material) && material.active !== false && materialStock(bundle?.movements, material.id) < Number(material.minimum)).length,
   waterOpen: (bundle?.waterAlerts || []).filter(alert => inScope(alert) && alert.status === 'open' && alert.hidden !== true).length,
   waterMissing: (bundle?.waterPools || []).filter(pool => inScope(pool) && waterControlState(pool, bundle?.waterChecks, bundle?.waterPoolParameters, now).due).length
  };

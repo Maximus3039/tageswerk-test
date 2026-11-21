@@ -55,7 +55,9 @@ function memoryDb(options = {}) {
   rows,
   async select(table) {
    calls.push(['select', table]);
-   if (options.missing) return {data: null, error: {code: 'PGRST205', message: 'Could not find the table in the schema cache'}};
+   if (options.missing || (options.missingTables || []).includes(table)) {
+    return {data: null, error: {code: 'PGRST205', message: 'Could not find the table in the schema cache'}};
+   }
    return {data: (rows[table] || []).map(row => ({...row})), error: null};
   },
   async insert(table, row) {
@@ -189,7 +191,49 @@ test('Validierung und fehlende Tabellen schreiben nichts in die Liste', async ()
  assert.equal(missing.bundle.reports.length, 0);
  const unloaded = await loadOperations(memoryDb({missing: true}), employee, context);
  assert.equal(unloaded.installed, false);
+ assert.equal(unloaded.materialsInstalled, false);
  assert.equal(unloaded.bundle.reports.length, 0);
+ assert.equal(unloaded.bundle.materials.length, 0);
+});
+
+test('Materialverwaltung bleibt ohne Tagesberichte und Temperatur ladbar', async () => {
+ const rows = blankRows();
+ rows.materials = [{
+  id: 'material-1',
+  organization_id: facility.organization_id,
+  facility_id: facility.id,
+  name: 'Chlor',
+  location: 'Lager',
+  unit: 'kg',
+  minimum_quantity: '1',
+  created_by: manager.userId,
+  created_at: now
+ }];
+ rows.material_movements = [];
+ const loaded = await loadOperations(memoryDb({
+  rows,
+  missingTables: [
+   'daily_reports',
+   'daily_report_revisions',
+   'daily_report_defects',
+   'inspection_templates',
+   'inspection_points',
+   'inspection_runs',
+   'inspection_results',
+   'assets',
+   'maintenance_logs',
+   'asset_defects',
+   'procurement_requests',
+   'temperature_points',
+   'temperature_readings',
+   'temperature_alerts'
+  ]
+ }), employee, context);
+ assert.equal(loaded.installed, false);
+ assert.equal(loaded.temperatureInstalled, false);
+ assert.equal(loaded.materialsInstalled, true);
+ assert.equal(loaded.bundle.materials.length, 1);
+ assert.equal(loaded.bundle.reports.length, 0);
 });
 
 test('Nachtrag, Status und Mangelverknüpfung brauchen eine bestätigte Antwort', async () => {

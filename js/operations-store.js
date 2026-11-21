@@ -19,6 +19,7 @@ import {
  restoreFacilityAlert,
  addWaterParameter,
  createMaterial,
+ updateMaterial,
  createTemperaturePoint,
  createWaterPool,
  recordMovement,
@@ -129,7 +130,7 @@ function confirmed(result) {
 function personName(context, userId, actor) {
  if (context?.names?.[userId]) return context.names[userId];
  if (actor?.userId === userId && actor.name) return actor.name;
- return 'Mitarbeiter';
+ return 'unbekannte Person';
 }
 
 function facilityName(context, facilityId) {
@@ -386,6 +387,7 @@ function assemble(loaded, actor, context) {
    location: row.location || '',
    unit: row.unit || '',
    minimum: String(row.minimum_quantity),
+   active: row.is_active !== false,
    createdBy: row.created_by,
    createdAt: row.created_at
   })),
@@ -636,123 +638,34 @@ async function readGroup(db, loaded, names) {
  return {ok: true, installed: true};
 }
 
+function groupReady(group) {
+ return group?.ok !== false && group?.installed === true;
+}
+
 export async function loadOperations(db, actor, context) {
  const loaded = {};
- for (const table of tables) {
-  const result = await readTable(db, table);
-  if (result?.error) {
-   const missing = missingTable(result.error);
-   return {
-    ok: false,
-    installed: !missing,
-    temperatureInstalled: false,
-    materialsInstalled: false,
-    waterInstalled: false,
-    waterFiltersInstalled: false,
-    alertHidesInstalled: false,
-    error: storageMessage(result.error),
-    bundle: emptyOperations()
-   };
-  }
-  loaded[table] = result?.data || [];
- }
+ const core = await readGroup(db, loaded, tables);
  const temperature = await readGroup(db, loaded, temperatureTables);
- if (!temperature.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: false,
-   materialsInstalled: false,
-   waterInstalled: false,
-   waterFiltersInstalled: false,
-   alertHidesInstalled: false,
-   error: temperature.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
  const materials = await readGroup(db, loaded, materialTables);
- if (!materials.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: temperature.installed,
-   materialsInstalled: false,
-   waterInstalled: false,
-   waterFiltersInstalled: false,
-   alertHidesInstalled: false,
-   error: materials.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
  const water = await readGroup(db, loaded, waterTables);
- if (!water.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: temperature.installed,
-   materialsInstalled: materials.installed,
-   waterInstalled: false,
-   waterFiltersInstalled: false,
-   alertHidesInstalled: false,
-   error: water.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
  const schedule = await readOptional(db, loaded, ['water_facility_slots', 'water_round_slots']);
- if (!schedule.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: temperature.installed,
-   materialsInstalled: materials.installed,
-   waterInstalled: water.installed,
-   waterFiltersInstalled: false,
-   alertHidesInstalled: false,
-   error: schedule.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
  const filters = await readOptionalGroup(db, loaded, [
   'water_filters',
   'water_filter_flushes',
   'water_filter_flush_corrections',
   'water_filter_status_events'
  ]);
- if (!filters.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: temperature.installed,
-   materialsInstalled: materials.installed,
-   waterInstalled: water.installed,
-   waterFiltersInstalled: false,
-   alertHidesInstalled: false,
-   error: filters.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
  const hides = await readOptionalGroup(db, loaded, ['facility_alert_visibility']);
- if (!hides.ok) {
-  return {
-   ok: false,
-   installed: true,
-   temperatureInstalled: temperature.installed,
-   materialsInstalled: materials.installed,
-   waterInstalled: water.installed,
-   waterFiltersInstalled: filters.installed,
-   alertHidesInstalled: false,
-   error: hides.error,
-   bundle: assemble(loaded, actor, context)
-  };
- }
+ const unexpected = [core, temperature, materials, water, schedule, filters, hides].find(item => item?.ok === false);
  return {
-  ok: true,
-  installed: true,
-  temperatureInstalled: temperature.installed,
-  materialsInstalled: materials.installed,
-  waterInstalled: water.installed,
-  waterFiltersInstalled: filters.installed,
-  alertHidesInstalled: hides.installed,
+  ok: !unexpected,
+  error: unexpected?.error,
+  installed: groupReady(core),
+  temperatureInstalled: groupReady(temperature),
+  materialsInstalled: groupReady(materials),
+  waterInstalled: groupReady(water),
+  waterFiltersInstalled: groupReady(filters),
+  alertHidesInstalled: groupReady(hides),
   bundle: assemble(loaded, actor, context)
  };
 }
@@ -1309,8 +1222,8 @@ export async function saveMaterial(db, bundle, draft, actor, now, context) {
   return denied(bundle, saved.error || 'Das Material wurde nicht bestätigt.');
  }
  const loaded = await loadOperations(db, actor, context);
- const material = loaded.ok ? loaded.bundle.materials.find(item => item.id === saved.data.id) : null;
- if (!material) return denied(bundle, 'Das Material wurde nicht bestätigt.');
+ const material = loaded.bundle?.materials?.find(item => item.id === saved.data.id);
+ if (!material) return denied(loaded.bundle || bundle, loaded.ok === false ? loaded.error : 'Das Material wurde nicht bestätigt.');
  return {ok: true, id: material.id, bundle: loaded.bundle, material};
 }
 
@@ -1335,9 +1248,40 @@ export async function saveMaterialMovement(db, bundle, draft, actor, now, contex
   return denied(bundle, saved.error || 'Die Buchung wurde nicht bestätigt.');
  }
  const loaded = await loadOperations(db, actor, context);
- const movement = loaded.ok ? loaded.bundle.movements.find(item => item.id === saved.data.id) : null;
- if (!movement || Number(movement.quantity) !== Number(local.movement.quantity)) return denied(bundle, 'Die Buchung wurde nicht bestätigt.');
+ const movement = loaded.bundle?.movements?.find(item => item.id === saved.data.id);
+ if (!movement || Number(movement.quantity) !== Number(local.movement.quantity)) {
+  return denied(loaded.bundle || bundle, loaded.ok === false ? loaded.error : 'Die Buchung wurde nicht bestätigt.');
+ }
  return {ok: true, id: movement.id, bundle: loaded.bundle, movement};
+}
+
+export async function saveMaterialChange(db, bundle, materialId, draft, actor, now, context) {
+ const local = updateMaterial(bundle, materialId, draft, actor, now);
+ if (!local.ok) return denied(bundle, local.error);
+ const payload = {
+  name: local.material.name,
+  location: local.material.location,
+  unit: local.material.unit,
+  minimum_quantity: local.material.minimum
+ };
+ if (draft?.active != null) payload.is_active = local.material.active;
+ let result;
+ try {
+  result = await db.update('materials', materialId, payload);
+ } catch (error) {
+  return denied(bundle, storageMessage(error));
+ }
+ if (result?.error && payload.is_active != null && /is_active|PGRST204/i.test(`${result.error.code || ''} ${result.error.message || ''}`)) {
+  delete payload.is_active;
+  try { result = await db.update('materials', materialId, payload); }
+  catch (error) { return denied(bundle, storageMessage(error)); }
+ }
+ const saved = confirmed(result);
+ if (!saved.ok) return denied(bundle, saved.error || 'Die Materialänderung wurde nicht bestätigt.');
+ const loaded = await loadOperations(db, actor, context);
+ const material = loaded.bundle?.materials?.find(item => item.id === materialId);
+ if (!material) return denied(loaded.bundle || bundle, loaded.ok === false ? loaded.error : 'Die Materialänderung wurde nicht bestätigt.');
+ return {ok: true, id: material.id, bundle: loaded.bundle, material};
 }
 
 function waterHistory(items, poolId) {

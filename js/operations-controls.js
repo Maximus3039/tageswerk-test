@@ -34,6 +34,10 @@ function canUse(facility, actor) {
  return !!actor?.userId && facilityVisibleToMember(facility, actor.memberships);
 }
 
+export function canBookMaterial(facility, actor) {
+ return canUse(facility, actor);
+}
+
 function canManage(facility, actor) {
  return !!actor?.userId && (actor.memberships || []).some(membership => membershipCoversFacility(facility, membership, false));
 }
@@ -268,10 +272,42 @@ export function createMaterial(bundle, draft, actor, now) {
   location: text(draft.location, 200),
   unit: text(draft.unit, 40),
   minimum: quantity(draft.minimum, true),
+  active: true,
   createdBy: actor.userId,
   createdAt: now
  };
  return {ok: true, bundle: carry(bundle, {materials: [material, ...(bundle?.materials || [])]}), material};
+}
+
+export function updateMaterial(bundle, materialId, draft, actor, now) {
+ const previous = (bundle?.materials || []).find(item => item.id === materialId);
+ if (!previous) return {ok: false, error: 'Das Material wurde nicht gefunden.', bundle};
+ if (!canManage(facilityOf(previous), actor)) {
+  return {ok: false, error: 'Material ändert die Betriebsleitung oder Geschäftsführung.', bundle};
+ }
+ const nextDraft = {
+  facility: facilityOf(previous),
+  name: draft?.name ?? previous.name,
+  location: draft?.location ?? previous.location,
+  unit: draft?.unit ?? previous.unit,
+  minimum: draft?.minimum ?? previous.minimum
+ };
+ const error = materialDraftError(nextDraft);
+ if (error) return {ok: false, error, bundle};
+ const active = draft?.active == null ? previous.active !== false : draft.active === true;
+ const material = {
+  ...previous,
+  name: text(nextDraft.name, 200),
+  location: text(nextDraft.location, 200),
+  unit: text(nextDraft.unit, 40),
+  minimum: quantity(nextDraft.minimum, true),
+  active
+ };
+ return {ok: true, bundle: carry(bundle, {materials: replaceMaterial(bundle.materials, material)}), material};
+}
+
+function replaceMaterial(list, material) {
+ return (list || []).map(item => item.id === material.id ? material : item);
 }
 
 export function stockOf(bundle, materialId) {
@@ -279,7 +315,7 @@ export function stockOf(bundle, materialId) {
 }
 
 export function materialBelowMinimum(bundle, material) {
- return !!material && stockOf(bundle, material.id) < Number(material.minimum);
+ return !!material && material.active !== false && stockOf(bundle, material.id) < Number(material.minimum);
 }
 
 function maintenanceLog(bundle, logId, facilityId) {
@@ -316,7 +352,7 @@ export function recordMovement(bundle, draft, actor, now) {
   quantity: amount,
   note: text(draft.note, 2000),
   recordedBy: actor.userId,
-  recordedName: actor.name || 'Mitarbeiter',
+  recordedName: actor.name || 'unbekannte Person',
   recordedAt: now,
   maintenanceLogId: draft.maintenanceLogId || null,
   procurementRequestId: null

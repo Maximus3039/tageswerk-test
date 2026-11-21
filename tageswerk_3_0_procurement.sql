@@ -2,6 +2,14 @@
 -- Nicht ohne ausdrückliche Freigabe ausführen.
 -- Voraussetzung: public.tageswerk_bind_operation_facility aus tageswerk_3_0_daily_reports.sql.
 -- Mitarbeiter melden Bedarf. Genehmigen und Ablehnen bleibt der Leitung vorbehalten.
+--
+-- INSERT-Policy (Mangel-Verknuepfung): Facility- UND Organization-Bindung
+-- = produktiver Live-Stand nach D-PROC-01 / Phase 20.
+-- Frueher schwacher Stand (nur facility_id, ohne organization_id) ist VERBOTEN.
+-- Diese Datei NICHT erneut gegen eine bestehende Prod-DB ausfuehren, wenn die
+-- Tabelle schon existiert (nicht idempotent). Policy-Nachzug: nur die
+-- Freigabe-Vorlage sql-proposals/procurement_defect_link_policy-NICHT-AUSFUEHREN.sql
+-- bzw. tests/integration/security/25-procurement-policy-TEST.sql (Test).
 
 BEGIN;
 
@@ -68,18 +76,18 @@ CREATE POLICY procurement_requests_insert ON public.procurement_requests FOR INS
   WITH CHECK (
     requested_by = auth.uid()
     AND status = 'submitted'
-    AND public.tageswerk_meter_role(organization_id, facility_id) IS NOT NULL
+    AND public.tageswerk_meter_role(
+      procurement_requests.organization_id,
+      procurement_requests.facility_id
+    ) IS NOT NULL
     AND (
-      defect_id IS NULL
+      procurement_requests.defect_id IS NULL
       OR EXISTS (
-        SELECT 1 FROM public.defects defect
-        WHERE defect.id = defect_id AND defect.facility_id = facility_id
-      )
-    )
-  );
-CREATE POLICY procurement_requests_update ON public.procurement_requests FOR UPDATE TO authenticated
-  USING (
-    public.tageswerk_meter_role(organization_id, facility_id) IN ('company_admin', 'facility_manager')
+        SELECT 1
+        FROM public.defects AS defect
+        WHERE defect.id = procurement_requests.defect_id
+          AND defect.facility_id = procurement_requests.facility_id
+          AND defect.organization_id = procurement_requests.organization_id
     OR (requested_by = auth.uid() AND status = 'submitted')
   )
   WITH CHECK (

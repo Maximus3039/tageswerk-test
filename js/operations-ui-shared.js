@@ -55,7 +55,7 @@ export function renderPanel(filterDate) {
 export function actor() {
  const user = state.currentUser;
  const profile = state.staff.find(member => member.user_id === user?.id);
- return {userId: user?.id, name: profile?.name || 'Mitarbeiter', memberships: state.myMemberships};
+ return {userId: user?.id, name: profile?.name || 'unbekannte Person', memberships: state.myMemberships};
 }
 
 export function facility() {
@@ -89,24 +89,31 @@ export async function commit(task) {
  if (opsUi.saving) return null;
  opsUi.saving = true;
  document.body.dataset.saving = '1';
- let result;
+ const previous = state.operationPreview;
  try {
-  result = await task();
+  const result = await task();
+  if (!result?.ok || !result.id) {
+   state.operationPreview = previous;
+   say('error', result?.error || 'Die Speicherung wurde nicht bestätigt.');
+   return null;
+  }
+  const loaded = await refreshFromDatabase(false);
+  if (!loaded.ok || !loaded.bundle) {
+   state.operationPreview = previous;
+   say('error', loaded.error || 'Die Speicherung wurde nicht bestätigt.');
+   return null;
+  }
+  say(result.warning ? 'error' : 'ok', result.warning ? `Gespeichert. ${result.warning}` : '✓ In der Datenbank gespeichert.');
+  await hooks.afterCommit();
+  return result;
  } catch (error) {
+  state.operationPreview = previous;
   say('error', 'Die Speicherung wurde nicht bestätigt.');
   return null;
  } finally {
   opsUi.saving = false;
   delete document.body.dataset.saving;
  }
- if (!result?.ok || !result.id) {
-  say('error', result?.error || 'Die Speicherung wurde nicht bestätigt.');
-  return null;
- }
- if (result.bundle) state.operationPreview = result.bundle;
- say(result.warning ? 'error' : 'ok', result.warning ? `Gespeichert. ${result.warning}` : '✓ In der Datenbank gespeichert.');
- await hooks.afterCommit();
- return result;
 }
 
 export async function refreshFromDatabase(announce) {
@@ -121,12 +128,9 @@ export async function refreshFromDatabase(announce) {
  state.materialsInstalled = opsUi.materialsInstalled;
  state.waterInstalled = opsUi.waterInstalled;
  state.waterFiltersInstalled = opsUi.waterFiltersInstalled;
- if (!loaded.ok) {
-  if (!state.operationPreview) state.operationPreview = emptyOperations();
-  if (announce) say('error', loaded.error);
-  return loaded;
- }
- state.operationPreview = loaded.bundle;
+ if (loaded.bundle) state.operationPreview = loaded.bundle;
+ else if (!state.operationPreview) state.operationPreview = emptyOperations();
+ if (!loaded.ok && announce) say('error', loaded.error);
  return loaded;
 }
 

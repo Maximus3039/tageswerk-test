@@ -31,6 +31,8 @@ function rpcCalls(source) {
 
 test('operations-ui behält die öffentliche Fassade', () => {
  const facade = files.find(file => file.name === 'operations-ui.js').source;
+ assert.match(facade, /section === 'stock'/);
+ assert.match(facade, /opsUi\.materialsInstalled/);
  assert.match(facade, /export function mountOperations\(/);
  assert.match(facade, /export function focusNotice\(/);
  assert.match(facade, /export function syncOperationFacility\(/);
@@ -63,6 +65,9 @@ test('Fachmodule trennen Berichte, Kennzahlen, Wasser und Temperatur', () => {
  assert.match(byName['operations-ui-sections.js'], /export function renderMaintenance\(/);
  assert.match(byName['operations-ui-sections.js'], /export function renderProcurement\(/);
  assert.match(byName['operations-ui-sections.js'], /export function renderStock\(/);
+ assert.match(byName['operations-ui-sections.js'], /Für diesen Betrieb sind keine Materialien erfasst/);
+ assert.match(byName['operations-ui-sections.js'], /Material deaktivieren/);
+ assert.match(byName['operations-ui-sections.js'], /saveMaterialChange\(/);
 });
 
 test('operations-ui-Module haben keine zirkulären Imports', () => {

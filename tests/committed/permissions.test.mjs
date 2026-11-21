@@ -24,6 +24,17 @@ test('Betriebsleitung und Geschäftsführung bleiben auf ihre Organisation begre
  assert.equal(isManager(foreignFacility), false);
 });
 
+test('Standortbearbeitung bleibt Mitarbeiterinnen und Mitarbeitern verwehrt', () => {
+ state.myMemberships = [
+  {organization_id: organization, facility_id: facility.id, role: 'employee', is_active: true}
+ ];
+ assert.equal(isManager(facility), false);
+ state.myMemberships = [
+  {organization_id: organization, facility_id: facility.id, role: 'facility_manager', is_active: true}
+ ];
+ assert.equal(isManager(facility), true);
+});
+
 test('Mitarbeiter und deaktivierte Leitungen verwalten den Betrieb nicht', () => {
  state.myMemberships = [
   {organization_id: organization, facility_id: facility.id, role: 'employee', is_active: true}

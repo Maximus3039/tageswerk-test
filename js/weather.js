@@ -1,3 +1,5 @@
+import {storedFacilityLocation} from './preferences.js';
+
 const cache = new Map();
 const CACHE_MS = 30 * 60 * 1000;
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
@@ -27,12 +29,39 @@ function cacheKey(lat, lon) {
  return `${Number(lat).toFixed(3)},${Number(lon).toFixed(3)}`;
 }
 
-export function facilityCoordinates(facility) {
- const lat = Number(facility?.latitude ?? facility?.lat);
- const lon = Number(facility?.longitude ?? facility?.lon);
+function parseCoord(value) {
+ if (value == null || value === '') return NaN;
+ const amount = Number(String(value).trim().replace(',', '.'));
+ return Number.isFinite(amount) ? amount : NaN;
+}
+
+export function parseManualCoordinates(latRaw, lonRaw) {
+ const lat = parseCoord(latRaw);
+ const lon = parseCoord(lonRaw);
+ if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+  return {ok: false, error: 'Bitte gültige Koordinaten eingeben (Breite -90 bis 90, Länge -180 bis 180).'};
+ }
+ return {ok: true, location: {lat, lon, source: 'stored', uncertain: false, place: ''}};
+}
+
+export function applyFacilityCoordinates(facilities, facilityId, location) {
+ if (!Array.isArray(facilities) || !facilityId || !location) return facilities;
+ const row = facilities.find(item => item.id === facilityId);
+ if (row) {
+  row.latitude = location.lat;
+  row.longitude = location.lon;
+ }
+ return facilities;
+}
+
+export function facilityCoordinates(facility, storage) {
+ const lat = parseCoord(facility?.latitude ?? facility?.lat);
+ const lon = parseCoord(facility?.longitude ?? facility?.lon);
  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
   return {lat, lon, source: 'facility', uncertain: false};
  }
+ const stored = storedFacilityLocation(facility?.id, storage);
+ if (stored && Math.abs(stored.lat) <= 90 && Math.abs(stored.lon) <= 180) return stored;
  return null;
 }
 

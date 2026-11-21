@@ -10,7 +10,9 @@ const migrations = [
  'tageswerk_3_4_invitation_role.sql',
  'tageswerk_3_4_management_guard.sql',
  'tageswerk_3_5_8_water_filter_flushes.sql',
- 'tageswerk_3_6_1_facility_alert_visibility.sql'
+ 'tageswerk_3_6_1_facility_alert_visibility.sql',
+ 'tageswerk_3_6_2_materials_manage.sql',
+ 'tageswerk_3_6_2_facility_location_update.sql'
 ].map(name => ({
  name,
  sql: readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')
@@ -109,4 +111,16 @@ test('ersetzte Funktionen behalten Zeilenumbrüche und Zeilenkommentare', () => 
  assert.match(preserved, /Geschaeftsfuehrungsrechte werden hier nicht veraendert/);
  assert.match(preserved, /Betriebsleitung darf nur Mitarbeiter und Techniker bearbeiten/);
  assert.doesNotMatch(preserved, /company_admin/);
+});
+
+test('3.6.2 Vorprüfungen bleiben lesend', () => {
+ const files = [
+  'tageswerk_3_6_2_vorpruefung.sql',
+  'tageswerk_3_6_2_testumgebung_voraussetzungen.sql'
+ ];
+ for (const name of files) {
+  const sql = readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8');
+  assert.match(sql, /SELECT pruefung, status, details|SELECT name, status, details/);
+  assert.doesNotMatch(sql, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT|REVOKE)\b/im, name);
+ }
 });

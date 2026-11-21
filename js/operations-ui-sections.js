@@ -3,6 +3,7 @@ import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {priorityNames} from './labels.js';
 import {
+ canBookMaterial,
  facilityNotices,
  materialBelowMinimum,
  procurementFromStock,
@@ -26,6 +27,7 @@ import {
  saveInspectionTemplate,
  saveMaintenanceLog,
  saveMaterial,
+ saveMaterialChange,
  saveMaterialMovement,
  saveProcurementRequest,
  saveProcurementReview,
@@ -275,6 +277,7 @@ export function renderProcurement(host, current) {
 export function renderStock(host, current) {
  missingNote(host, opsUi.materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  const data = bundle();
+ const materials = data.materials.filter(item => item.facilityId === current.id && item.active !== false);
  if (isManager(current)) {
   const name = input();
   const location = input();
@@ -284,19 +287,52 @@ export function renderStock(host, current) {
   host.append(labeled('Material', name), labeled('Lagerort', location), labeled('Einheit', unit), labeled('Mindestbestand', minimum));
   host.append(button('Material speichern', '', () => commit(() => saveMaterial(database(), bundle(), {facility: current, name: name.value, location: location.value, unit: unit.value, minimum: minimum.value}, actor(), new Date().toISOString(), context()))));
  }
- for (const material of data.materials.filter(item => item.facilityId === current.id)) {
+ if (!materials.length) {
+  const empty = document.createElement('p');
+  empty.className = 'muted';
+  empty.textContent = opsUi.materialsInstalled
+   ? 'Für diesen Betrieb sind keine Materialien erfasst.'
+   : 'Die Bestandsliste bleibt leer, bis die Materialtabellen installiert sind.';
+  host.append(empty);
+  return;
+ }
+ for (const material of materials) {
   const stock = stockOf(data, material.id);
   const low = materialBelowMinimum(data, material);
   const openRequest = data.requests.some(item => item.materialId === material.id && item.status === 'submitted');
   const row = item(material.name, [`${material.location} · Bestand ${amountLabel(stock)} ${material.unit}`, `Mindestbestand ${amountLabel(material.minimum)} ${material.unit}`, openRequest ? 'Offene Beschaffung vorhanden.' : 'Keine offene Beschaffung.'], low);
-  const quantity = input();
-  quantity.inputMode = 'decimal';
-  const note = input();
-  note.placeholder = 'Bemerkung zur Buchung';
-  row.append(labeled('Menge', quantity), labeled('Bemerkung', note));
-  const book = direction => commit(() => saveMaterialMovement(database(), bundle(), {materialId: material.id, direction, quantity: quantity.value, note: note.value}, actor(), new Date().toISOString(), context()));
-  row.append(button('Zugang buchen', 'secondary', () => book('in')));
-  row.append(button('Entnahme buchen', 'secondary', () => book('out')));
+  row.classList.add('stock-card');
+  if (isManager(current)) {
+   const editName = input(material.name);
+   const editLocation = input(material.location);
+   const editUnit = input(material.unit);
+   const editMinimum = input(String(material.minimum));
+   editMinimum.inputMode = 'decimal';
+   row.append(labeled('Bezeichnung ändern', editName), labeled('Lagerort ändern', editLocation), labeled('Einheit ändern', editUnit), labeled('Mindestbestand ändern', editMinimum));
+   row.append(button('Material aktualisieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
+    name: editName.value,
+    location: editLocation.value,
+    unit: editUnit.value,
+    minimum: editMinimum.value
+   }, actor(), new Date().toISOString(), context()))));
+   row.append(button('Material deaktivieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
+    name: material.name,
+    location: material.location,
+    unit: material.unit,
+    minimum: material.minimum,
+    active: false
+   }, actor(), new Date().toISOString(), context()))));
+  }
+  if (canBookMaterial(current, actor())) {
+   const quantity = input();
+   quantity.inputMode = 'decimal';
+   const note = input();
+   note.placeholder = 'Bemerkung zur Buchung';
+   row.append(labeled('Menge', quantity), labeled('Bemerkung', note));
+   const book = direction => commit(() => saveMaterialMovement(database(), bundle(), {materialId: material.id, direction, quantity: quantity.value, note: note.value}, actor(), new Date().toISOString(), context()));
+   row.append(button('Zugang buchen', 'secondary', () => book('in')));
+   row.append(button('Entnahme buchen', 'secondary', () => book('out')));
+  }
   if (low && !openRequest) {
    row.append(button('Beschaffung vorbereiten', '', () => {
     const prepared = procurementFromStock(bundle(), material.id, actor(), new Date().toISOString());
@@ -315,11 +351,11 @@ export function renderStock(host, current) {
     }, actor(), new Date().toISOString(), context()));
    }));
   }
-  for (const movement of data.movements.filter(item => item.materialId === material.id)) {
+  for (const movement of data.movements.filter(item => item.materialId === material.id).slice(0, 8)) {
    const line = document.createElement('p');
    line.className = 'help';
    const direction = movement.direction === 'in' ? 'Zugang' : 'Entnahme';
-   line.textContent = `${new Date(movement.recordedAt).toLocaleString('de-DE')} · ${movement.recordedName}: ${direction} ${amountLabel(movement.quantity)} ${material.unit}${movement.maintenanceLogId ? ' · für eine Wartung' : ''}${movement.note ? ` · ${movement.note}` : ''}`;
+   line.textContent = `${new Date(movement.recordedAt).toLocaleString('de-DE')} · Gebucht von ${movement.recordedName}: ${direction} ${amountLabel(movement.quantity)} ${material.unit}${movement.maintenanceLogId ? ' · für eine Wartung' : ''}${movement.note ? ` · ${movement.note}` : ''}`;
    row.append(line);
   }
   host.append(row);

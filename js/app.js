@@ -52,7 +52,14 @@ supabase.auth.onAuthStateChange(event=>{
  update();
 });
 function draw(id,rows,empty){const node=el(id);node.replaceChildren();if(!rows.length){const p=document.createElement('p');p.className='muted';p.textContent=empty;node.append(p);return}for(const r of rows){const div=document.createElement('div');div.className='item';const b=document.createElement('strong');b.textContent=r.name;div.append(b);if(r.organization_id){const s=document.createElement('div');s.className='badge';s.textContent='Unternehmens-ID: '+r.organization_id.slice(0,8)+'…';div.append(s)}node.append(div)}}
-async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),supabase.from('facilities').select('id,name,organization_id').order('name')]);if(o.error)throw o.error;if(f.error)throw f.error;state.organizations=o.data||[];state.accessibleFacilities=f.data||[];status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
+async function loadFacilities(){
+ const full=await supabase.from('facilities').select('id,name,organization_id,latitude,longitude').order('name');
+ if(!full.error)return full;
+ const missing=full.error.code==='PGRST204'||/latitude|longitude/i.test(full.error.message||'');
+ if(!missing)return full;
+ return supabase.from('facilities').select('id,name,organization_id').order('name');
+}
+async function load(){try{status('Berechtigte Betriebsdaten werden geladen …');const [o,f]=await Promise.all([supabase.from('organizations').select('id,name').order('name'),loadFacilities()]);if(o.error)throw o.error;if(f.error)throw f.error;state.organizations=o.data||[];state.accessibleFacilities=f.data||[];status('✓ Anmeldung und Datenbankabfrage erfolgreich.');await loadPermissions();await loadDefects();await loadCriticalAcks();await loadSettings();renderDashboard();startRealtime()}catch(e){status('Datenbankabfrage fehlgeschlagen: '+e.message,true)}}
 function refreshScopeCards(){const orgIds=new Set(state.accessibleFacilities.map(f=>f.organization_id));draw('orgs',(state.organizations||[]).filter(o=>orgIds.has(o.id)),'Keine sichtbaren Unternehmen.');draw('facilities',state.accessibleFacilities,'Keine sichtbaren Betriebe.');const select=el('defect-facility');const previous=select.value;select.replaceChildren();for(const facility of state.accessibleFacilities){const option=document.createElement('option');option.value=facility.id;option.textContent=facility.name;select.append(option)}if(state.accessibleFacilities.some(x=>x.id===previous))select.value=previous;el('save-defect').disabled=!state.accessibleFacilities.length;el('summary').textContent=`Sichtbar: ${orgIds.size} Unternehmen und ${state.accessibleFacilities.length} Betriebe.`;populateDefectFacilityFilter();}
 async function loadPermissions(){
  const managerFacilities=await loadPermissionData();

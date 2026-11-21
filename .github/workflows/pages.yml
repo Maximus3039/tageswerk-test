@@ -79,6 +79,7 @@ jobs:
           js/operations.js
           js/password-reset.js
           js/permissions.js
+          js/preferences.js
           js/staff-ui.js
           js/state.js
           js/supabase.js
@@ -91,7 +92,7 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
           diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
-          grep -q '<title>Tageswerk 3.6.0</title>' dist/index.html
+          grep -q '<title>Tageswerk 3.6.2</title>' dist/index.html
           grep -q 'src="./js/app.js"' dist/index.html
           grep -q 'href="./css/app.css"' dist/index.html
           grep -q 'href="./css/theme-3.6.css"' dist/index.html
@@ -99,9 +100,9 @@ jobs:
           grep -q "register('./service-worker.js')" dist/index.html
           test -f dist/css/tokens.css
           test -f dist/js/nexus-icons.js
-          grep -q '"name": "Tageswerk 3.6.0"' dist/manifest.webmanifest
+          grep -q '"name": "Tageswerk 3.6.2"' dist/manifest.webmanifest
           grep -q '"start_url": "./"' dist/manifest.webmanifest
-          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.0'" dist/service-worker.js
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.2'" dist/service-worker.js
           grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
           if grep -R -E -n 'gamvnzggcrrlnyoknllu|test\.tageswerk\.local' dist; then
             exit 1

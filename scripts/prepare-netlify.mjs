@@ -31,6 +31,7 @@ const required = [
  'js/weather.js',
  'js/water-filters.js',
  'js/permissions.js',
+ 'js/preferences.js',
  'js/supabase.js'
 ];
 for (const relative of required) {

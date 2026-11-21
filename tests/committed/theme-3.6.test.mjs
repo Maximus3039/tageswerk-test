@@ -44,7 +44,7 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(index, /nexus-defects-toolbar/);
  assert.match(index, /nexus-command-head/);
  assert.match(index, /class="nexus/);
- assert.match(index, /Tageswerk 3\.6\.1/);
+ assert.match(index, /Tageswerk 3\.6\.2/);
  assert.match(tokens, /--nexus-bg/);
  assert.match(tokens, /--nexus-cyan/);
  assert.match(tokens, /--nexus-glow/);
@@ -76,6 +76,14 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(tokens, /prefers-reduced-motion/);
  assert.match(theme, /--nexus-motion/);
  assert.match(dashboard, /renderWeatherPanel/);
+ assert.match(dashboard, /Standort speichern/);
+ assert.match(dashboard, /Breitengrad/);
+ assert.match(dashboard, /Längengrad/);
+ assert.match(dashboard, /parseManualCoordinates/);
+ assert.match(dashboard, /persistManagedFacilityLocation/);
+ assert.match(dashboard, /bindAutoAlertSetting\(\);/);
+ assert.match(dashboard, /setAutoAlertWindowsEnabled\(state\.currentUser\?\.id, box\.checked\)/);
+ assert.match(dashboard, /displaySettings\(\);\s*return;/);
  assert.match(dashboard, /renderAnalyticsPanel/);
  assert.match(dashboard, /paintNexusStatus/);
  assert.match(dashboard, /facility-spotlight-status/);
@@ -89,8 +97,9 @@ test('3.6.0 Designsystem und Dashboard-Anker sind verdrahtet', () => {
  assert.match(pages, /css\/theme-3\.6\.css/);
  assert.match(pages, /css\/tokens\.css/);
  assert.match(pages, /js\/nexus-icons\.js/);
- assert.match(pages, /Tageswerk 3\.6\.0/);
- assert.match(pages, /tageswerk-shell-3\.6\.0/);
+ assert.match(pages, /Tageswerk 3\.6\.2/);
+ assert.match(pages, /tageswerk-shell-3\.6\.2/);
+ assert.match(pages, /js\/preferences\.js/);
  assert.match(pages, /ref: 67711f85113018cebd80a56f5bad1d0a5b815328/);
 });
 
@@ -118,17 +127,17 @@ test('Verbrauchslogik kennzeichnet Schätzungen und vergleicht Perioden', () => 
  assert.equal(sparkHeights([{total: 100n}, {total: 50n, estimated: 50n, measured: null}]).length, 2);
 });
 
-test('Pages-Paket 3.6.1 enthält Design-CSS, Nexus-Icons und Produktiv-Supabase', () => {
+test('Pages-Paket 3.6.2 enthält Design-CSS, Nexus-Icons, preferences und Produktiv-Supabase', () => {
  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
  const result = spawnSync(process.execPath, ['scripts/prepare-netlify.mjs'], {cwd: root, encoding: 'utf8'});
  assert.equal(result.status, 0, result.stderr || result.stdout);
  const dist = path.join(root, 'dist');
- for (const relative of ['css/theme-3.6.css', 'css/tokens.css', 'js/nexus-icons.js', 'js/weather.js', 'js/water-filters.js']) {
+ for (const relative of ['css/theme-3.6.css', 'css/tokens.css', 'js/nexus-icons.js', 'js/weather.js', 'js/water-filters.js', 'js/preferences.js']) {
   assert.equal(existsSync(path.join(dist, relative)), true, relative);
  }
  const distHtml = readFileSync(path.join(dist, 'index.html'), 'utf8');
  assert.match(distHtml, /theme-3\.6\.css/);
- assert.match(distHtml, /Tageswerk 3\.6\.1/);
+ assert.match(distHtml, /Tageswerk 3\.6\.2/);
  const distSupabase = readFileSync(path.join(dist, 'js/supabase.js'), 'utf8');
  assert.match(distSupabase, /eqtrifscedpsngsysxvc\.supabase\.co/);
  assert.doesNotMatch(distSupabase, /gamvnzggcrrlnyoknllu/);

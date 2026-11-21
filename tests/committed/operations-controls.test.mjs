@@ -8,6 +8,7 @@ function operationsUiFiles(...names) {
 import {
  acknowledgeTemperatureAlert,
  createMaterial,
+ updateMaterial,
  configureTemperatureInput,
  createTemperaturePoint,
  facilityNotices,
@@ -52,6 +53,7 @@ import {waterHistoryRole} from '../../js/permissions.js';
 import {
  loadOperations,
  saveMaterial,
+ saveMaterialChange,
  saveMaterialMovement,
  saveProcurementRequest,
  saveTemperatureAcknowledgement,
@@ -340,6 +342,9 @@ function controlDb(options = {}) {
    if ((options.missingControls && ['temperature_points', 'temperature_readings', 'temperature_alerts', 'materials', 'material_movements'].includes(table)) || (options.missingTables || []).includes(table)) {
     return {data: null, error: {code: 'PGRST205', message: 'schema cache'}};
    }
+   if (options.failTable === table) {
+    return {data: null, error: {code: '42501', message: 'permission denied for relation'}};
+   }
    return {data: (rows[table] || []).map(row => ({...row})), error: null};
   },
   async insert(table, row) {
@@ -574,6 +579,40 @@ test('Materialbuchung, Beschaffung und fremde Zeilen folgen der Datenbank', asyn
  assert.equal(onlyMaterials.materialsInstalled, true);
  assert.equal(onlyMaterials.bundle.temperaturePoints.length, 0);
  assert.equal(onlyMaterials.bundle.materials.length, 1);
+ const coreMissing = [
+  'daily_reports', 'daily_report_revisions', 'daily_report_defects',
+  'inspection_templates', 'inspection_points', 'inspection_runs', 'inspection_results',
+  'assets', 'maintenance_logs', 'asset_defects', 'procurement_requests'
+ ];
+ const isolated = await loadOperations(controlDb({userId: manager.userId, missingTables: coreMissing}), manager, context);
+ assert.equal(isolated.installed, false);
+ assert.equal(isolated.materialsInstalled, true);
+ const created = await saveMaterial(controlDb({userId: manager.userId, missingTables: coreMissing}), isolated.bundle, {
+  facility, name: 'Filtervlies', location: 'Technik', unit: 'Stück', minimum: '2'
+ }, manager, now, context);
+ assert.equal(created.ok, true);
+ assert.equal(created.material.name, 'Filtervlies');
+});
+
+test('Materialpflege bleibt der Leitung vorbehalten und übersteht Folgefehler beim Nachladen', async () => {
+ const created = createMaterial(emptyOperations(), {facility, name: 'Chlor', location: 'Lager', unit: 'kg', minimum: '1'}, manager, now);
+ assert.equal(created.ok, true);
+ assert.equal(updateMaterial(created.bundle, created.material.id, {name: 'Chlor', location: 'Lager', unit: 'kg', minimum: '1'}, employee).ok, false);
+ const renamed = updateMaterial(created.bundle, created.material.id, {name: 'Chlorgranulat', location: 'Technik', unit: 'kg', minimum: '2'}, manager, now);
+ assert.equal(renamed.ok, true);
+ assert.equal(renamed.material.name, 'Chlorgranulat');
+ const inactiveMaterial = updateMaterial(renamed.bundle, created.material.id, {
+  name: 'Chlorgranulat', location: 'Technik', unit: 'kg', minimum: '2', active: false
+ }, manager, now);
+ assert.equal(inactiveMaterial.material.active, false);
+ assert.equal(materialBelowMinimum(inactiveMaterial.bundle, inactiveMaterial.material), false);
+ const db = controlDb({userId: manager.userId, failTable: 'water_filters'});
+ const saved = await saveMaterial(db, emptyOperations(), {facility, name: 'pH-Minus', location: 'Lager', unit: 'kg', minimum: '0'}, manager, now, context);
+ assert.equal(saved.ok, true);
+ assert.equal(saved.bundle.materials.some(item => item.id === saved.id), true);
+ const changed = await saveMaterialChange(db, saved.bundle, saved.id, {name: 'pH-Minus', location: 'Halle', unit: 'kg', minimum: '1'}, manager, now, context);
+ assert.equal(changed.ok, true);
+ assert.equal(changed.material.location, 'Halle');
 });
 
 test('Messstellen bleiben in der Historie und folgen dem Kontrollintervall', async () => {

@@ -121,9 +121,16 @@ function renderPanelImpl(filterDate) {
  host.replaceChildren();
  if (filterDate !== undefined) host.dataset.filter = filterDate;
  const sourceNode = el('operations-source');
- sourceNode.textContent = opsUi.installed
+ const sectionReady = section === 'stock'
+  ? opsUi.materialsInstalled
+  : section === 'temperature'
+   ? opsUi.temperatureInstalled
+   : section === 'water'
+    ? opsUi.waterInstalled
+    : opsUi.installed;
+ sourceNode.textContent = sectionReady
   ? 'Gespeichert wird in der Datenbank. Eine Meldung gilt erst, wenn die Datenbank den Datensatz bestätigt.'
-  : 'Die Betriebsdatenbank ist noch nicht installiert. Eingaben bleiben im Formular und werden nicht als gespeichert geführt.';
+  : 'Dieses Betriebsmodul ist noch nicht installiert. Eingaben bleiben im Formular und werden nicht als gespeichert geführt.';
  if (section === 'reports') renderReports(host, current);
  if (section === 'inspections') renderInspections(host, current);
  if (section === 'maintenance') renderMaintenance(host, current);
@@ -199,7 +206,14 @@ export function mountOperations() {
   await openOperations();
   card.scrollIntoView({behavior: 'smooth', block: 'start'});
  });
- el('operations-facility')?.addEventListener('change', () => renderPanelImpl(''));
+ el('operations-facility')?.addEventListener('change', () => {
+  const id = el('operations-facility').value;
+  const dash = el('dashboard-facility');
+  if (dash && dash.value !== 'all' && dash.value !== id) dash.value = id;
+  renderPanelImpl('');
+  paintOperationMetrics();
+  document.dispatchEvent(new CustomEvent('tageswerk-facility-context'));
+ });
  for (const tab of document.querySelectorAll('[data-operation]')) {
   tab.addEventListener('click', () => {
    if (tab.dataset.operation === 'temperature') opsUi.temperatureSettingsOpen = false;

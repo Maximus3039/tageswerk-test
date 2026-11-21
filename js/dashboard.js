@@ -17,7 +17,15 @@ import {
  formatDelta,
  sparkHeights
 } from './consumption-analytics.js';
-import {weatherForFacility, weatherReportLine} from './weather.js';
+import {
+ applyFacilityCoordinates,
+ facilityCoordinates,
+ geocodeFacilityName,
+ parseManualCoordinates,
+ weatherForFacility,
+ weatherReportLine
+} from './weather.js';
+import {autoAlertWindowsEnabled, setAutoAlertWindowsEnabled, writeFacilityLocation} from './preferences.js';
 
 let openDefectsFromDashboard = () => {};
 export function setDashboardActions(actions) {
@@ -145,21 +153,129 @@ function renderSpark(host, points) {
  }
 }
 
+function weatherCard() {
+ return el('dash-weather-card') || el('dash-weather')?.closest('.dash-panel');
+}
+
+export async function persistManagedFacilityLocation(facility, location) {
+ if (!facility || !location || !isManager(facility)) {
+  return {ok: false, error: 'Keine Berechtigung, den Standort zu ändern.'};
+ }
+ writeFacilityLocation(facility.id, location);
+ applyFacilityCoordinates(state.accessibleFacilities, facility.id, location);
+ const {error} = await supabase.from('facilities').update({latitude: location.lat, longitude: location.lon}).eq('id', facility.id);
+ if (error) return {ok: true, warning: 'Standort lokal gespeichert. Die Datenbank hat die Koordinaten nicht übernommen.'};
+ return {ok: true};
+}
+
+function paintWeatherLocationEditor(box, facility) {
+ if (!facility || !isManager(facility)) return;
+ const current = facilityCoordinates(facility);
+ const form = document.createElement('div');
+ form.className = 'weather-location-form';
+ const lat = document.createElement('input');
+ lat.type = 'text';
+ lat.inputMode = 'decimal';
+ lat.autocomplete = 'off';
+ lat.value = current ? String(current.lat) : '';
+ const lon = document.createElement('input');
+ lon.type = 'text';
+ lon.inputMode = 'decimal';
+ lon.autocomplete = 'off';
+ lon.value = current ? String(current.lon) : '';
+ const latLabel = document.createElement('label');
+ latLabel.textContent = 'Breitengrad';
+ latLabel.append(lat);
+ const lonLabel = document.createElement('label');
+ lonLabel.textContent = 'Längengrad';
+ lonLabel.append(lon);
+ const help = document.createElement('p');
+ help.className = 'help';
+ const save = document.createElement('button');
+ save.type = 'button';
+ save.className = 'compact-button';
+ save.textContent = 'Standort speichern';
+ save.addEventListener('click', async () => {
+  const parsed = parseManualCoordinates(lat.value, lon.value);
+  if (!parsed.ok) {
+   help.textContent = parsed.error;
+   return;
+  }
+  save.disabled = true;
+  try {
+   const result = await persistManagedFacilityLocation(facility, parsed.location);
+   if (!result.ok) {
+    help.textContent = result.error;
+    return;
+   }
+   help.textContent = result.warning || 'Standort gespeichert.';
+   await renderWeatherPanel();
+  } finally {
+   save.disabled = false;
+  }
+ });
+ const estimate = document.createElement('button');
+ estimate.type = 'button';
+ estimate.className = 'secondary compact-button';
+ estimate.textContent = 'Standort aus Betriebsnamen schätzen';
+ estimate.addEventListener('click', async () => {
+  estimate.disabled = true;
+  help.textContent = 'Standort wird geschätzt …';
+  try {
+   const location = await geocodeFacilityName(facility.name);
+   if (!location) {
+    help.textContent = 'Für diesen Betriebsnamen wurde kein verlässlicher Ort gefunden.';
+    return;
+   }
+   const result = await persistManagedFacilityLocation(facility, location);
+   if (!result.ok) {
+    help.textContent = result.error;
+    return;
+   }
+   if (result.warning) help.textContent = result.warning;
+   await renderWeatherPanel();
+  } catch {
+   help.textContent = 'Die Standortschätzung ist fehlgeschlagen.';
+  } finally {
+   estimate.disabled = false;
+  }
+ });
+ form.append(latLabel, lonLabel, save, estimate, help);
+ box.append(form);
+}
+
+function paintWeatherEmpty(box, message, facility) {
+ const card = weatherCard();
+ card?.classList.add('is-empty');
+ box.replaceChildren();
+ const help = document.createElement('p');
+ help.className = 'help weather-empty-copy';
+ help.textContent = message;
+ box.append(help);
+ paintWeatherLocationEditor(box, facility);
+}
+
 async function renderWeatherPanel() {
  const box = el('dash-weather');
  if (!box) return;
  const facility = selectedFacility();
  const seq = ++weatherSeq;
+ const card = weatherCard();
  if (!facility) {
-  box.innerHTML = '<p class="help">Kein Betrieb gewählt.</p>';
+  paintWeatherEmpty(box, 'Kein Betrieb gewählt.', null);
   lastWeatherLine = '';
   return;
  }
- box.innerHTML = '<p class="help">Wetter wird geladen …</p>';
+ card?.classList.remove('is-empty');
+ box.replaceChildren();
+ const loading = document.createElement('p');
+ loading.className = 'help';
+ loading.textContent = `Wetter für ${facility.name} wird geladen …`;
+ box.append(loading);
  const result = await weatherForFacility(facility);
  if (seq !== weatherSeq) return;
  if (!result.ok) {
-  box.innerHTML = `<p class="help">${result.error}</p>`;
+  paintWeatherEmpty(box, result.error, facility);
   lastWeatherLine = '';
   return;
  }
@@ -209,6 +325,7 @@ async function renderWeatherPanel() {
  source.className = 'help';
  source.textContent = `${weather.source} · ${result.location.source === 'facility' ? 'Standort ok' : 'geschätzt'}`;
  box.append(source);
+ paintWeatherLocationEditor(box, facility);
 }
 
 async function renderAnalyticsPanel() {
@@ -400,6 +517,9 @@ el('consumption-facility')?.addEventListener('change', () => {
 });
 el('dash-analytics-medium')?.addEventListener('change', () => renderAnalyticsPanel());
 el('dash-analytics-range')?.addEventListener('change', () => renderAnalyticsPanel());
+document.addEventListener('tageswerk-facility-context', () => {
+ renderWeatherPanel();
+});
 
 export async function loadCriticalAcks() {
  if (!state.currentUser) return;
@@ -418,6 +538,7 @@ function renderCriticalAlerts(data) {
  const box = el('dashboard-alerts');
  if (!box) return;
  box.replaceChildren();
+ if (!autoAlertWindowsEnabled(state.currentUser?.id)) return;
  const critical = data.filter(item => item.priority === 'critical' && isActiveDefect(item));
  if (!critical.length) return;
  const heading = document.createElement('div');
@@ -473,6 +594,7 @@ function renderCriticalAlerts(data) {
 }
 
 export async function loadSettings() {
+ bindAutoAlertSetting();
  const {data, error} = await supabase.from('facility_escalation_settings').select('facility_id,reminder_minutes,escalation_minutes,after_hours_mode,business_hours');
  if (error) {
   state.settingsRows = [];
@@ -481,13 +603,28 @@ export async function loadSettings() {
    message.className = 'error';
    message.textContent = 'Einstellungen konnten nicht geladen werden: ' + error.message;
   }
+  displaySettings();
   return;
  }
  state.settingsRows = data || [];
  displaySettings();
 }
 
+function bindAutoAlertSetting() {
+ const box = el('setting-auto-alerts');
+ if (!box || box.dataset.bound) return;
+ box.dataset.bound = '1';
+ box.checked = autoAlertWindowsEnabled(state.currentUser?.id);
+ box.addEventListener('change', () => {
+  setAutoAlertWindowsEnabled(state.currentUser?.id, box.checked);
+  renderDashboard();
+ });
+}
+
 function displaySettings() {
+ bindAutoAlertSetting();
+ const auto = el('setting-auto-alerts');
+ if (auto) auto.checked = autoAlertWindowsEnabled(state.currentUser?.id);
  const facilityId = el('settings-facility')?.value;
  const settings = state.settingsRows.find(item => item.facility_id === facilityId);
  if (el('setting-reminder')) el('setting-reminder').value = settings?.reminder_minutes ?? 15;
@@ -530,5 +667,9 @@ el('save-settings')?.addEventListener('click', async () => {
  }, {onConflict: 'facility_id'});
  message.className = error ? 'error' : 'ok';
  message.textContent = error ? 'Speichern fehlgeschlagen: ' + error.message : '✓ Einstellungen gespeichert.';
- if (!error) await loadSettings();
+ if (!error) {
+  const personal = el('setting-auto-alerts')?.checked;
+  await loadSettings();
+  if (personal != null) el('setting-auto-alerts').checked = personal;
+ }
 });
