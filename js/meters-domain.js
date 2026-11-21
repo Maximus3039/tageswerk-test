@@ -7,6 +7,13 @@ export const mediumUnits={electricity:['kWh'],water:['m3'],gas:['kWh','m3'],heat
 
 export function unitsForMedium(medium){return mediumUnits[medium]||[]}
 
+export function tariffRegisterFromLabel(label){
+ const text=String(label||'');
+ if(/\b1[.\-]8[.\-]2\b|\bNT\b|Niedertarif/i.test(text))return 'NT';
+ if(/\b1[.\-]8[.\-]1\b|\b(?:HT|HAT)\b|Hochtarif/i.test(text))return 'HT';
+ return '';
+}
+
 export function membershipAllowsMeterAdmin(facility,memberships,userId){
  if(!facility||!userId)return false;
  return (memberships||[]).some(m=>m.user_id===userId&&membershipCoversFacility(facility,m,false));

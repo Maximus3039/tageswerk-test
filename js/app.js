@@ -13,7 +13,9 @@ import {inviteFacilityOptions,loadInvitations,setStaffActions,staffFacilityOptio
 import {loadDefects,populateDefectFacilityFilter} from './defects-ui.js';
 import {loadCriticalAcks,loadSettings,populateConsumptionFacility,populateDashboardFilters,renderDashboard,resetConsumptionPanel,setDashboardActions,touchConsumptionFacility} from './dashboard.js';
 import {decorateModuleIcons,decorateNavIcons} from './nexus-icons.js';
-import {openManagementDashboard,syncManagementAccess} from './management-dashboard.js';
+import {loadDashboardLayouts,openManagementDashboard,syncManagementAccess} from './management-dashboard.js';
+import {mountFacilityAdmin} from './facilities-admin.js';
+import {isMobileUx, mountMobileUx, mountMoreHub} from './mobile-ux.js';
 
 // Invitation URLs contain type=invite. Recovery URLs contain type=recovery or vorgang=passwort.
 const initialCallback=readAuthCallback({hash:location.hash,search:location.search});
@@ -65,7 +67,7 @@ function refreshScopeCards(){const orgIds=new Set(state.accessibleFacilities.map
 async function loadPermissions(){
  const managerFacilities=await loadPermissionData();
  refreshScopeCards();
- staffFacilityOptions();inviteFacilityOptions();syncManagementAccess();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();populateConsumptionFacility();syncMeterImportAccess();await loadFacilityMeters(el('consumption-facility').value);
+ staffFacilityOptions();inviteFacilityOptions();syncManagementAccess();mountFacilityAdmin();if(managerFacilities.length){await loadInvitations();await loadDashboardLayouts()}populateDashboardFilters();populateConsumptionFacility();syncMeterImportAccess();await loadFacilityMeters(el('consumption-facility').value);
 }
 setStaffActions({
  refresh:async()=>{await loadPermissions();await loadDefects()},
@@ -192,12 +194,19 @@ function navigate(view){if(view==='capture'){toggleCapture();return}toggleCaptur
  el('report-panel').classList.toggle('hidden',view==='tasks');el('defects-panel').classList.toggle('hidden',view==='report');
  if(view==='tasks'){el('defect-filter').value='mine';loadDefects()}else if(view==='defects'){el('defect-filter').value='all';loadDefects()}
  if(view==='more'){
-  const card=el('operations-card');
-  if(card&&!card.classList.contains('hidden')){
-   el('open-operations')?.classList.add('active');
-   if(!state.operationPreview)openOperations();
+  mountMoreHub();
+  if(isMobileUx()){
+   el('operations-card')?.classList.add('hidden');
+   el('management-board-card')?.classList.add('hidden');
+   el('consumption-card')?.classList.add('hidden');
+  }else{
+   const card=el('operations-card');
+   if(card&&!card.classList.contains('hidden')){
+    el('open-operations')?.classList.add('active');
+    if(!state.operationPreview)openOperations();
+   }
+   if(el('management-board-card')&&!el('management-board-card').classList.contains('hidden'))openManagementDashboard();
   }
-  if(el('management-board-card')&&!el('management-board-card').classList.contains('hidden'))openManagementDashboard();
  }
  for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('active',b.dataset.view===view);
  window.scrollTo({top:0,behavior:'smooth'});
@@ -212,6 +221,7 @@ el('capture-close')?.addEventListener('click',()=>toggleCapture(false));
 mountOperations();
 decorateNavIcons();
 decorateModuleIcons();
+mountMobileUx();
 function startRealtime(){if(state.realtimeChannel){supabase.removeChannel(state.realtimeChannel);state.realtimeChannel=null}if(!state.currentUser)return;state.realtimeChannel=supabase.channel('tageswerk29-updates').on('postgres_changes',{event:'*',schema:'public',table:'defects'},()=>scheduleRefresh()).on('postgres_changes',{event:'*',schema:'public',table:'critical_defect_acknowledgements'},()=>scheduleRefresh()).subscribe((channelState)=>{el('live-indicator').textContent=channelState==='SUBSCRIBED'?'● Live verbunden':channelState==='CHANNEL_ERROR'?'⚠ Live-Verbindung gestört':'Synchronisierung: '+channelState});}
 function scheduleRefresh(){clearTimeout(state.refreshTimer);state.refreshTimer=setTimeout(async()=>{await loadDefects();await loadCriticalAcks();renderDashboard()},550)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.currentUser)scheduleRefresh()});

@@ -53,7 +53,9 @@ async function openReports(page, role) {
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
  await page.locator('[data-view="more"]:visible').first().click();
- await page.locator('#open-operations').click();
+ const hubOps = page.locator('#more-hub').getByRole('button', {name: 'Betriebserfassung'});
+ if (await hubOps.isVisible()) await hubOps.click();
+ else await page.locator('#open-operations').click();
  await expect(page.getByText('Besondere Vorkommnisse')).toBeVisible();
 }
 
@@ -98,7 +100,7 @@ test('Die Auswertungsschaltflächen bleiben auf dem Smartphone kompakt', async (
  const filters = board.locator('.figure-filters');
  const presets = board.locator('.figure-presets');
  await expect(filters.getByRole('button', {name: 'Zeitraum anzeigen'})).toBeVisible();
- await expect(presets.getByRole('button')).toHaveCount(4);
+ await expect(presets.getByRole('button')).toHaveCount(5);
  await presets.scrollIntoViewIfNeeded();
  const layout = await presets.evaluate(el => {
   const style = getComputedStyle(el);
@@ -110,13 +112,13 @@ test('Die Auswertungsschaltflächen bleiben auf dem Smartphone kompakt', async (
  });
  expect(layout.display).toBe('grid');
  expect(layout.columns.split(' ').filter(Boolean)).toHaveLength(2);
+ const week = layout.buttons.find(btn => btn.text === 'Aktuelle Woche');
  const month = layout.buttons.find(btn => btn.text === 'Aktueller Monat');
- const previous = layout.buttons.find(btn => btn.text === 'Vorheriger Monat');
  const year = layout.buttons.find(btn => btn.text === 'Aktuelles Jahr');
  expect(month.height).toBeGreaterThanOrEqual(44);
  expect(month.height).toBeLessThanOrEqual(56);
- expect(Math.abs(previous.top - month.top)).toBeLessThan(2);
- expect(previous.left).toBeGreaterThan(month.left + month.width - 1);
+ expect(Math.abs(month.top - week.top)).toBeLessThan(2);
+ expect(month.left).toBeGreaterThan(week.left + week.width - 1);
  expect(year.top).toBeGreaterThan(month.top + month.height - 1);
  const show = await filters.getByRole('button', {name: 'Zeitraum anzeigen'}).boundingBox();
  expect(show.height).toBeGreaterThanOrEqual(44);
@@ -134,10 +136,10 @@ test('Die Auswertungsschaltflächen bleiben auf dem Smartphone kompakt', async (
  });
  expect(narrow.columns.split(' ').filter(Boolean)).toHaveLength(2);
  expect(narrow.viewport).toBe(320);
+ const narrowWeek = narrow.buttons.find(btn => btn.text === 'Aktuelle Woche');
  const narrowMonth = narrow.buttons.find(btn => btn.text === 'Aktueller Monat');
- const narrowPrevious = narrow.buttons.find(btn => btn.text === 'Vorheriger Monat');
  expect(narrowMonth.height).toBeLessThanOrEqual(56);
- expect(Math.abs(narrowPrevious.top - narrowMonth.top)).toBeLessThan(2);
+ expect(Math.abs(narrowMonth.top - narrowWeek.top)).toBeLessThan(2);
  expect(narrow.boardRight).toBeLessThanOrEqual(321);
  expect(narrowMonth.right).toBeLessThanOrEqual(321);
 });

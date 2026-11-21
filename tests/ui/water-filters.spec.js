@@ -111,7 +111,9 @@ async function openWaterFilters(page, role) {
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
  await page.locator('[data-view="more"]:visible').first().click();
- await page.locator('#open-operations').click();
+ const hubOps = page.locator('#more-hub').getByRole('button', {name: 'Betriebserfassung'});
+ if (await hubOps.isVisible()) await hubOps.click();
+ else await page.locator('#open-operations').click();
  await page.locator('[data-operation="water"]').click();
  await expect(page.locator('.water-filters')).toBeVisible();
 }

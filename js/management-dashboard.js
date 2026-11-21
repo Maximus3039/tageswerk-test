@@ -3,16 +3,20 @@ import {el} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {statusNames} from './labels.js';
-import {isActiveDefect, sortByPriorityThenAge} from './defects.js';
+import {facilityStatusCounts, isActiveDefect, sortByPriorityThenAge} from './defects.js';
 import {loadDayFigureBoard} from './operations-store.js';
-import {formatCents, figurePercent} from './operations.js';
+import {fetchConsumptionCalendar} from './meters-store.js';
+import {assetOverdue, formatCents, figurePercent} from './operations.js';
+import {analyticsMedia, buildAnalytics, formatAnalyticsValue} from './consumption-analytics.js';
 import {revenuePerVisitor, summarizeComparableWindow, yearEndForecast} from './statistics.js';
 import {
  allowedFacilityIds,
  copyConfigToFacilities,
+ DASHBOARD_PRESETS,
  defaultLayout,
  facilityTileConfig,
  gridColumns,
+ moveFacilityId,
  readLocalLayouts,
  writeLocalLayouts
 } from './dashboard-layouts.js';
@@ -21,6 +25,7 @@ let timer = null;
 let seq = 0;
 let layoutsState = {layouts: [defaultLayout()]};
 let activeIndex = 0;
+const consumptionCache = new Map();
 
 function managedFacilities() {
  return (state.accessibleFacilities || []).filter(isManager);
@@ -78,14 +83,83 @@ function periodFromRows(rows, from, to, key) {
  return summarizeComparableWindow(rows, from, to, key, priorKey);
 }
 
-function renderTile(host, facility, layout, board, today) {
+function lastReportFor(facilityId) {
+ const reports = (state.operationPreview?.reports || []).filter(report => report.facilityId === facilityId);
+ reports.sort((left, right) => String(right.reportDate || '').localeCompare(String(left.reportDate || '')));
+ return reports[0] || null;
+}
+
+function overdueMaintenance(facilityId) {
+ return (state.operationPreview?.assets || []).filter(asset => asset.facilityId === facilityId && assetOverdue(asset, new Date().toISOString())).length;
+}
+
+function openTasks(facilityId) {
+ return (state.cachedDefects || []).filter(item => item.facility_id === facilityId && item.assigned_to && isActiveDefect(item)).length;
+}
+
+async function consumptionFor(facility, media, today) {
+ const yearFrom = `${today.slice(0, 4)}-01-01`;
+ const lines = [];
+ for (const medium of media) {
+  const key = `${facility.id}:${medium}:${yearFrom}:${today}`;
+  let data = consumptionCache.get(key);
+  if (!data) {
+   const result = await fetchConsumptionCalendar({
+    p_facility_id: facility.id,
+    p_medium: medium,
+    p_meter_id: null,
+    p_grain: 'month',
+    p_from: yearFrom,
+    p_to: today
+   });
+   data = result.error ? {error: result.error.message} : {rows: result.data || []};
+   consumptionCache.set(key, data);
+  }
+  if (data.error) {
+   lines.push({medium, label: analyticsMedia.find(item => item.id === medium)?.label || medium, text: 'Verbrauch nicht verfügbar'});
+   continue;
+  }
+  const analytics = buildAnalytics(data.rows, {medium, range: 'year'});
+  lines.push({
+   medium,
+   label: analyticsMedia.find(item => item.id === medium)?.label || medium,
+   text: `${formatAnalyticsValue(analytics.current, analytics.unit)} · ${analytics.qualityLabel}`
+  });
+ }
+ return lines;
+}
+
+function renderTile(host, facility, layout, board, today, extras) {
   const config = facilityTileConfig(layout, facility.id);
   const tile = document.createElement('article');
   tile.className = layout.compact ? 'mgmt-tile compact' : 'mgmt-tile';
   tile.dataset.facilityId = facility.id;
   const heading = document.createElement('h3');
   heading.textContent = facility.name;
-  tile.append(heading);
+  const order = document.createElement('div');
+  order.className = 'mgmt-order';
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.className = 'secondary compact-button';
+  up.textContent = '↑';
+  up.addEventListener('click', () => {
+   const next = {...activeLayout(), facilityIds: moveFacilityId(allowedFacilityIds(activeLayout().facilityIds, managedFacilities()), facility.id, -1)};
+   layoutsState.layouts[activeIndex] = next;
+   persist();
+   paint();
+  });
+  const down = document.createElement('button');
+  down.type = 'button';
+  down.className = 'secondary compact-button';
+  down.textContent = '↓';
+  down.addEventListener('click', () => {
+   const next = {...activeLayout(), facilityIds: moveFacilityId(allowedFacilityIds(activeLayout().facilityIds, managedFacilities()), facility.id, 1)};
+   layoutsState.layouts[activeIndex] = next;
+   persist();
+   paint();
+  });
+  order.append(up, down);
+  tile.append(heading, order);
   if (!board?.ok) {
    const err = document.createElement('p');
    err.className = 'help';
@@ -112,15 +186,16 @@ function renderTile(host, facility, layout, board, today) {
    period.className = 'mgmt-period';
    const h = document.createElement('h4');
    h.textContent = title;
-   period.append(h, metricBlock('Besucher', visitors.current, visitors.prior, false));
-   period.append(metricBlock('Umsatz', revenue.current, revenue.prior, true));
+   period.append(h);
+   if (config.showVisitors) period.append(metricBlock('Besucher', visitors.current, visitors.prior, false));
+   if (config.showRevenue) period.append(metricBlock('Umsatz', revenue.current, revenue.prior, true));
    if (visitors.state === 'incomplete' || revenue.state === 'incomplete') {
     const gap = document.createElement('p');
     gap.className = 'help';
     gap.textContent = 'Vergleich unvollständig. Fehlende Tage werden nicht als 0 gezählt.';
     period.append(gap);
    }
-   if (config.showRevenuePerVisitor) {
+   if (config.showRevenuePerVisitor && config.showRevenue && config.showVisitors) {
     const per = revenuePerVisitor(visitors.current, revenue.current);
     const line = document.createElement('p');
     line.className = 'help';
@@ -137,6 +212,48 @@ function renderTile(host, facility, layout, board, today) {
     ? `Prognose Besucher Jahr: erfasst ${forecast.actual}, Rest ${forecast.rest}, Gesamt ${forecast.total}. ${forecast.label}`
     : forecast.label;
    tile.append(line);
+  }
+  if (config.showStatus) {
+   const counts = facilityStatusCounts(state.cachedDefects, facility.id);
+   const report = lastReportFor(facility.id);
+   const status = document.createElement('section');
+   status.className = 'mgmt-status';
+   const title = document.createElement('h4');
+   title.textContent = 'Betriebsstatus';
+   status.append(title);
+   for (const [label, value] of [
+    ['Aktive Mängel', counts.active],
+    ['Kritische Mängel', counts.critical],
+    ['Überfällige Wartungen', extras.maintenance],
+    ['Offene Aufgaben', extras.tasks]
+   ]) {
+    const line = document.createElement('p');
+    line.textContent = `${label}: ${value}`;
+    status.append(line);
+   }
+   const last = document.createElement('p');
+   last.className = 'help';
+   last.textContent = report ? `Letzter Tagesbericht: ${report.reportDate}` : 'Letzter Tagesbericht: keine Daten';
+   status.append(last);
+   tile.append(status);
+  }
+  if (config.showMaintenance) {
+   const line = document.createElement('p');
+   line.textContent = `Überfällige Wartungen: ${extras.maintenance}`;
+   tile.append(line);
+  }
+  if (config.showConsumption) {
+   const list = document.createElement('div');
+   const title = document.createElement('h4');
+   title.textContent = 'Verbrauch';
+   list.append(title);
+   for (const line of extras.consumption || []) {
+    const row = document.createElement('p');
+    row.className = 'help';
+    row.textContent = `${line.label}: ${line.text}`;
+    list.append(row);
+   }
+   tile.append(list);
   }
   if (config.showDefects) {
    const defects = sortByPriorityThenAge((state.cachedDefects || []).filter(item => item.facility_id === facility.id && isActiveDefect(item))).slice(0, config.defectLimit);
@@ -155,7 +272,14 @@ function renderTile(host, facility, layout, board, today) {
     button.type = 'button';
     button.className = 'mgmt-link';
     button.textContent = `${defect.title} · ${statusNames[defect.status] || defect.status}`;
-    button.addEventListener('click', () => document.querySelector('[data-view="defects"]')?.click());
+    button.addEventListener('click', () => {
+     document.querySelector('[data-view="defects"]')?.click();
+     const filter = el('defect-facility-filter');
+     if (filter) {
+      filter.value = facility.id;
+      filter.dispatchEvent(new Event('change'));
+     }
+    });
     list.append(button);
    }
    tile.append(list);
@@ -177,17 +301,48 @@ async function paint() {
   }
   const layout = activeLayout();
   const ids = allowedFacilityIds(layout.facilityIds, facilities);
-  const selected = facilities.filter(item => ids.includes(item.id));
+  const selected = ids.map(id => facilities.find(item => item.id === id)).filter(Boolean);
   root.style.setProperty('--mgmt-cols', String(gridColumns(selected.length, layout.columns)));
   root.classList.toggle('mgmt-monitor', layout.monitor === true);
+  document.body.classList.toggle('mgmt-fullscreen', layout.fullscreen === true);
   const today = new Date().toISOString().slice(0, 10);
   const token = ++seq;
   const boards = await Promise.all(selected.map(async facility => {
+   const config = facilityTileConfig(layout, facility.id);
    const board = await loadDayFigureBoard({rpc: (name, args) => supabase.rpc(name, args)}, facility.id, {from: `${today.slice(0, 4)}-01-01`, to: today});
-   return {facility, board};
+   const consumption = config.showConsumption ? await consumptionFor(facility, config.media, today) : [];
+   return {
+    facility,
+    board,
+    extras: {
+     maintenance: overdueMaintenance(facility.id),
+     tasks: openTasks(facility.id),
+     consumption
+    }
+   };
   }));
   if (token !== seq) return;
-  for (const item of boards) renderTile(root, item.facility, layout, item.board, today);
+  for (const item of boards) renderTile(root, item.facility, layout, item.board, today, item.extras);
+}
+
+function fillConfig() {
+  const layout = activeLayout();
+  const preset = DASHBOARD_PRESETS[layout.preset] || DASHBOARD_PRESETS.overview;
+  if (el('mgmt-columns')) el('mgmt-columns').value = String(layout.columns || 2);
+  if (el('mgmt-compact')) el('mgmt-compact').checked = Boolean(layout.compact);
+  if (el('mgmt-monitor')) el('mgmt-monitor').checked = Boolean(layout.monitor);
+  if (el('mgmt-refresh')) el('mgmt-refresh').value = String(layout.refreshSeconds || 60);
+  if (el('mgmt-preset')) el('mgmt-preset').value = layout.preset || 'overview';
+  for (const [id, key] of [
+   ['mgmt-show-visitors', 'showVisitors'],
+   ['mgmt-show-revenue', 'showRevenue'],
+   ['mgmt-show-status', 'showStatus'],
+   ['mgmt-show-defects', 'showDefects'],
+   ['mgmt-show-maintenance', 'showMaintenance'],
+   ['mgmt-show-consumption', 'showConsumption']
+  ]) {
+   if (el(id)) el(id).checked = Boolean(preset[key]);
+  }
 }
 
 function bindConfig() {
@@ -200,13 +355,30 @@ function bindConfig() {
    layout.columns = Number(el('mgmt-columns')?.value || layout.columns);
    layout.compact = Boolean(el('mgmt-compact')?.checked);
    layout.monitor = Boolean(el('mgmt-monitor')?.checked);
+   layout.fullscreen = Boolean(el('mgmt-fullscreen')?.checked);
    layout.refreshSeconds = Number(el('mgmt-refresh')?.value || 60);
    layout.preset = el('mgmt-preset')?.value || layout.preset;
    layout.facilityIds = [...(el('mgmt-facilities')?.selectedOptions || [])].map(option => option.value);
+   const preset = {...(DASHBOARD_PRESETS[layout.preset] || DASHBOARD_PRESETS.overview)};
+   if (el('mgmt-show-visitors')) preset.showVisitors = el('mgmt-show-visitors').checked;
+   if (el('mgmt-show-revenue')) preset.showRevenue = el('mgmt-show-revenue').checked;
+   if (el('mgmt-show-status')) preset.showStatus = el('mgmt-show-status').checked;
+   if (el('mgmt-show-defects')) preset.showDefects = el('mgmt-show-defects').checked;
+   if (el('mgmt-show-maintenance')) preset.showMaintenance = el('mgmt-show-maintenance').checked;
+   if (el('mgmt-show-consumption')) preset.showConsumption = el('mgmt-show-consumption').checked;
+   layout.perFacility = {};
+   for (const id of layout.facilityIds.length ? layout.facilityIds : managedFacilities().map(item => item.id)) {
+    layout.perFacility[id] = {...preset};
+   }
    layoutsState.layouts[activeIndex] = layout;
    persist();
    paint();
    startRefresh();
+   if (layout.fullscreen && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+   } else if (!layout.fullscreen && document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+   }
   });
   el('mgmt-copy-config')?.addEventListener('click', () => {
    const layout = copyConfigToFacilities(activeLayout(), allowedFacilityIds(activeLayout().facilityIds, managedFacilities()).map(id => id));
@@ -234,16 +406,19 @@ export async function openManagementDashboard() {
   bindConfig();
   const select = el('mgmt-facilities');
   if (select) {
+   const previous = new Set([...(select.selectedOptions || [])].map(option => option.value));
+   const layoutIds = new Set(activeLayout().facilityIds || []);
    select.replaceChildren();
    for (const facility of managedFacilities()) {
     const option = document.createElement('option');
     option.value = facility.id;
     option.textContent = facility.name;
-    option.selected = true;
+    option.selected = layoutIds.size ? layoutIds.has(facility.id) : previous.size ? previous.has(facility.id) : true;
     select.append(option);
    }
   }
   await loadDashboardLayouts();
+  fillConfig();
   await paint();
   startRefresh();
 }

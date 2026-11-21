@@ -13,6 +13,7 @@ import {
  filterDefectsByFacility,
  isOverdueDefect,
  matchesArchiveQuery,
+ matchesDefectQuery,
  myActiveDefects,
  resolveDefectFacilityFilter,
  scopeDefects,
@@ -28,12 +29,15 @@ import {
  fetchDefectRows,
  insertDefectRow,
  restoreArchivedDefect,
- updateDefectRow
+ updateDefectRow,
+ uploadDefectPhoto
 } from './defects-store.js';
 import {getCurrentUser} from './auth.js';
 import {loadCriticalAcks,renderDashboard} from './dashboard.js';
+import {compactList} from './mobile-ux.js';
 
 let archiveQuery='';
+let defectQuery='';
 let archiveFacilityId='';
 let archiveOpen=false;
 let defectPaint=0;
@@ -96,8 +100,15 @@ async function paintDefects(){
  const facilityFilter=resolveDefectFacilityFilter(state.defectFacilityFilter,state.accessibleFacilities);
  state.defectFacilityFilter=facilityFilter;
  const scoped=facilityScopedCache();
- const visible=scopeDefects(state.cachedDefects,{facilityFilter,mode,userId:state.currentUser?.id});
+ const visible=scopeDefects(state.cachedDefects,{facilityFilter,mode,userId:state.currentUser?.id}).filter(defect=>matchesDefectQuery(defect,defectQuery));
  box.replaceChildren();
+ const search=document.createElement('input');
+ search.id='defect-search';
+ search.type='search';
+ search.value=defectQuery;
+ search.placeholder='Offene Mängel durchsuchen';
+ search.addEventListener('input',()=>{const caret=search.selectionStart;defectQuery=search.value;paintDefects().then(()=>{const next=el('defect-search');if(!next)return;next.focus();try{next.setSelectionRange(caret,caret)}catch(e){}})});
+ box.append(search);
  const stats=defectStatistics(scoped);
  const summary=document.createElement('p');
  summary.className='help';
@@ -105,10 +116,12 @@ async function paintDefects(){
  box.append(summary);
  el('defect-count').textContent=String(mode==='all'?scoped.length:visible.length);
  el('mine-count').textContent=String(myActiveDefects(scoped,state.currentUser?.id).length);
- if(mode==='all'){await paintDefectSections(box,token,scoped);return}
+ const queried=scoped.filter(defect=>matchesDefectQuery(defect,defectQuery));
+ if(mode==='all'){await paintDefectSections(box,token,queried);return}
  if(token!==defectPaint)return;
  if(!visible.length){const info=document.createElement('p');info.className='muted';info.textContent='Keine Mängel in dieser Ansicht.';box.append(info);return}
  for(const defect of visible){if(token!==defectPaint)return;box.append(await defectCard(defect))}
+ compactList(box,12);
 }
 
 async function paintDefectSections(box,token,scoped){
@@ -298,7 +311,7 @@ function setDefectComposerOpen(open){
 }
 el('open-defect-form')?.addEventListener('click',()=>setDefectComposerOpen(true));
 el('close-defect-form')?.addEventListener('click',()=>setDefectComposerOpen(false));
-el('defect-form')?.addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').className='error';el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;document.body.dataset.saving='1';el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await getCurrentUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const {error}=await insertDefectRow(payload);if(error)throw error;el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';setDefectComposerOpen(false);await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;delete document.body.dataset.saving;el('save-defect').disabled=!state.accessibleFacilities.length}});
+el('defect-form')?.addEventListener('submit',async event=>{event.preventDefault();if(state.busy)return;const facility=state.accessibleFacilities.find(f=>f.id===el('defect-facility').value);const title=el('defect-title').value.trim();if(!facility||!title){el('defect-message').className='error';el('defect-message').textContent='Bitte Betrieb und Titel auswählen.';return}state.busy=true;document.body.dataset.saving='1';el('save-defect').disabled=true;el('defect-message').className='help';el('defect-message').textContent='Mangel wird gespeichert …';try{const {data:{user},error:authError}=await getCurrentUser();if(authError||!user)throw authError||new Error('Bitte erneut anmelden.');const payload={organization_id:facility.organization_id,facility_id:facility.id,title,description:el('defect-desc').value.trim()||null,priority:el('defect-priority').value,created_by:user.id};const due=el('defect-due')?.value;if(due)payload.resolution_due_at=new Date(due).toISOString();const assigned=el('defect-assign')?.value;if(assigned)payload.assigned_to=assigned;const {error}=await insertDefectRow(payload);if(error)throw error;const photo=await uploadDefectPhoto(facility.id,el('defect-photo')?.files?.[0]);if(!photo.ok)throw new Error(photo.error);el('defect-title').value='';el('defect-desc').value='';el('defect-priority').value='normal';if(el('defect-due'))el('defect-due').value='';el('defect-message').className='ok';el('defect-message').textContent='✓ Mangel in Supabase gespeichert.';setDefectComposerOpen(false);await loadDefects();await loadCriticalAcks()}catch(e){el('defect-message').className='error';el('defect-message').textContent='Speichern fehlgeschlagen: '+e.message}finally{state.busy=false;delete document.body.dataset.saving;el('save-defect').disabled=!state.accessibleFacilities.length}});
 el('refresh-defects')?.addEventListener('click',loadDefects);
 el('defect-filter')?.addEventListener('change',()=>{el('nav-mine').classList.toggle('active',el('defect-filter').value==='mine');el('nav-all').classList.toggle('active',el('defect-filter').value!=='mine');paintDefects()});
 el('defect-facility-filter')?.addEventListener('change',()=>{state.defectFacilityFilter=resolveDefectFacilityFilter(el('defect-facility-filter').value,state.accessibleFacilities);el('defect-facility-filter').value=state.defectFacilityFilter;paintDefects()});

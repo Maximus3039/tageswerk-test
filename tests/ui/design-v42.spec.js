@@ -44,7 +44,7 @@ test('Nexus V4.2 hat kompakte Dashboard-Struktur und Module zuerst', async ({pag
  expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test('Betriebsführung steht vor Weitere Module', async ({page}) => {
+test('Betriebsführung steht vor Weitere Module', async ({page}, testInfo) => {
  await openApp(page);
  await page.evaluate(() => {
   document.querySelector('#app')?.classList.remove('hidden');
@@ -59,7 +59,12 @@ test('Betriebsführung steht vor Weitere Module', async ({page}) => {
    opsHidden: ops.classList.contains('hidden')
   };
  });
- expect(order.opsHidden).toBe(false);
- expect(order.ops).toBeLessThan(order.more);
+ if (testInfo.project.name === 'smartphone') {
+  expect(order.opsHidden).toBe(true);
+  await expect(page.locator('#more-hub')).toBeVisible();
+ } else {
+  expect(order.opsHidden).toBe(false);
+  expect(order.ops).toBeLessThan(order.more);
+ }
  await expect(page.locator('#operations-tabs .neon-tile')).toHaveCount(8);
 });

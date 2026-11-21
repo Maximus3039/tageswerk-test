@@ -34,7 +34,8 @@ test('Mängel-Toolbar folgt der kompakten Nexus-Struktur', async ({page}, testIn
  await expect(page.locator('#nav-mine')).toBeVisible();
  await expect(page.locator('#nav-all')).toBeVisible();
  await expect(page.locator('#open-defect-form')).toBeVisible();
- await expect(page.locator('#defect-facility-filter')).toBeVisible();
+ if (testInfo.project.name === 'smartphone') await expect(page.locator('#defect-filter-toggle')).toBeVisible();
+ else await expect(page.locator('#defect-facility-filter')).toBeVisible();
  const layout = await page.locator('.nexus-defects-toolbar .defects-nav').evaluate(node => {
   const style = getComputedStyle(node);
   const mine = node.querySelector('#nav-mine')?.getBoundingClientRect();
@@ -64,5 +65,7 @@ test('Sicherheitsnotice und Mängel-Erfassung bleiben nach Design-Freeze sichtba
  await expect(page.locator('.notice')).toContainText('Mandantentrennung aktiv');
  await expect(page.locator('.notice')).toContainText('Kernregeln für Mängel');
  await expect(page.locator('#open-defect-form')).toBeVisible();
- await expect(page.locator('#defect-facility-filter')).toBeVisible();
+ const mobile = page.viewportSize()?.width < 851;
+ if (mobile) await expect(page.locator('#defect-filter-toggle')).toBeVisible();
+ else await expect(page.locator('#defect-facility-filter')).toBeVisible();
 });

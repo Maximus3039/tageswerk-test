@@ -117,8 +117,8 @@ function headerKind(text){
 }
 
 function registerOf(label){
- if(/\bNT\b|Niedertarif/i.test(label))return "NT";
- if(/\b(?:HT|HAT)\b|Hochtarif/i.test(label))return "HT";
+ if(/\b1[.\-]8[.\-]2\b|\bNT\b|Niedertarif/i.test(label))return "NT";
+ if(/\b1[.\-]8[.\-]1\b|\b(?:HT|HAT)\b|Hochtarif/i.test(label))return "HT";
  return "";
 }
 

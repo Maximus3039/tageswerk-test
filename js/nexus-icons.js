@@ -17,11 +17,18 @@ const icons = {
 
 const navLabels = {
  dashboard: 'Start',
- agenda: 'Aufgaben',
+ agenda: 'Tagesgeschäft',
  capture: 'Erfassen',
  notices: 'Hinweise',
  defects: 'Mängel',
  tasks: 'Meine Mängel',
+ more: 'Mehr'
+};
+
+const mobileNavLabels = {
+ dashboard: 'Dashboard',
+ agenda: 'Tagesgeschäft',
+ defects: 'Vorgänge',
  more: 'Mehr'
 };
 
@@ -52,7 +59,8 @@ export function decorateNavIcons() {
    host.dataset.icon = icon;
    const label = document.createElement('span');
    label.className = 'nexus-nav-label';
-   label.textContent = navLabels[view] || (button.textContent || '').replace(/^[⌂📋＋🔔⚒▤☰\s]+/u, '').trim();
+   const mobile = button.closest('.bottom-nav');
+   label.textContent = (mobile && mobileNavLabels[view]) || navLabels[view] || (button.textContent || '').replace(/^[⌂📋＋🔔⚒▤☰\s]+/u, '').trim();
    // Genau ein Icon + eine Beschriftung (keine Legacy-Emojis/Textknoten)
    button.replaceChildren(host, label);
   }

@@ -19,6 +19,22 @@ export function analyticsWindow(range, now = berlinToday()) {
  if (range === 'day') {
   return {from: dateKey(now), to: dateKey(now), grain: 'day', compareFrom: dateKey(addDays(now, -1)), compareTo: dateKey(addDays(now, -1))};
  }
+ if (range === 'week') {
+  const from = addDays(now, -6);
+  const compareTo = addDays(from, -1);
+  const compareFrom = addDays(compareTo, -6);
+  return {from: dateKey(from), to: dateKey(now), grain: 'day', compareFrom: dateKey(compareFrom), compareTo: dateKey(compareTo)};
+ }
+ if (range === 'yoy') {
+  const from = {y: now.y - 1, m: now.m, d: now.d};
+  return {
+   from: dateKey(from),
+   to: dateKey(now),
+   grain: 'month',
+   compareFrom: dateKey({y: now.y - 2, m: now.m, d: now.d}),
+   compareTo: dateKey(addDays(from, -1))
+  };
+ }
  if (range === 'year') {
   const from = {y: now.y, m: 1, d: 1};
   return {

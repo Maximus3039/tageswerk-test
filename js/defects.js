@@ -56,7 +56,21 @@ export function archiveHeading(count, open) {
 export function matchesArchiveQuery(defect, query) {
  const text = String(query || '').trim().toLocaleLowerCase('de');
  if (!text) return true;
- return `${defect?.title || ''} ${defect?.description || ''}`.toLocaleLowerCase('de').includes(text);
+ return `${defect?.title || ''} ${defect?.description || ''} ${defect?.status || ''}`.toLocaleLowerCase('de').includes(text);
+}
+
+export function matchesDefectQuery(defect, query) {
+ return matchesArchiveQuery(defect, query);
+}
+
+export function facilityStatusCounts(defects, facilityId) {
+ const rows = (defects || []).filter(defect => defect.facility_id === facilityId);
+ const open = rows.filter(isActiveDefect);
+ return {
+  active: open.length,
+  critical: open.filter(defect => defect.priority === 'critical').length,
+  overdue: open.filter(defect => isOverdueDefect(defect)).length
+ };
 }
 
 export function completionStamp(defect) {

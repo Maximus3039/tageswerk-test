@@ -1,5 +1,6 @@
 import {el} from './utils.js';
 import {state} from './state.js';
+import {acknowledgeNotice, visibleNotices} from './notifications.js';
 import {isManager} from './permissions.js';
 import {priorityNames} from './labels.js';
 import {
@@ -58,6 +59,15 @@ import {
  today
 } from './operations-ui-shared.js';
 
+function rareFold(title, ...nodes) {
+ const details = document.createElement('details');
+ details.className = 'mobile-fold';
+ const summary = document.createElement('summary');
+ summary.textContent = title;
+ details.append(summary, ...nodes.filter(Boolean));
+ return details;
+}
+
 export function renderReports(host, current) {
  const data = bundle();
  const date = input(today());
@@ -93,6 +103,9 @@ export function renderReports(host, current) {
    loadWeather.disabled = false;
   }
  });
+ const figuresHint = document.createElement('p');
+ figuresHint.className = 'help';
+ figuresHint.textContent = 'Besucher, Umsatz und Wetter werden nicht erneut erfasst, wenn sie am selben Tag schon unter Tageskennzahlen bzw. als Wettersnapshot vorliegen.';
  const save = button('Tagesbericht speichern', '', () => commit(async () => {
   const weatherText = String(weatherSnapshot || weatherPreview.value || '').trim();
   const body = String(incidents.value || '').trim();
@@ -117,6 +130,7 @@ export function renderReports(host, current) {
  }));
  host.append(
   labeled('Datum', date),
+  figuresHint,
   labeled('Wettersnapshot (Prognose zum Speicherzeitpunkt)', weatherPreview),
   loadWeather,
   labeled('Besondere Vorkommnisse', incidents),
@@ -128,7 +142,7 @@ export function renderReports(host, current) {
  const filterDate = input('');
  filterDate.type = 'date';
  const filter = button('An diesem Tag anzeigen', 'secondary', () => renderPanel(filterDate.value));
- host.append(labeled('Berichte filtern', filterDate), filter);
+ const history = rareFold('Frühere Berichte', labeled('Berichte filtern', filterDate), filter);
  for (const report of filterDailyReports(data.reports, {facilityId: current.id, date: host.dataset.filter || ''})) {
   const lines = [
    `${report.facilityName} · ${report.authorName} · ${new Date(report.createdAt).toLocaleString('de-DE')}`,
@@ -151,8 +165,9 @@ export function renderReports(host, current) {
    const mail = dailyReportEmail(report, report.facilityName);
    say('ok', `${mail.subject}\n${mail.body}\n\nDie E-Mail wird nicht versendet.`);
   }));
-  host.append(row);
+  history.append(row);
  }
+ host.append(history);
 }
 
 export function renderInspections(host, current) {
@@ -166,8 +181,14 @@ export function renderInspections(host, current) {
   const count = input('1');
   count.type = 'number';
   count.inputMode = 'numeric';
-  host.append(labeled('Bezeichnung des Kontrollgangs', name), labeled('Prüfpunkte', points), labeled('Wiederholung', unit), labeled('Intervallanzahl', count));
-  host.append(button('Checkliste anlegen', '', () => commit(() => saveInspectionTemplate(database(), bundle(), {facility: current, name: name.value, points: points.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context()))));
+  host.append(rareFold(
+   'Checkliste anlegen',
+   labeled('Bezeichnung des Kontrollgangs', name),
+   labeled('Prüfpunkte', points),
+   labeled('Wiederholung', unit),
+   labeled('Intervallanzahl', count),
+   button('Checkliste anlegen', '', () => commit(() => saveInspectionTemplate(database(), bundle(), {facility: current, name: name.value, points: points.value, intervalUnit: unit.value, intervalCount: count.value}, actor(), new Date().toISOString(), context())))
+  ));
   const template = select((data.templates || []).filter(item => item.facilityId === current.id).map(item => ({value: item.id, label: item.name})));
   const people = state.staff.filter(member => member.is_active === true && member.facility_id === current.id);
   const person = select(people.map(member => ({value: member.user_id, label: member.name})));
@@ -284,8 +305,14 @@ export function renderStock(host, current) {
   const unit = input('Stück');
   const minimum = input('0');
   minimum.inputMode = 'decimal';
-  host.append(labeled('Material', name), labeled('Lagerort', location), labeled('Einheit', unit), labeled('Mindestbestand', minimum));
-  host.append(button('Material speichern', '', () => commit(() => saveMaterial(database(), bundle(), {facility: current, name: name.value, location: location.value, unit: unit.value, minimum: minimum.value}, actor(), new Date().toISOString(), context()))));
+  host.append(rareFold(
+   'Material anlegen',
+   labeled('Material', name),
+   labeled('Lagerort', location),
+   labeled('Einheit', unit),
+   labeled('Mindestbestand', minimum),
+   button('Material speichern', '', () => commit(() => saveMaterial(database(), bundle(), {facility: current, name: name.value, location: location.value, unit: unit.value, minimum: minimum.value}, actor(), new Date().toISOString(), context())))
+  ));
  }
  if (!materials.length) {
   const empty = document.createElement('p');
@@ -302,26 +329,40 @@ export function renderStock(host, current) {
   const openRequest = data.requests.some(item => item.materialId === material.id && item.status === 'submitted');
   const row = item(material.name, [`${material.location} · Bestand ${amountLabel(stock)} ${material.unit}`, `Mindestbestand ${amountLabel(material.minimum)} ${material.unit}`, openRequest ? 'Offene Beschaffung vorhanden.' : 'Keine offene Beschaffung.'], low);
   row.classList.add('stock-card');
+  if (low) {
+   const hint = document.createElement('p');
+   hint.className = 'help';
+   hint.textContent = openRequest
+    ? 'Nachbestellhinweis: Es liegt bereits eine offene Beschaffung vor. Es wird nicht automatisch bestellt.'
+    : 'Nachbestellhinweis: Mindestbestand unterschritten. Bitte eine Beschaffung mit Freigabe anlegen.';
+   row.append(hint);
+  }
   if (isManager(current)) {
    const editName = input(material.name);
    const editLocation = input(material.location);
    const editUnit = input(material.unit);
    const editMinimum = input(String(material.minimum));
    editMinimum.inputMode = 'decimal';
-   row.append(labeled('Bezeichnung ändern', editName), labeled('Lagerort ändern', editLocation), labeled('Einheit ändern', editUnit), labeled('Mindestbestand ändern', editMinimum));
-   row.append(button('Material aktualisieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
-    name: editName.value,
-    location: editLocation.value,
-    unit: editUnit.value,
-    minimum: editMinimum.value
-   }, actor(), new Date().toISOString(), context()))));
-   row.append(button('Material deaktivieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
-    name: material.name,
-    location: material.location,
-    unit: material.unit,
-    minimum: material.minimum,
-    active: false
-   }, actor(), new Date().toISOString(), context()))));
+   row.append(rareFold(
+    'Stammdaten',
+    labeled('Bezeichnung ändern', editName),
+    labeled('Lagerort ändern', editLocation),
+    labeled('Einheit ändern', editUnit),
+    labeled('Mindestbestand ändern', editMinimum),
+    button('Material aktualisieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
+     name: editName.value,
+     location: editLocation.value,
+     unit: editUnit.value,
+     minimum: editMinimum.value
+    }, actor(), new Date().toISOString(), context()))),
+    button('Material deaktivieren', 'secondary', () => commit(() => saveMaterialChange(database(), bundle(), material.id, {
+     name: material.name,
+     location: material.location,
+     unit: material.unit,
+     minimum: material.minimum,
+     active: false
+    }, actor(), new Date().toISOString(), context())))
+   ));
   }
   if (canBookMaterial(current, actor())) {
    const quantity = input();
@@ -366,11 +407,11 @@ export function renderNotices(host, current) {
  missingNote(host, opsUi.temperatureInstalled, 'Temperaturkontrollen sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  missingNote(host, opsUi.materialsInstalled, 'Materialbestände sind noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
  missingNote(host, opsUi.waterInstalled, 'Wasserhygiene ist noch nicht in der Datenbank installiert. Es wurde nichts gespeichert.');
- const notices = facilityNotices(bundle(), state.cachedDefects, {
+ const notices = visibleNotices(facilityNotices(bundle(), state.cachedDefects, {
   facilityIds: [current.id],
   now: new Date().toISOString(),
   actor: actor()
- });
+ }), {userId: state.currentUser?.id});
  if (!notices.length) {
   const empty = document.createElement('p');
   empty.className = 'muted';
@@ -378,7 +419,14 @@ export function renderNotices(host, current) {
   host.append(empty);
   return;
  }
- for (const notice of notices) host.append(item(notice.title, [notice.detail], notice.warn));
+ for (const notice of notices) {
+  const row = item(notice.title, [notice.detail], notice.warn);
+  row.append(button('Quittieren', 'secondary', () => {
+   acknowledgeNotice(state.currentUser?.id, notice.id);
+   renderPanel();
+  }));
+  host.append(row);
+ }
 }
 
 

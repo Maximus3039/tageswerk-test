@@ -5,6 +5,7 @@ import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {clearFacilityMeters, loadFacilityMeters, resetMeterEditor} from './meters.js';
 import {paintMobile} from './mobile.js';
+import {compactList} from './mobile-ux.js';
 import {refreshOperationMetrics, syncOperationFacility} from './operations-ui.js';
 import {DASHBOARD_DEFECT_LIMIT, dashboardMineDefects, dashboardRecentDefects, isActiveDefect} from './defects.js';
 import {membershipAllowsMeterReading} from './meters-domain.js';
@@ -454,6 +455,9 @@ function paintNexusStatus(openCount, criticalCount, progressCount) {
 export function renderDashboard() {
  if (!el('metric-open')) return;
  paintMobile();
+ compactList(el('agenda-list'), 12);
+ compactList(el('notice-list'), 12);
+ compactList(el('dash-notices'), 8);
  const selected = el('dashboard-facility').value;
  const data = state.cachedDefects.filter(item => selected === 'all' || item.facility_id === selected);
  const count = pred => data.filter(pred).length;

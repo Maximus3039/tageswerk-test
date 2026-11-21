@@ -57,7 +57,7 @@ async function openApp(page, role) {
  await expect(page.locator('#app')).toBeVisible();
 }
 
-test('Geschäftsführung sieht Einladungsbestätigung und Management-Kacheln mit drei Zeiträumen', async ({page}) => {
+test('Geschäftsführung sieht Einladungsbestätigung und Management-Kacheln mit drei Zeiträumen', async ({page}, testInfo) => {
  await openApp(page, 'manager');
  await page.locator('[data-view="more"]:visible').first().click();
  await expect(page.locator('#invite-email-confirm')).toBeVisible();
@@ -67,12 +67,20 @@ test('Geschäftsführung sieht Einladungsbestätigung und Management-Kacheln mit
  await page.locator('#invite-first').fill('Test');
  await page.locator('#invite-last').fill('Person');
  await page.locator('#invite-email-confirm').fill('anders@example.invalid');
- await page.locator('#invite-submit').click();
+ await page.locator('#invite-submit').scrollIntoViewIfNeeded();
+ await page.locator('#invite-submit').click({force: true});
  await expect(page.locator('#invite-message')).toContainText('stimmen nicht überein');
  await page.locator('#invite-email-confirm').fill('neu@example.invalid');
- await expect(page.locator('#open-management-dashboard')).toBeVisible();
- await page.locator('#open-management-dashboard').click();
+ if (testInfo.project.name === 'smartphone') {
+  await page.locator('#more-hub').getByRole('button', {name: 'Management-Dashboard'}).click();
+ } else {
+  await expect(page.locator('#open-management-dashboard')).toBeVisible();
+  await page.locator('#open-management-dashboard').click();
+ }
  await expect(page.locator('#management-board-card')).toBeVisible();
+ if (testInfo.project.name === 'smartphone') {
+  await page.locator('details.mobile-fold summary').filter({hasText: 'Darstellung'}).click();
+ }
  await expect(page.locator('#management-config')).toBeVisible();
  await expect(page.locator('#mgmt-monitor')).toBeVisible();
  await expect(page.locator('#management-board .mgmt-period')).toHaveCount(3);

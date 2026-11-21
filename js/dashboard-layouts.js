@@ -1,10 +1,10 @@
 const STORAGE = 'tageswerk-management-dashboard';
 
 export const DASHBOARD_PRESETS = {
- overview: {label: 'Gesamtübersicht', showDefects: true, showMaintenance: true, showConsumption: true, showForecast: true, showRevenuePerVisitor: true},
- visitors: {label: 'Besucher und Umsatz', showDefects: false, showMaintenance: false, showConsumption: false, showForecast: true, showRevenuePerVisitor: true},
- technique: {label: 'Technik und Verbrauch', showDefects: false, showMaintenance: true, showConsumption: true, showForecast: false, showRevenuePerVisitor: false},
- defects: {label: 'Mängel und Wartungen', showDefects: true, showMaintenance: true, showConsumption: false, showForecast: false, showRevenuePerVisitor: false}
+ overview: {label: 'Gesamtübersicht', showVisitors: true, showRevenue: true, showStatus: true, showDefects: true, showMaintenance: true, showConsumption: true, showForecast: true, showRevenuePerVisitor: true},
+ visitors: {label: 'Besucher und Umsatz', showVisitors: true, showRevenue: true, showStatus: false, showDefects: false, showMaintenance: false, showConsumption: false, showForecast: true, showRevenuePerVisitor: true},
+ technique: {label: 'Technik und Verbrauch', showVisitors: false, showRevenue: false, showStatus: true, showDefects: false, showMaintenance: true, showConsumption: true, showForecast: false, showRevenuePerVisitor: false},
+ defects: {label: 'Mängel und Wartungen', showVisitors: false, showRevenue: false, showStatus: true, showDefects: true, showMaintenance: true, showConsumption: false, showForecast: false, showRevenuePerVisitor: false}
 };
 
 export function defaultLayout() {
@@ -25,14 +25,28 @@ export function facilityTileConfig(layout, facilityId) {
  const preset = DASHBOARD_PRESETS[layout?.preset] || DASHBOARD_PRESETS.overview;
  const custom = layout?.perFacility?.[facilityId] || {};
  return {
+  showVisitors: custom.showVisitors ?? preset.showVisitors ?? true,
+  showRevenue: custom.showRevenue ?? preset.showRevenue ?? true,
+  showStatus: custom.showStatus ?? preset.showStatus ?? true,
   showDefects: custom.showDefects ?? preset.showDefects,
   showMaintenance: custom.showMaintenance ?? preset.showMaintenance,
   showConsumption: custom.showConsumption ?? preset.showConsumption,
   showForecast: custom.showForecast ?? preset.showForecast,
   showRevenuePerVisitor: custom.showRevenuePerVisitor ?? preset.showRevenuePerVisitor,
   defectLimit: custom.defectLimit ?? 3,
-  media: custom.media || ['electricity', 'water', 'gas', 'heat']
+  media: custom.media || ['electricity', 'water', 'heat', 'gas']
  };
+}
+
+export function moveFacilityId(ids, id, direction) {
+ const list = [...(ids || [])];
+ const index = list.indexOf(id);
+ if (index < 0) return list;
+ const next = index + direction;
+ if (next < 0 || next >= list.length) return list;
+ const copy = list.splice(index, 1)[0];
+ list.splice(next, 0, copy);
+ return list;
 }
 
 export function allowedFacilityIds(requested, accessible) {

@@ -1078,9 +1078,79 @@ body.nexus-v43 label[for="operations-facility"]{
 .mgmt-monitor .mgmt-config,.mgmt-monitor .side-nav,.mgmt-monitor header{opacity:.35}
 .defect-card.is-overdue{box-shadow:0 0 16px var(--nexus-danger)}
 .mgmt-config{display:grid;gap:8px;margin-bottom:12px}
+.mgmt-order{display:flex;gap:6px;margin-bottom:8px}
+.mgmt-status p{margin:2px 0}
+.mgmt-chart-wrap{overflow:hidden;max-width:100%}
+.mgmt-chart{width:100%;height:120px;color:var(--nexus-cyan)}
+body.mgmt-fullscreen .mgmt-config{display:none}
+body.nexus-v44 .figure-table-wrap,body.nexus-v44 .mgmt-grid,body.nexus-v44 .filterbar{max-width:100%;overflow-x:auto}
+body.nexus-v44 input,body.nexus-v44 select,body.nexus-v44 textarea,body.nexus-v44 button{max-width:100%}
+body.nexus-v44 #defect-search{width:100%;margin-bottom:8px}
 @media(max-width:768px){
  .mgmt-grid{grid-template-columns:1fr}
+ .figure-table{font-size:.85rem}
+ .mgmt-metric strong{overflow-wrap:anywhere}
 }
 @media(max-width:390px){
  .mgmt-tile{padding:10px}
+}
+@media(max-width:850px){
+ body.nexus-v44 .app-shell,body.nexus-v44 main{overflow-x:hidden}
+ body.nexus-v44 .figure-filters,body.nexus-v44 .defects-toolbar{display:grid;gap:8px}
+ body.nexus-v45 .bottom-nav{grid-template-columns:repeat(4,1fr)!important}
+ body.nexus-v45 .side-nav{display:none}
+ #mobile-capture-fab{
+  position:fixed;right:16px;bottom:calc(12px + 56px + env(safe-area-inset-bottom) + var(--tw-keyboard,0px));z-index:110;
+  min-height:48px;min-width:48px;padding:10px 16px;border-radius:999px;
+  background:var(--nexus-accent,#e1bf48);color:#0b121c;box-shadow:0 8px 24px #0008
+ }
+ body.nexus-v45 .capture-sheet{z-index:160;bottom:calc(76px + env(safe-area-inset-bottom) + var(--tw-keyboard,0px))}
+ body.nexus-v45:has(#capture-sheet:not(.hidden)) #mobile-capture-fab,
+ body.nexus-v45:has(.defect-composer:not(.hidden)) #mobile-capture-fab,
+ body.nexus-v45:has(#mobile-sheet:not(.hidden)) #mobile-capture-fab,
+ body.keyboard-open #mobile-capture-fab,
+ body.field-focus #mobile-capture-fab{display:none!important}
+ body.nexus-v45 .notice-compact{font-size:.78rem;line-height:1.35}
+ body.nexus-v45 .notice-compact>summary{min-height:44px;cursor:pointer;font-weight:650}
+ body.nexus-v45 .notice-compact .notice-full{margin:8px 0 0}
+ body.nexus-v45 .error,body.nexus-v45 .ok{max-height:none;overflow:visible;font-size:.9rem}
+ body.nexus-v45 header > div > small{display:none}
+ body.nexus-v45 main{padding-bottom:calc(168px + env(safe-area-inset-bottom))}
+ body.nexus-v45 .view::after{content:"";display:block;height:calc(88px + env(safe-area-inset-bottom))}
+ body.nexus-v45 #home-quick{padding-right:6.75rem;padding-bottom:12px}
+ body.nexus-v45 button,body.nexus-v45 input,body.nexus-v45 select,body.nexus-v45 textarea{scroll-margin-bottom:168px}
+ body.nexus-v45 #more-modules-card{display:none!important}
+ body.nexus-v45 #view-more:has(#operations-card:not(.hidden)) #more-hub,
+ body.nexus-v45 #view-more:has(#consumption-card:not(.hidden)) #more-hub,
+ body.nexus-v45 #view-more:has(#management-board-card:not(.hidden)) #more-hub{display:none}
+ body.nexus-v45 #mgmt-back-more{width:100%;margin:0 0 10px}
+ body.nexus-v45 #defects-card .filterbar{display:none!important}
+ .mobile-sheet{position:fixed;inset:0;z-index:200;background:#0008;display:flex;align-items:flex-end}
+ .mobile-sheet.hidden{display:none}
+ .mobile-sheet-panel{width:100%;max-height:80vh;overflow:auto;background:#0b1624;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+ .more-hub{display:grid;gap:12px}
+ .more-hub .module-card{width:100%}
+ .cases-tabs{display:flex;gap:8px;margin-bottom:10px}
+ .cases-tabs button{flex:1;min-height:44px}
+ .mobile-fold{margin:8px 0;border:1px solid var(--nexus-border-soft,#38536b);border-radius:12px;padding:8px}
+ .mobile-fold>summary{min-height:44px;cursor:pointer;color:var(--nexus-accent,#e1bf48)}
+ #defects-panel > .filterbar,#defects-card .filterbar{display:none}
+ #defect-filter-toggle{width:100%;margin-bottom:8px}
+ .figure-table-wrap{overflow-x:auto;max-width:100%}
+ body.nexus-v45 input,body.nexus-v45 select,body.nexus-v45 textarea,body.nexus-v45 button{max-width:100%}
+ body.nexus-v45 .mgmt-config,body.nexus-v45 #management-config{font-size:.95rem}
+ body.nexus-v45 .kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+ body.nexus-v45 .dash-hero,body.nexus-v45 .dashboard-columns{grid-template-columns:1fr}
+ body.nexus-v45 .defect-composer-sheet,body.nexus-v45 .capture-sheet{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+ body.nexus-v45 .mgmt-order{display:none}
+ body.nexus-v45 #reading-save,body.nexus-v45 #meter-save,body.nexus-v45 #invite-submit,body.nexus-v45 #save-settings,body.nexus-v45 #defect-form button[type="submit"]{min-height:48px}
+ body:has(#app.hidden) #mobile-capture-fab,body:has(#login:not(.hidden)) #mobile-capture-fab{display:none!important}
+}
+@media(min-width:851px){
+ #mobile-capture-fab,.cases-tabs,#more-hub,#defect-filter-toggle,#mgmt-back-more{display:none!important}
+ #defects-panel > .filterbar{display:flex}
+}
+@media(max-width:320px){
+ body.nexus-v45 .bottom-nav button{font-size:.62rem;padding:4px 1px}
+ .mgmt-tile{padding:8px}
 }

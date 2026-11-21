@@ -86,6 +86,9 @@ export function supabaseOperationDb(supabase) {
   },
   rpc(name, args) {
    return supabase.rpc(name, args);
+  },
+  from(table) {
+   return supabase.from(table);
   }
  };
 }
@@ -860,6 +863,40 @@ export async function loadDayFigureBoard(db, facilityId, range) {
   return {ok: false, missing: figuresMissing(error) || /schema cache|PGRST202/i.test(figuresErrorText(error)), error: figuresStorageMessage(error)};
  }
  return {ok: true, overview: overview.data, period: period.data};
+}
+
+export async function importDayFiguresBatch(db, facilityId, fileName, rows) {
+ const payload = (rows || []).map(row => ({
+  day: row.day,
+  visitors: row.visitors,
+  total_cents: row.totalCents,
+  action: row.action
+ }));
+ let result;
+ try {
+  result = await db.rpc('tageswerk_import_day_figures', {
+   p_facility_id: facilityId,
+   p_file_name: fileName,
+   p_rows: payload
+  });
+ } catch (error) {
+  return {ok: false, missing: figuresMissing(error) || /schema cache|PGRST202|42883/i.test(figuresErrorText(error)), error: figuresStorageMessage(error)};
+ }
+ if (result?.error) {
+  return {ok: false, missing: figuresMissing(result.error) || /schema cache|PGRST202|42883/i.test(figuresErrorText(result.error)), error: figuresStorageMessage(result.error)};
+ }
+ return {ok: true, report: result.data};
+}
+
+export async function listDayFigureImports(db, facilityId) {
+ let result;
+ try {
+  result = await db.from('facility_day_figure_imports').select('id,file_name,imported_at,inserted_count,updated_count,skipped_count,error_count,details').eq('facility_id', facilityId).order('imported_at', {ascending: false}).limit(20);
+ } catch (error) {
+  return {ok: false, missing: true, error: figuresStorageMessage(error), rows: []};
+ }
+ if (result?.error) return {ok: false, missing: /schema cache|PGRST205|42P01/i.test(result.error.message || ''), error: figuresStorageMessage(result.error), rows: []};
+ return {ok: true, rows: result.data || []};
 }
 
 export async function saveReportDefect(db, bundle, reportId, defect, actor, context) {

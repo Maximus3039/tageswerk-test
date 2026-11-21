@@ -1,5 +1,16 @@
 import {supabase} from './supabase.js';
 
+export async function uploadDefectPhoto(facilityId, file) {
+ if (!file) return {ok: true, skipped: true};
+ const path = `${facilityId}/${crypto.randomUUID()}-${String(file.name || 'foto').replace(/[^\w.\-]+/g, '_')}`;
+ const uploaded = await supabase.storage.from('defect-photos').upload(path, file, {upsert: false});
+ if (!uploaded.error) return {ok: true, path};
+ if (/Bucket not found|not found|404/i.test(uploaded.error.message || '')) {
+  return {ok: true, skipped: true, error: 'Fotoablage ist vorbereitet, der Speicher ist in dieser Datenbank noch nicht installiert.'};
+ }
+ return {ok: false, error: uploaded.error.message};
+}
+
 const DEFECT_COLUMNS = 'id,title,description,priority,status,facility_id,organization_id,assigned_to,created_at,resolution_due_at,resolved_at,archived_at,archived_by';
 const PAGE_SIZE = 500;
 

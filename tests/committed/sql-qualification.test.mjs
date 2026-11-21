@@ -13,7 +13,10 @@ const migrations = [
  'tageswerk_3_6_1_facility_alert_visibility.sql',
  'tageswerk_3_6_2_materials_manage.sql',
  'tageswerk_3_6_2_facility_location_update.sql',
- 'tageswerk_3_6_3_material_movements_insert.sql'
+ 'tageswerk_3_6_3_material_movements_insert.sql',
+ 'tageswerk_3_7_0_create_facility.sql',
+ 'tageswerk_3_7_0_notice_acks.sql',
+ 'tageswerk_3_7_0_defect_photos.sql'
 ].map(name => ({
  name,
  sql: readFileSync(new URL(`../../${name}`, import.meta.url), 'utf8')

@@ -1,0 +1,1276 @@
+{
+  "widths": {
+    "320": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/320-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3652,
+        "inner": {
+          "w": 320,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/320-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1204,
+        "inner": {
+          "w": 320,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/320-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 2092,
+        "inner": {
+          "w": 320,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/320-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3964,
+        "inner": {
+          "w": 320,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/320-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3964,
+        "inner": {
+          "w": 320,
+          "h": 844
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 320,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    },
+    "360": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/360-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3512,
+        "inner": {
+          "w": 360,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/360-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1141,
+        "inner": {
+          "w": 360,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/360-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 2050,
+        "inner": {
+          "w": 360,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/360-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3765,
+        "inner": {
+          "w": 360,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/360-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3765,
+        "inner": {
+          "w": 360,
+          "h": 844
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 360,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    },
+    "375": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/375-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3476,
+        "inner": {
+          "w": 375,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/375-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1120,
+        "inner": {
+          "w": 375,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/375-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 2012,
+        "inner": {
+          "w": 375,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/375-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3706,
+        "inner": {
+          "w": 375,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/375-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3706,
+        "inner": {
+          "w": 375,
+          "h": 844
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 375,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    },
+    "390": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/390-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3455,
+        "inner": {
+          "w": 390,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/390-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1099,
+        "inner": {
+          "w": 390,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/390-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 1991,
+        "inner": {
+          "w": 390,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/390-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3685,
+        "inner": {
+          "w": 390,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/390-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3685,
+        "inner": {
+          "w": 390,
+          "h": 844
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 390,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    },
+    "430": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/430-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3379,
+        "inner": {
+          "w": 430,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/430-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1044,
+        "inner": {
+          "w": 430,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/430-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 1937,
+        "inner": {
+          "w": 430,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/430-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3609,
+        "inner": {
+          "w": 430,
+          "h": 844
+        },
+        "fab": {
+          "display": "block",
+          "y": 728,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/430-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3609,
+        "inner": {
+          "w": 430,
+          "h": 844
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 430,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    },
+    "768": {
+      "dashboard": {
+        "file": "docs/abnahme-mobile-3.7.0/768-dashboard.png",
+        "overflow": 0,
+        "scrollHeight": 3203,
+        "inner": {
+          "w": 768,
+          "h": 1024
+        },
+        "fab": {
+          "display": "block",
+          "y": 908,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "tagesgeschaeft": {
+        "file": "docs/abnahme-mobile-3.7.0/768-tagesgeschaeft.png",
+        "overflow": 0,
+        "scrollHeight": 1024,
+        "inner": {
+          "w": 768,
+          "h": 1024
+        },
+        "fab": {
+          "display": "block",
+          "y": 908,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "vorgaenge": {
+        "file": "docs/abnahme-mobile-3.7.0/768-vorgaenge.png",
+        "overflow": 0,
+        "scrollHeight": 1853,
+        "inner": {
+          "w": 768,
+          "h": 1024
+        },
+        "fab": {
+          "display": "block",
+          "y": 908,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "mehr": {
+        "file": "docs/abnahme-mobile-3.7.0/768-mehr.png",
+        "overflow": 0,
+        "scrollHeight": 3200,
+        "inner": {
+          "w": 768,
+          "h": 1024
+        },
+        "fab": {
+          "display": "block",
+          "y": 908,
+          "h": 48,
+          "right": 16,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      },
+      "erfassen": {
+        "file": "docs/abnahme-mobile-3.7.0/768-erfassen.png",
+        "overflow": 0,
+        "scrollHeight": 3200,
+        "inner": {
+          "w": 768,
+          "h": 1024
+        },
+        "fab": {
+          "display": "none",
+          "y": 0,
+          "h": 0,
+          "right": 768,
+          "navOverlap": false
+        },
+        "nav": [
+          "Dashboard",
+          "Tagesgeschäft",
+          "Vorgänge",
+          "Mehr"
+        ],
+        "hub": [
+          "Betriebserfassung",
+          "Zählerstände",
+          "Management-Dashboard",
+          "Mitarbeiter",
+          "Einladungen",
+          "Betriebe anlegen",
+          "Eskalationsregeln",
+          "Dashboard-Darstellung"
+        ],
+        "tiles": [
+          "Verbrauch",
+          "Excel-Import",
+          "Betrieb",
+          "Management"
+        ],
+        "mgmtVisible": false,
+        "opsVisible": false
+      }
+    }
+  },
+  "flows": {
+    "reading": {
+      "clicks": 2,
+      "file": "docs/abnahme-mobile-3.7.0/390-zaehlerstaende.png"
+    },
+    "defect": {
+      "clicks": 2,
+      "file": "docs/abnahme-mobile-3.7.0/390-mangel-melden.png",
+      "titleY": 0
+    },
+    "temperature": {
+      "clicks": 2,
+      "file": "docs/abnahme-mobile-3.7.0/390-temperatur.png"
+    },
+    "report": {
+      "clicks": 2,
+      "file": "docs/abnahme-mobile-3.7.0/390-tagesberichte.png"
+    },
+    "manageDefect": {
+      "clicks": 1,
+      "file": "docs/abnahme-mobile-3.7.0/390-maengelmanagement.png"
+    },
+    "mehr": {
+      "clicks": 1,
+      "file": "docs/abnahme-mobile-3.7.0/390-mehr-voll.png",
+      "overflow": 0,
+      "scrollHeight": 3685,
+      "inner": {
+        "w": 390,
+        "h": 844
+      },
+      "fab": {
+        "display": "block",
+        "y": 728,
+        "h": 48,
+        "right": 16,
+        "navOverlap": false
+      },
+      "nav": [
+        "Dashboard",
+        "Tagesgeschäft",
+        "Vorgänge",
+        "Mehr"
+      ],
+      "hub": [
+        "Betriebserfassung",
+        "Zählerstände",
+        "Management-Dashboard",
+        "Mitarbeiter",
+        "Einladungen",
+        "Betriebe anlegen",
+        "Eskalationsregeln",
+        "Dashboard-Darstellung"
+      ],
+      "tiles": [
+        "Verbrauch",
+        "Excel-Import",
+        "Betrieb",
+        "Management"
+      ],
+      "mgmtVisible": false,
+      "opsVisible": false
+    },
+    "management": {
+      "clicks": 2,
+      "file": "docs/abnahme-mobile-3.7.0/390-management-dashboard.png"
+    },
+    "staff": {
+      "file": "docs/abnahme-mobile-3.7.0/390-mitarbeiterverwaltung.png"
+    },
+    "water": {
+      "file": "docs/abnahme-mobile-3.7.0/390-wasserhygiene.png"
+    },
+    "stock": {
+      "file": "docs/abnahme-mobile-3.7.0/390-materialverwaltung.png"
+    },
+    "captureClosed": true
+  }
+}

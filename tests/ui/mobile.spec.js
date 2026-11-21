@@ -14,11 +14,10 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  const mobile = testInfo.project.name === 'smartphone';
  const bottom = page.locator('.bottom-nav');
  const side = page.locator('.side-nav');
- await expect(bottom.locator('button')).toHaveCount(5);
- await expect(bottom).toContainText('Start');
- await expect(bottom).toContainText('Aufgaben');
- await expect(bottom).toContainText('Erfassen');
- await expect(bottom).toContainText('Hinweise');
+ await expect(bottom.locator('button')).toHaveCount(4);
+ await expect(bottom).toContainText('Dashboard');
+ await expect(bottom).toContainText('Tagesgeschäft');
+ await expect(bottom).toContainText('Vorgänge');
  await expect(bottom).toContainText('Mehr');
  if (mobile) {
   await expect(bottom).toBeVisible();
@@ -28,7 +27,8 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
   await expect(side).toContainText('Mängel');
  }
  const visible = name => page.locator(`[data-view="${name}"]:visible`);
- await visible('capture').click();
+ if (mobile) await page.locator('#mobile-capture-fab').click();
+ else await visible('capture').click();
  await expect(page.locator('#capture-sheet')).toBeVisible();
  await expect(page.locator('#capture-actions button')).toHaveCount(6);
  await expect(page.locator('#capture-actions')).toContainText('Wasserhygiene erfassen');
@@ -41,8 +41,13 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  await expect(page.locator('#capture-sheet')).toBeHidden();
  await visible('agenda').click();
  await expect(page.locator('#view-agenda')).toBeVisible();
- await visible('notices').click();
- await expect(page.locator('#view-notices')).toBeVisible();
+ if (mobile) {
+  await visible('defects').click();
+  await expect(page.locator('#view-defects')).toBeVisible();
+ } else {
+  await visible('notices').click();
+  await expect(page.locator('#view-notices')).toBeVisible();
+ }
  await visible('dashboard').click();
  await expect(page.locator('#home-greeting')).toBeVisible();
  await expect(page.locator('#dashboard-facility')).toBeVisible();

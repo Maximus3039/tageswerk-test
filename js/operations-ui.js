@@ -3,6 +3,7 @@ import {el, show} from './utils.js';
 import {state} from './state.js';
 import {operationMetrics, waterRowsForMember} from './operations.js';
 import {facilityNotices} from './operations-controls.js';
+import {acknowledgeNotice, visibleNotices} from './notifications.js';
 import {
  actor,
  bundle,
@@ -41,11 +42,11 @@ function paintOperationMetrics() {
 function paintNotices(facilityIds) {
  const host = el('dash-notices');
  if (!host) return;
- const notices = facilityNotices(bundle(), state.cachedDefects, {
+ const notices = visibleNotices(facilityNotices(bundle(), state.cachedDefects, {
   facilityIds,
   now: new Date().toISOString(),
   actor: actor()
- });
+ }), {userId: state.currentUser?.id});
  host.replaceChildren();
  if (!notices.length) {
   const empty = document.createElement('p');
@@ -57,17 +58,26 @@ function paintNotices(facilityIds) {
  for (const notice of notices) {
   const row = document.createElement('div');
   row.className = notice.warn ? 'dash-row is-overdue' : 'dash-row';
-  row.tabIndex = 0;
-  row.setAttribute('role', 'button');
   const title = document.createElement('strong');
   const facilityName = state.accessibleFacilities.find(item => item.id === notice.facilityId)?.name || 'Betrieb';
   title.textContent = notice.title;
   const detail = document.createElement('small');
   detail.textContent = `${facilityName} · ${notice.detail}`;
-  row.append(title, detail);
-  const open = () => showNotice(notice);
-  row.addEventListener('click', open);
-  row.addEventListener('keydown', event => { if (event.key === 'Enter') open(); });
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'mgmt-link';
+  open.textContent = 'Öffnen';
+  open.addEventListener('click', () => showNotice(notice));
+  const ack = document.createElement('button');
+  ack.type = 'button';
+  ack.className = 'secondary compact-button';
+  ack.textContent = 'Quittieren';
+  ack.addEventListener('click', event => {
+   event.stopPropagation();
+   acknowledgeNotice(state.currentUser?.id, notice.id);
+   paintOperationMetrics();
+  });
+  row.append(title, detail, open, ack);
   host.append(row);
  }
 }

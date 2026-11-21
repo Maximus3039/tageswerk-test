@@ -74,8 +74,8 @@ function translateImportMedium(art,einheit){
 }
 
 function excelRegister(label){
- if(/\bNT\b|Niedertarif/i.test(label||""))return "NT";
- if(/\b(?:HT|HAT)\b|Hochtarif/i.test(label||""))return "HT";
+ if(/\b1[.\-]8[.\-]2\b|\bNT\b|Niedertarif/i.test(label||""))return "NT";
+ if(/\b1[.\-]8[.\-]1\b|\b(?:HT|HAT)\b|Hochtarif/i.test(label||""))return "HT";
  return "";
 }
 
@@ -920,7 +920,7 @@ function mountMeterImport(){
  const file=node("input");
  file.id="import-file";
  file.type="file";
- file.accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+ file.accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
  fileLabel.append(file);
  const summary=node("div");
  summary.id="import-summary";
@@ -1222,7 +1222,10 @@ function readWorkbook(file){
    try{
     const buffer=reader.result;
     const hash=await sha256Hex(buffer);
-    const workbook=XLSX.read(buffer,{type:"array",cellFormula:true,cellDates:false});
+    const csv=/\.csv$/i.test(fileName);
+    const workbook=csv
+     ? XLSX.read(new TextDecoder().decode(buffer),{type:"string",cellDates:false})
+     : XLSX.read(buffer,{type:"array",cellFormula:true,cellDates:false});
     if(document.getElementById("import-profile").value!=="tageszeit_zweizeilig")throw new Error("Dieses Profil ist nicht verfügbar.");
     await presentImportResult(convertTageszeitZweizeilig(workbook,fileName,XLSX),{name:fileName,hash,size:buffer.byteLength});
    }catch(error){

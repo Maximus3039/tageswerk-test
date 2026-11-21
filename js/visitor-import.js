@@ -122,9 +122,25 @@ export function parsePdfTables(text) {
 
 export const VISITOR_IMPORT_LIMIT = 800;
 
-export function mapImportRows(sheet, mapping, existingDays = new Set()) {
- if ((sheet?.rows || []).length > VISITOR_IMPORT_LIMIT) {
-  return {ok: false, error: `Mehr als ${VISITOR_IMPORT_LIMIT} Zeilen werden in einem Vorgang nicht übernommen.`};
+export function importChunks(rows, size = VISITOR_IMPORT_LIMIT) {
+ const list = rows || [];
+ const chunks = [];
+ for (let index = 0; index < list.length; index += size) {
+  chunks.push({
+   index: chunks.length + 1,
+   from: index + 1,
+   to: Math.min(index + size, list.length),
+   rows: list.slice(index, index + size),
+   status: 'pending'
+  });
+ }
+ return chunks;
+}
+
+export function mapImportRows(sheet, mapping, existingDays = new Set(), options = {}) {
+ const maxRows = options.maxRows ?? VISITOR_IMPORT_LIMIT;
+ if ((sheet?.rows || []).length > maxRows) {
+  return {ok: false, error: `Mehr als ${maxRows} Zeilen werden in einem Vorgang nicht übernommen.`};
  }
  const dayKey = mapping.day;
  const visitorKey = mapping.visitors;
