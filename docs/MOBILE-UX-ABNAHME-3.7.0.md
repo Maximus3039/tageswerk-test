@@ -115,7 +115,7 @@ Nicht ausführbar ohne Freigabe: SQL in Supabase, Edge-Deployments, GitHub-Pages
 
 ## 10. Commit
 
-Lokaler Commit auf `modularisierung`, kein Push. Die Commit-ID steht im Git-Log von HEAD.
+Lokaler Commit auf `modularisierung`, kein Push: `01cf296`.
 
 ## Halt
 
