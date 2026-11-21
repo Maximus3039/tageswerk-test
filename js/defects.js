@@ -117,3 +117,32 @@ export function scopeDefects(defects, {facilityFilter = DEFECT_FACILITY_ALL, mod
  if (mode === 'all') return scoped;
  return visibleDefectsForMode(scoped, mode, userId);
 }
+
+export function isOverdueDefect(defect, now = Date.now()) {
+ if (!isActiveDefect(defect) || !defect?.resolution_due_at) return false;
+ const due = new Date(defect.resolution_due_at).getTime();
+ return Number.isFinite(due) && due < now;
+}
+
+export function defectStatistics(defects, now = Date.now()) {
+ const rows = defects || [];
+ const open = rows.filter(isActiveDefect);
+ const overdue = open.filter(defect => isOverdueDefect(defect, now));
+ const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+ const created = rows.filter(defect => new Date(defect.created_at || 0).getTime() >= monthAgo);
+ const closed = rows.filter(defect => defect.status === 'resolved' && new Date(defect.resolved_at || 0).getTime() >= monthAgo);
+ const durations = closed
+  .map(defect => new Date(defect.resolved_at).getTime() - new Date(defect.created_at).getTime())
+  .filter(value => Number.isFinite(value) && value >= 0);
+ const averageHours = durations.length
+  ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length / 36e5)
+  : null;
+ const titles = new Map();
+ for (const defect of rows) {
+  const key = String(defect.title || '').trim().toLocaleLowerCase('de');
+  if (!key) continue;
+  titles.set(key, (titles.get(key) || 0) + 1);
+ }
+ const recurring = [...titles.entries()].filter(([, count]) => count >= 3).map(([title, count]) => ({title, count}));
+ return {open: open.length, overdue: overdue.length, created30: created.length, closed30: closed.length, averageHours, recurring};
+}

@@ -9,7 +9,9 @@ import {
  completionText,
  DEFECT_FACILITY_ALL,
  defectFacilityOptions,
+ defectStatistics,
  filterDefectsByFacility,
+ isOverdueDefect,
  matchesArchiveQuery,
  myActiveDefects,
  resolveDefectFacilityFilter,
@@ -96,6 +98,11 @@ async function paintDefects(){
  const scoped=facilityScopedCache();
  const visible=scopeDefects(state.cachedDefects,{facilityFilter,mode,userId:state.currentUser?.id});
  box.replaceChildren();
+ const stats=defectStatistics(scoped);
+ const summary=document.createElement('p');
+ summary.className='help';
+ summary.textContent=`Offen ${stats.open} · Überfällig ${stats.overdue} · Neu 30 Tage ${stats.created30} · Abgeschlossen 30 Tage ${stats.closed30}`+(stats.averageHours==null?'':` · Ø Bearbeitung ${stats.averageHours} Stunden`)+(stats.recurring.length?` · Wiederkehrend: ${stats.recurring.map(item=>item.title).slice(0,3).join(', ')}`:'');
+ box.append(summary);
  el('defect-count').textContent=String(mode==='all'?scoped.length:visible.length);
  el('mine-count').textContent=String(myActiveDefects(scoped,state.currentUser?.id).length);
  if(mode==='all'){await paintDefectSections(box,token,scoped);return}
@@ -206,7 +213,7 @@ async function restoreDefect(defect,button,msg){
 
 async function defectCard(defect){
  const card=document.createElement('div');
- card.className=`defect defect-card priority-${defect.priority||'normal'} status-${defect.status||'open'}${defect.archived_at?' is-archived':''}`;
+ card.className=`defect defect-card priority-${defect.priority||'normal'} status-${defect.status||'open'}${defect.archived_at?' is-archived':''}${isOverdueDefect(defect)?' is-overdue':''}`;
  const facility=state.accessibleFacilities.find(item=>item.id===defect.facility_id);
  const facilityLine=document.createElement('div');facilityLine.className='help';facilityLine.textContent=facility?.name||'Betrieb';
  const title=document.createElement('strong');title.textContent=defect.title;

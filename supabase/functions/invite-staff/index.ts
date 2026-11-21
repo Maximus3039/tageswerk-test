@@ -40,6 +40,20 @@ Deno.serve(async request => {
    const {data: {user}, error} = await client.auth.getUser();
    return {user, error};
   },
+  async resumeInvitation(input) {
+   const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY, {
+    global: {headers: {Authorization: authorization}},
+    auth: {persistSession: false}
+   });
+   const {data, error} = await client.from('staff_invitations').select('id,email,facility_id,status,role,first_name,last_name').eq('id', input.id).maybeSingle();
+   if (error || !data) return {ok: false, error: 'Einladung nicht gefunden'};
+   if (data.status !== 'pending') return {ok: false, error: 'Die Einladung ist nicht erneut versendbar.'};
+   if (data.facility_id !== input.facilityId) return {ok: false, error: 'Betrieb stimmt nicht.'};
+   if (String(data.email || '').trim().toLowerCase() !== String(input.email || '').trim().toLowerCase()) {
+    return {ok: false, error: 'Empfaengeradresse weicht ab.'};
+   }
+   return {ok: true, id: data.id, invitation: data};
+  },
   async requestInvitation(input) {
    const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY, {
     global: {headers: {Authorization: authorization}},
@@ -71,8 +85,10 @@ Deno.serve(async request => {
    return {error};
   },
   async inviteByEmail(input) {
+   const recipient = String(input.email || '').trim().toLowerCase();
+   if (!recipient) return {error: {message: 'Empfaengeradresse fehlt', status: 400}};
    const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {auth: {persistSession: false}});
-   const {error} = await admin.auth.admin.inviteUserByEmail(input.email, {
+   const {error} = await admin.auth.admin.inviteUserByEmail(recipient, {
     data: {full_name: input.firstName + ' ' + input.lastName},
     ...(input.redirectTo ? {redirectTo: input.redirectTo} : {})
    });

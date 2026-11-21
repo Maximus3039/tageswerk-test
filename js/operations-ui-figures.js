@@ -3,12 +3,23 @@ import {
  dayFigureAccess,
  employeeFigureWindow,
  formatCalendarDay,
- formatCents
+ formatCents,
+ historicalFigurePayload
 } from './operations.js';
 import {
  loadDayFigureBoard,
  saveDayFigures
 } from './operations-store.js';
+import {
+ applyDuplicatePolicy,
+ defaultColumnMap,
+ importReport,
+ mapImportRows,
+ parseCsvTables,
+ parsePdfTables,
+ parseXlsxTables
+} from './visitor-import.js';
+import {yearEndForecast, revenuePerVisitor} from './statistics.js';
 import {
  actor,
  button,
@@ -101,6 +112,17 @@ function renderFigureBoard(host, board, access) {
    host.append(metricLine('Bistroumsatz', block.bistro, true));
   }
   host.append(metricLine('Gesamtumsatz', block.total, true));
+  if (access === 'manager' && block.visitors?.state === 'complete' && block.total?.state === 'complete') {
+   const per = revenuePerVisitor(block.visitors.current, block.total.current);
+   host.append(metricLine('Umsatz pro Besucher', {state: per.state === 'value' ? 'complete' : 'missing', current: per.cents, prior: null, change: {label: per.label}}, true));
+  }
+ }
+ const forecast = yearEndForecast((overview.rows || []).map(row => ({day: row.day, visitors: row.visitors, totalCents: row.totalCents})), overview.rows?.[0]?.day || '');
+ if (access === 'manager' && forecast.state) {
+  const line = document.createElement('p');
+  line.className = 'help';
+  line.textContent = forecast.label + (forecast.total != null ? ` Erfasst ${forecast.actual}, Rest ${forecast.rest}, Prognose ${forecast.total}.` : '');
+  host.append(line);
  }
 }
 
@@ -247,12 +269,80 @@ function figureSettings(current, access) {
  historicTotal.inputMode = 'decimal';
  historicTotal.placeholder = '0,00';
  historicNote.placeholder = 'Grund, falls der Tag schon gespeichert ist';
- const pdf = document.createElement('input');
- pdf.type = 'file';
- pdf.accept = 'application/pdf';
- pdf.addEventListener('change', () => {
-  pdf.value = '';
-  say('error', 'Die PDF-Erkennung wartet auf eine echte Beispieldatei. Es wurde nichts gelesen und nichts gespeichert.');
+ const file = document.createElement('input');
+ file.type = 'file';
+ file.accept = '.xlsx,.csv,.pdf,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+ const preview = document.createElement('div');
+ preview.className = 'help';
+ const duplicates = select([{value: 'skip', label: 'Vorhandene Tage überspringen'}, {value: 'update', label: 'Vorhandene Tage nach Bestätigung aktualisieren'}], 'skip');
+ file.addEventListener('change', async () => {
+  const picked = file.files?.[0];
+  file.value = '';
+  if (!picked) return;
+  const board = await loadDayFigureBoard(database(), current.id, {});
+  const existing = new Set((board?.overview?.rows || []).filter(row => row.visitors != null || row.totalCents != null).map(row => row.day));
+  let parsed;
+  if (/\.csv$/i.test(picked.name) || picked.type === 'text/csv') parsed = parseCsvTables(await picked.text());
+  else if (/\.pdf$/i.test(picked.name) || picked.type === 'application/pdf') parsed = parsePdfTables(await picked.text());
+  else parsed = parseXlsxTables(globalThis.XLSX?.read(await picked.arrayBuffer(), {type: 'array'}));
+  if (!parsed.ok) {
+   say('error', parsed.error);
+   return;
+  }
+  const sheet = parsed.sheets[0];
+  const mapped = mapImportRows(sheet, defaultColumnMap(sheet.headers), existing);
+  if (!mapped.ok) {
+   say('error', mapped.error);
+   return;
+  }
+  const planned = applyDuplicatePolicy(mapped.rows, duplicates.value);
+  preview.textContent = `${planned.length} Zeilen, ${mapped.errors.length} Lesefehler. Noch nichts gespeichert.`;
+  const run = button('Import nach Vorschau speichern', '', () => commit(async () => {
+   if (!confirm('Import für '+current.name+' mit '+planned.filter(row => row.action !== 'skip').length+' Speichervorgängen starten?')) return {ok: false, error: 'Import abgebrochen.'};
+   const reportRows = [];
+   for (const row of planned) {
+    if (row.action === 'skip') {
+     reportRows.push({...row, skipped: true});
+     continue;
+    }
+    const payload = historicalFigurePayload({
+     day: row.day,
+     visitors: row.visitors == null ? '' : String(row.visitors),
+     total: row.totalCents == null ? '' : (row.totalCents / 100).toFixed(2).replace('.', ','),
+     gate: '',
+     bistro: '',
+     changeNote: row.action === 'update' ? 'Historischer Import aktualisiert '+picked.name : '',
+     replaces: row.action === 'update'
+    }, access, today());
+    if (!payload.ok) {
+     reportRows.push({...row, error: payload.error});
+     say('error', 'Import bei '+row.day+' gestoppt: '+payload.error);
+     break;
+    }
+    const saved = await saveDayFigures(database(), {
+     facility: current,
+     access,
+     day: row.day,
+     visitors: row.visitors == null ? '' : String(row.visitors),
+     total: row.totalCents == null ? '' : formatCents(row.totalCents).replace(' €', ''),
+     gate: '',
+     bistro: '',
+     changeNote: row.action === 'update' ? 'Historischer Import aktualisiert '+picked.name : 'Historischer Import '+picked.name,
+     replaces: row.action === 'update',
+     source: 'import'
+    }, actor(), today());
+    if (!saved.ok) {
+     reportRows.push({...row, error: saved.error});
+     say('error', 'Import bei '+row.day+' gestoppt: '+saved.error);
+     break;
+    }
+    reportRows.push({...row, saved: true});
+   }
+   const report = importReport(reportRows, mapped.errors);
+   say('ok', `Importbericht ${picked.name}: gespeichert ${report.imported}, aktualisiert ${report.updated}, übersprungen ${report.skipped}, Fehler ${report.failed}.`);
+   return {ok: true, id: 'visitor-import', bundle: {}};
+  }));
+  preview.append(document.createElement('br'), run);
  });
  panel.append(title, help, labeled('Historisches Datum', historicDay), labeled('Besucherzahl', historicVisitors), labeled('Gesamtumsatz', historicTotal), labeled('Grund der Änderung', historicNote));
  panel.append(button('Historische Kennzahlen speichern', 'secondary', () => commit(() => saveDayFigures(database(), {
@@ -267,10 +357,10 @@ function figureSettings(current, access) {
   replaces: false,
   source: 'import'
  }, actor(), today()))));
- panel.append(labeled('PDF-Datei', pdf));
+ panel.append(labeled('Datei (XLSX, CSV oder digitale PDF)', file), labeled('Doppelte Tage', duplicates), preview);
  const steps = document.createElement('p');
  steps.className = 'help';
- steps.textContent = 'Der Import führt über Datei, Analyse, Vorschau, Korrektur, Bestätigung und Protokoll. Die Auswertung einer PDF-Datei beginnt erst nach einer echten Beispieldatei.';
+ steps.textContent = 'Der Import führt über Datei, Spaltenzuordnung, Vorschau, Dublettenregel und Bestätigung. Gescannte PDFs ohne Text werden nicht übernommen. Ohne die vorbereitete SQL-Funktion erfolgt die Speicherung zeilenweise und stoppt beim ersten Fehler.';
  panel.append(steps);
  wrap.append(panel);
  return wrap;

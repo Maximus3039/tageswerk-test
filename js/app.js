@@ -13,6 +13,7 @@ import {inviteFacilityOptions,loadInvitations,setStaffActions,staffFacilityOptio
 import {loadDefects,populateDefectFacilityFilter} from './defects-ui.js';
 import {loadCriticalAcks,loadSettings,populateConsumptionFacility,populateDashboardFilters,renderDashboard,resetConsumptionPanel,setDashboardActions,touchConsumptionFacility} from './dashboard.js';
 import {decorateModuleIcons,decorateNavIcons} from './nexus-icons.js';
+import {openManagementDashboard,syncManagementAccess} from './management-dashboard.js';
 
 // Invitation URLs contain type=invite. Recovery URLs contain type=recovery or vorgang=passwort.
 const initialCallback=readAuthCallback({hash:location.hash,search:location.search});
@@ -64,7 +65,7 @@ function refreshScopeCards(){const orgIds=new Set(state.accessibleFacilities.map
 async function loadPermissions(){
  const managerFacilities=await loadPermissionData();
  refreshScopeCards();
- staffFacilityOptions();inviteFacilityOptions();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();populateConsumptionFacility();syncMeterImportAccess();await loadFacilityMeters(el('consumption-facility').value);
+ staffFacilityOptions();inviteFacilityOptions();syncManagementAccess();if(managerFacilities.length)await loadInvitations();populateDashboardFilters();populateConsumptionFacility();syncMeterImportAccess();await loadFacilityMeters(el('consumption-facility').value);
 }
 setStaffActions({
  refresh:async()=>{await loadPermissions();await loadDefects()},
@@ -196,6 +197,7 @@ function navigate(view){if(view==='capture'){toggleCapture();return}toggleCaptur
    el('open-operations')?.classList.add('active');
    if(!state.operationPreview)openOperations();
   }
+  if(el('management-board-card')&&!el('management-board-card').classList.contains('hidden'))openManagementDashboard();
  }
  for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('active',b.dataset.view===view);
  window.scrollTo({top:0,behavior:'smooth'});

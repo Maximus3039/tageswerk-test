@@ -1,5 +1,15 @@
 import {normalizeInvitationRole} from './rules.js';
 
+function normalizeInviteEmail(value) {
+ return String(value ?? '').trim().toLowerCase();
+}
+
+function alreadyRegisteredInviteError(error) {
+ const message = String(error?.message || '').toLowerCase();
+ const status = Number(error?.status);
+ return status === 422 || /already been registered|already registered|user already exists/.test(message);
+}
+
 export const invitationCors = {
  'Access-Control-Allow-Origin': '*',
  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -14,7 +24,7 @@ function json(data, status = 200) {
  };
 }
 
-export async function inviteStaff({method = 'POST', authorization = '', env = {}, body = undefined, readBody = null, getUser, requestInvitation, updateInvitation, inviteByEmail, log = () => {}, now = () => new Date().toISOString()}) {
+export async function inviteStaff({method = 'POST', authorization = '', env = {}, body = undefined, readBody = null, getUser, requestInvitation, resumeInvitation = null, updateInvitation, inviteByEmail, log = () => {}, now = () => new Date().toISOString()}) {
  if (method === 'OPTIONS') return {status: 204, body: null, headers: invitationCors};
  if (method !== 'POST') return json({error: 'POST erforderlich'}, 405);
  if (!String(authorization).startsWith('Bearer ')) return json({error: 'Anmeldung erforderlich'}, 401);
@@ -27,19 +37,42 @@ export async function inviteStaff({method = 'POST', authorization = '', env = {}
  const payload = readBody ? await readBody() : body;
  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return json({error: 'Ungueltiges JSON'}, 400);
  const facilityId = String(payload.facility_id || '');
- const email = String(payload.email || '').trim().toLowerCase();
+ const email = normalizeInviteEmail(payload.email);
+ const confirmation = payload.confirm_email == null ? email : normalizeInviteEmail(payload.confirm_email);
  const firstName = String(payload.first_name || '').trim();
  const lastName = String(payload.last_name || '').trim();
- if (!/^[0-9a-f-]{36}$/i.test(facilityId) || !/^\S+@\S+\.\S+$/.test(email) || !firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
+ if (!/^[0-9a-f-]{36}$/i.test(facilityId) || !/^\S+@\S+\.\S+$/.test(email) || email !== confirmation || !firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
   return json({error: 'Bitte gueltige Daten eingeben'}, 400);
  }
  const role = normalizeInvitationRole(payload.role);
  if (!role) return json({error: 'Eine Einladung kann nur Mitarbeiter oder Techniker vorsehen.'}, 400);
- const prepared = await requestInvitation({facilityId, email, firstName, lastName, role});
+ const resumeId = String(payload.invitation_id || '').trim();
+ let prepared;
+ if (resumeId) {
+  if (!/^[0-9a-f-]{36}$/i.test(resumeId) || typeof resumeInvitation !== 'function') {
+   return json({error: 'Die Einladung kann nicht erneut versendet werden.'}, 409);
+  }
+  prepared = await resumeInvitation({id: resumeId, facilityId, email, firstName, lastName, role});
+ } else {
+  prepared = await requestInvitation({facilityId, email, firstName, lastName, role});
+ }
  if (!prepared?.ok) return json({error: prepared?.error || 'Die Einladung wurde abgelehnt.'}, 403);
  const invitationId = prepared.id || prepared.invitation?.id;
+ const storedEmail = normalizeInviteEmail(prepared.invitation?.email || email);
+ if (storedEmail !== email) return json({error: 'Empfaengeradresse weicht von der Einladungszeile ab.'}, 500);
  const redirectTo = env.TAGESWERK_REDIRECT_URL || '';
- const delivery = await inviteByEmail({email, firstName, lastName, redirectTo: redirectTo || undefined});
+ const delivery = await inviteByEmail({email: storedEmail, firstName, lastName, redirectTo: redirectTo || undefined});
+ if (delivery?.error && alreadyRegisteredInviteError(delivery.error)) {
+  const markedExisting = await updateInvitation({
+   id: invitationId,
+   changes: {status: 'sent', updated_at: now()},
+   onlyStatus: 'pending'
+  });
+  if (markedExisting?.error || !markedExisting?.updated) {
+   return json({error: 'Bestehendes Konto erkannt, aber Einladungsstatus konnte nicht bestaetigt werden. Bitte Administration kontaktieren.'}, 500);
+  }
+  return json({ok: true, id: invitationId, email: storedEmail, existing_account: true, delivery: 'skipped_existing_account'});
+ }
  if (delivery?.error) {
   log('TAGESWERK_INVITATION_SEND_ERROR', {
    invitation_id: invitationId,
@@ -70,5 +103,5 @@ export async function inviteStaff({method = 'POST', authorization = '', env = {}
   });
   return json({error: 'E-Mail versendet, aber Einladungsstatus konnte nicht bestaetigt werden. Bitte Administration kontaktieren.'}, 500);
  }
- return json({ok: true, id: invitationId});
+ return json({ok: true, id: invitationId, email: storedEmail, existing_account: false, delivery: 'accepted_by_mail_service'});
 }

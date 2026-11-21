@@ -35,6 +35,7 @@ const technician = {userId: 'tech-1', name: 'Tim', memberships: [membership('tec
 const sql = readFileSync(new URL('../../tageswerk_3_5_4_day_figures.sql', import.meta.url), 'utf8');
 const hotfix = readFileSync(new URL('../../tageswerk_3_5_4_day_figures_hotfix.sql', import.meta.url), 'utf8');
 const schemaReload = readFileSync(new URL('../../tageswerk_3_5_4_day_figures_schema_reload.sql', import.meta.url), 'utf8');
+const uniquePrep = readFileSync(new URL('../../tageswerk_3_5_4_facilities_id_org_unique.sql', import.meta.url), 'utf8');
 
 test('Tageskennzahlen rechnen Vergleich, Prozent und getrennte Zeiträume', () => {
  assert.equal(compareCalendarDay('2026-11-14'), '2025-11-15');
@@ -281,6 +282,12 @@ test('Der COALESCE-Hotfix ersetzt nur die betroffenen Kennzahlenfunktionen', () 
  assert.match(hotfix, /LEAST\(COALESCE\(p_to, berlin\), berlin\)/);
  assert.match(schemaReload, /NOTIFY pgrst, 'reload schema'/);
  assert.match(schemaReload, /Nicht ohne ausdr\u00fcckliche Freigabe ausf\u00fchren/);
+});
+
+test('Die Unique-Vorbereitung ändert keine Betriebszeilen', () => {
+ assert.match(uniquePrep, /Nicht ohne ausdr\u00fcckliche Freigabe ausf\u00fchren/);
+ assert.match(uniquePrep, /ADD CONSTRAINT facilities_id_organization_id_key UNIQUE \(id, organization_id\)/);
+ assert.doesNotMatch(uniquePrep, /\b(INSERT|UPDATE|DELETE|DROP)\b/i);
 });
 
 test('Die Migration sperrt Zuordnung, Herkunft und Revisionsmanipulation', () => {

@@ -206,11 +206,12 @@ test('Einladung unterscheidet neue Konten, bestehende Konten und deaktivierte Zu
   body: {facility_id: second.id, email: 'konto@example.test', first_name: 'Kim', last_name: 'Konto'},
   inviteError: {message: 'A user with this email address has already been registered', status: 422}
  });
- assert.equal(registeredResult.result.status, 409);
- assert.equal(registeredResult.result.body.ok, undefined);
+ assert.equal(registeredResult.result.status, 200);
+ assert.equal(registeredResult.result.body.ok, true);
+ assert.equal(registeredResult.result.body.existing_account, true);
+ assert.equal(registeredResult.result.body.email, 'konto@example.test');
  assert.equal(registered.state.rows[0].role, 'employee');
- assert.equal(registered.state.rows[0].status, 'failed');
- assert.match(registered.state.rows[0].error_detail, /already been registered/);
+ assert.equal(registered.state.rows[0].status, 'sent');
  assert.equal(registered.state.members.length, 0);
 });
 
@@ -335,6 +336,8 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.match(prepared, /client\.rpc\('request_staff_invitation'/);
  assert.match(prepared, /p_role: input\.role/);
  assert.match(prepared, /inviteUserByEmail/);
+ assert.match(prepared, /resumeInvitation/);
+ assert.match(prepared, /Empfaengeradresse weicht ab/);
  assert.match(prepared, /TAGESWERK_REDIRECT_URL/);
  assert.match(prepared, /changes\.error_detail = input\.changes\.error_detail/);
  assert.match(prepared, /\.eq\('status', input\.onlyStatus\)/);
@@ -346,7 +349,9 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  assert.match(handler, /method === 'OPTIONS'/);
  assert.match(handler, /Bearer /);
  assert.match(handler, /onlyStatus: 'pending'/);
- assert.doesNotMatch(handler, /existing_account/);
+ assert.match(handler, /existing_account: true/);
+ assert.match(handler, /storedEmail !== email/);
+ assert.match(handler, /confirm_email/);
  assert.match(roleSqlFile, /private\.can_manage_facility\(p_facility_id\)/);
  assert.match(roleSqlFile, /v_role NOT IN \('employee', 'technician'\)/);
  assert.match(roleSqlFile, /v_email IS NULL OR v_email !~ /);
@@ -364,6 +369,8 @@ test('Die vorbereitete Funktion bleibt lokal und ersetzt nur die geprüfte Annah
  }
  assert.match(prepared, /role/);
  assert.match(staffUi, /role:inviteRole/);
+ assert.match(staffUi, /confirm_email:recipient.email/);
+ assert.match(staffUi, /invite-email-confirm/);
  assert.match(staffUi, /PGRST204/);
  assert.match(staffUi, /roleNames\[r\.role\]/);
 });
