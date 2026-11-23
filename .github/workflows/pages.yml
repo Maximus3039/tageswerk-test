@@ -24,8 +24,8 @@ jobs:
       - name: Geprüften Release holen
         uses: actions/checkout@v4
         with:
-          # 3.6.3 Release. Rollback 3.6.2: 9a3887d9dd1dbc9e02175b7b99f1f9a03099708f
-          ref: 5d6a3b4749042bdf0906c8b1985f5bdac6fe7355
+          # 3.7.0 Release. Rollback 3.6.3: 5d6a3b4749042bdf0906c8b1985f5bdac6fe7355
+          ref: 1cf46644e182afabf862d274acd483dae188a5ac
 
       - name: Node.js einrichten
         uses: actions/setup-node@v4
@@ -50,11 +50,15 @@ jobs:
           js/app.js
           js/auth.js
           js/consumption-analytics.js
+          js/dashboard-facility.js
           js/dashboard-layouts.js
           js/dashboard.js
           js/defects-store.js
           js/defects-ui.js
           js/defects.js
+          js/facilities-admin.js
+          js/historical-consumption-ui.js
+          js/historical-consumption.js
           js/invite-recipient.js
           js/labels.js
           js/management-dashboard.js
@@ -66,8 +70,10 @@ jobs:
           js/meters-store.js
           js/meters-ui.js
           js/meters.js
+          js/mobile-ux.js
           js/mobile.js
           js/nexus-icons.js
+          js/notifications.js
           js/operations-controls.js
           js/operations-store.js
           js/operations-ui-figures.js
@@ -94,7 +100,7 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/pages-expected.txt
           diff -u /tmp/pages-expected.txt /tmp/pages-actual.txt
-          grep -q '<title>Tageswerk 3.6.3</title>' dist/index.html
+          grep -q '<title>Tageswerk 3.7.0</title>' dist/index.html
           grep -q 'src="./js/app.js"' dist/index.html
           grep -q 'href="./css/app.css"' dist/index.html
           grep -q 'href="./css/theme-3.6.css"' dist/index.html
@@ -102,10 +108,15 @@ jobs:
           grep -q "register('./service-worker.js')" dist/index.html
           test -f dist/css/tokens.css
           test -f dist/js/nexus-icons.js
-          grep -q '"name": "Tageswerk 3.6.3"' dist/manifest.webmanifest
+          test -f dist/js/dashboard-facility.js
+          test -f dist/js/historical-consumption.js
+          test -f dist/js/historical-consumption-ui.js
+          test -f dist/js/mobile-ux.js
+          grep -q '"name": "Tageswerk 3.7.0"' dist/manifest.webmanifest
           grep -q '"start_url": "./"' dist/manifest.webmanifest
-          grep -q "SHELL_CACHE = 'tageswerk-shell-3.6.3'" dist/service-worker.js
+          grep -q "SHELL_CACHE = 'tageswerk-shell-3.7.0'" dist/service-worker.js
           grep -q 'eqtrifscedpsngsysxvc.supabase.co' dist/js/supabase.js
+          grep -q 'HISTORICAL_COMMIT_ENABLED=false' dist/js/meter-import-store.js
           if grep -R -E -n 'gamvnzggcrrlnyoknllu|test\.tageswerk\.local' dist; then
             exit 1
           fi
