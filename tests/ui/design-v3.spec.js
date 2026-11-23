@@ -21,9 +21,10 @@ test('Nexus-Login und Hintergrund sind verdrahtet', async ({page}) => {
 
 test('Betriebszentrale zeigt Kopf und Kennzahlen', async ({page}) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('.nexus-kicker')).toHaveText(/Betriebszentrale/i);
  await expect(page.locator('#nexus-date')).toBeVisible();

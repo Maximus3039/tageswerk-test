@@ -1,5 +1,5 @@
 import {supabase} from './supabase.js';
-import {el} from './utils.js';
+import {el, setHidden} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {statusNames} from './labels.js';
@@ -402,7 +402,7 @@ export async function openManagementDashboard() {
   if (!managedFacilities().length) return;
   const card = el('management-board-card');
   if (!card) return;
-  card.classList.remove('hidden');
+  setHidden(card, false);
   bindConfig();
   const select = el('mgmt-facilities');
   if (select) {

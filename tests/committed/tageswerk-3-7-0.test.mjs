@@ -11,6 +11,13 @@ import {matchesDefectQuery, openStatuses} from '../../js/defects.js';
 import {analyticsWindow} from '../../js/consumption-analytics.js';
 import {state} from '../../js/state.js';
 
+const releaseDir = new URL('../../sql/releases/3.7.0/', import.meta.url);
+const release01 = readFileSync(new URL('01_preflight.sql', releaseDir), 'utf8');
+const release02 = readFileSync(new URL('02_schema.sql', releaseDir), 'utf8');
+const release03 = readFileSync(new URL('03_functions.sql', releaseDir), 'utf8');
+const release04 = readFileSync(new URL('04_policies.sql', releaseDir), 'utf8');
+const release05 = readFileSync(new URL('05_storage.sql', releaseDir), 'utf8');
+const release06 = readFileSync(new URL('06_verification.sql', releaseDir), 'utf8');
 const vorpruefung = readFileSync(new URL('../../tageswerk_3_7_0_vorpruefung.sql', import.meta.url), 'utf8');
 const createFacility = readFileSync(new URL('../../tageswerk_3_7_0_create_facility.sql', import.meta.url), 'utf8');
 const notices = readFileSync(new URL('../../tageswerk_3_7_0_notice_acks.sql', import.meta.url), 'utf8');
@@ -22,6 +29,27 @@ const figures = readFileSync(new URL('../../js/operations-ui-figures.js', import
 test('3.7.0-Vorprüfung bleibt lesend', () => {
  assert.match(vorpruefung, /lesende Vorprüfung/);
  assert.doesNotMatch(vorpruefung, /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT|REVOKE|NOTIFY|DO)\b/im);
+});
+
+test('Release-SQL 3.7.0 bleibt additiv und ersetzt keine vorhandenen Kernfunktionen', () => {
+ assert.match(release01, /Kein DDL, kein DML/);
+ assert.doesNotMatch(release01, /^\s*(INSERT|UPDATE|DELETE|CREATE TABLE|ALTER|DROP TABLE|GRANT|REVOKE|NOTIFY)\b/im);
+ assert.match(release02, /CREATE TABLE IF NOT EXISTS public\.utility_monthly_consumption/);
+ assert.match(release02, /CREATE TABLE IF NOT EXISTS public\.defect_photos/);
+ assert.match(release02, /Kein zweiter Index/);
+ assert.doesNotMatch(release02, /^\s*CREATE UNIQUE INDEX IF NOT EXISTS facilities_id_organization_id_uidx/m);
+ assert.doesNotMatch(release02, /^\s*DROP TABLE\b/m);
+ assert.match(release03, /IF to_regprocedure\('public\.tageswerk_create_facility\(uuid,text\)'\) IS NOT NULL/);
+ assert.doesNotMatch(release03, /CREATE OR REPLACE FUNCTION public\.tageswerk_prepare_reading/);
+ assert.doesNotMatch(release03, /CREATE OR REPLACE FUNCTION public\.tageswerk_commit_historical_import/);
+ assert.doesNotMatch(release03, /CREATE OR REPLACE FUNCTION public\.employee_update_assigned_defect/);
+ assert.doesNotMatch(release03, /tageswerk_archive_defect/);
+ assert.match(release04, /FORCE ROW LEVEL SECURITY/);
+ assert.doesNotMatch(release04, /ON public\.defects/);
+ assert.match(release05, /public = false/);
+ assert.doesNotMatch(release05, /FOR UPDATE TO authenticated/);
+ assert.doesNotMatch(release05, /FOR DELETE TO authenticated/);
+ assert.match(release06, /tageswerk_create_facility\(uuid,text\)/);
 });
 
 test('Neue Betriebe bleiben der Geschäftsführung vorbehalten', () => {

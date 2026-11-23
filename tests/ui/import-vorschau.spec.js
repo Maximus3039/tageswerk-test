@@ -14,5 +14,6 @@ test('Die serverseitige Importvorschau ist in der lokalen Entwicklung vorhanden'
  await expect(page.locator('#import-preview-start')).toHaveCount(1);
  await expect(page.locator('#import-commit-start')).toHaveCount(1);
  await expect(page.locator('#import-commit-start')).toBeDisabled();
+ await expect(page.locator('#import-commit-confirm')).toBeDisabled();
  expect(writes).toEqual([]);
 });

@@ -6,9 +6,10 @@ async function openApp(page) {
  await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({contentType: 'text/javascript', body: mock}));
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
 }
 
@@ -68,9 +69,10 @@ export function createClient(){return{from:query,rpc(){return Promise.resolve({d
  await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({contentType: 'text/javascript', body: managerMock}));
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  const notice = page.locator('main > .notice');
  await expect(notice).toContainText('Mandantentrennung aktiv');

@@ -1,5 +1,5 @@
 import {supabase} from './supabase.js';
-import {el,show,status} from './utils.js';
+import {el,setHidden,show,status,syncHiddenDialogs} from './utils.js';
 import {state} from './state.js';
 import {loadPermissionData} from './permissions.js';
 import {getCurrentUser,signInWithPassword,signOut,updateUser,acceptInvitation,resetPasswordForEmail} from './auth.js';
@@ -16,6 +16,8 @@ import {decorateModuleIcons,decorateNavIcons} from './nexus-icons.js';
 import {loadDashboardLayouts,openManagementDashboard,syncManagementAccess} from './management-dashboard.js';
 import {mountFacilityAdmin} from './facilities-admin.js';
 import {isMobileUx, mountMobileUx, mountMoreHub} from './mobile-ux.js';
+
+syncHiddenDialogs();
 
 // Invitation URLs contain type=invite. Recovery URLs contain type=recovery or vorgang=passwort.
 const initialCallback=readAuthCallback({hash:location.hash,search:location.search});
@@ -196,9 +198,9 @@ function navigate(view){if(view==='capture'){toggleCapture();return}toggleCaptur
  if(view==='more'){
   mountMoreHub();
   if(isMobileUx()){
-   el('operations-card')?.classList.add('hidden');
-   el('management-board-card')?.classList.add('hidden');
-   el('consumption-card')?.classList.add('hidden');
+   setHidden(el('operations-card'), true);
+   setHidden(el('management-board-card'), true);
+   setHidden(el('consumption-card'), true);
   }else{
    const card=el('operations-card');
    if(card&&!card.classList.contains('hidden')){
@@ -209,6 +211,7 @@ function navigate(view){if(view==='capture'){toggleCapture();return}toggleCaptur
   }
  }
  for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('active',b.dataset.view===view);
+ syncHiddenDialogs();
  window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.view)));
@@ -226,4 +229,4 @@ function startRealtime(){if(state.realtimeChannel){supabase.removeChannel(state.
 function scheduleRefresh(){clearTimeout(state.refreshTimer);state.refreshTimer=setTimeout(async()=>{await loadDefects();await loadCriticalAcks();renderDashboard()},550)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.currentUser)scheduleRefresh()});
 
-el('reload').addEventListener('click',load);await update();
+el('reload').addEventListener('click',load);await update();syncHiddenDialogs();

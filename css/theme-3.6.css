@@ -1100,7 +1100,7 @@ body.nexus-v44 #defect-search{width:100%;margin-bottom:8px}
  body.nexus-v45 .bottom-nav{grid-template-columns:repeat(4,1fr)!important}
  body.nexus-v45 .side-nav{display:none}
  #mobile-capture-fab{
-  position:fixed;right:16px;bottom:calc(12px + 56px + env(safe-area-inset-bottom) + var(--tw-keyboard,0px));z-index:110;
+  position:fixed;right:16px;bottom:calc(20px + 72px + env(safe-area-inset-bottom) + var(--tw-keyboard,0px));z-index:110;
   min-height:48px;min-width:48px;padding:10px 16px;border-radius:999px;
   background:var(--nexus-accent,#e1bf48);color:#0b121c;box-shadow:0 8px 24px #0008
  }
@@ -1141,6 +1141,8 @@ body.nexus-v44 #defect-search{width:100%;margin-bottom:8px}
  body.nexus-v45 .mgmt-config,body.nexus-v45 #management-config{font-size:.95rem}
  body.nexus-v45 .kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
  body.nexus-v45 .dash-hero,body.nexus-v45 .dashboard-columns{grid-template-columns:1fr}
+ body.nexus-v45 .dash-panel,body.nexus-v45 .facility-select-wrap,body.nexus-v45 #dashboard-facility,body.nexus-v45 #dash-analytics-card,body.nexus-v45 .stats-toolbar{min-width:0;max-width:100%}
+ body.nexus-v45 #consumption-empty.hidden,body.nexus-v45 #consumption-empty[hidden]{display:none!important}
  body.nexus-v45 .defect-composer-sheet,body.nexus-v45 .capture-sheet{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
  body.nexus-v45 .mgmt-order{display:none}
  body.nexus-v45 #reading-save,body.nexus-v45 #meter-save,body.nexus-v45 #invite-submit,body.nexus-v45 #save-settings,body.nexus-v45 #defect-form button[type="submit"]{min-height:48px}

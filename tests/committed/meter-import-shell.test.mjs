@@ -10,7 +10,8 @@ import {
  normalizePreviewResult,
  previewErrorMessage,
  commitErrorMessage,
- runHistoricalCommit
+ runHistoricalCommit,
+ HISTORICAL_COMMIT_ENABLED
 } from '../../js/meter-import-store.js';
 import {needsReview} from '../../js/meter-import-review.js';
 
@@ -56,6 +57,7 @@ test('meter-import-store.js hält Mapping-, Vorschau- und Commit-Zugriffe', () =
  assert.match(store, /utility_meter_consumption/);
  assert.match(store, /tageswerk_preview_historical_import/);
  assert.match(store, /tageswerk_commit_historical_import/);
+ assert.match(store, /HISTORICAL_COMMIT_ENABLED=false/);
  assert.match(store, /p_facility_id/);
  assert.match(store, /p_payload/);
  assert.match(store, /p_client_token/);
@@ -193,7 +195,7 @@ test('Importbestätigung, Berechtigung und doppelte Übernahme bleiben begrenzt'
   hash,
   fileName: 'stand.xlsx'
  }).call, false);
- const decision = prepareCommitCall({
+ const gated = prepareCommitCall({
   permission: '',
   confirmed: true,
   busy: false,
@@ -203,7 +205,16 @@ test('Importbestätigung, Berechtigung und doppelte Übernahme bleiben begrenzt'
   hash,
   fileName: 'stand.xlsx'
  });
- assert.equal(decision.call, true);
+ assert.equal(HISTORICAL_COMMIT_ENABLED, false);
+ assert.equal(gated.call, false);
+ assert.match(gated.message, /deaktiviert/);
+ const decision = {
+  call: true,
+  token,
+  hash,
+  fileName: 'stand.xlsx',
+  payload
+ };
 
  const calls = [];
  const first = await runHistoricalCommit({

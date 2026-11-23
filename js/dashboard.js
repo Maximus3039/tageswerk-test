@@ -1,6 +1,6 @@
 ﻿import {supabase} from './supabase.js';
 import {priorityNames, statusNames} from './labels.js';
-import {el, show} from './utils.js';
+import {el, hideFromAssistive, show} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {clearFacilityMeters, loadFacilityMeters, resetMeterEditor} from './meters.js';
@@ -9,6 +9,7 @@ import {compactList} from './mobile-ux.js';
 import {refreshOperationMetrics, syncOperationFacility} from './operations-ui.js';
 import {DASHBOARD_DEFECT_LIMIT, dashboardMineDefects, dashboardRecentDefects, isActiveDefect} from './defects.js';
 import {membershipAllowsMeterReading} from './meters-domain.js';
+import {chosenConsumptionFacilityId, consumptionFacilitiesAvailable} from './dashboard-facility.js';
 import {fetchConsumptionCalendar} from './meters-store.js';
 import {
  analyticsMedia,
@@ -40,6 +41,29 @@ let weatherSeq = 0;
 let analyticsSeq = 0;
 let lastWeatherLine = '';
 
+const CONSUMPTION_EMPTY_TEXT = 'Für dein Konto sind keine Betriebe freigegeben.';
+
+function syncConsumptionEmpty(available) {
+ const empty = el('consumption-empty');
+ const panel = el('consumption-panel');
+ if (empty) {
+  empty.classList.toggle('hidden', available);
+  empty.hidden = available;
+  hideFromAssistive(empty, available);
+  empty.replaceChildren();
+  if (!available) {
+   const note = document.createElement('p');
+   note.className = 'muted';
+   note.textContent = CONSUMPTION_EMPTY_TEXT;
+   empty.append(note);
+  }
+ }
+ if (panel) {
+  panel.classList.toggle('hidden', !available);
+  hideFromAssistive(panel, !available);
+ }
+}
+
 export function resetConsumptionPanel() {
  resetMeterEditor();
  consumptionFacilityTouched = false;
@@ -47,48 +71,50 @@ export function resetConsumptionPanel() {
  el('open-consumption')?.classList.remove('active');
  el('consumption-facility')?.replaceChildren();
  clearFacilityMeters();
- show('consumption-empty', false);
- show('consumption-panel', true);
+ syncConsumptionEmpty(true);
 }
 
 export function populateConsumptionFacility() {
  const sel = el('consumption-facility');
  if (!sel) return;
  const previous = sel.value;
- const facilities = state.accessibleFacilities;
- const dashboard = el('dashboard-facility')?.value;
- sel.replaceChildren();
- const available = facilities.length > 0;
- show('consumption-empty', !available);
- show('consumption-panel', available);
- if (!available) return;
- for (const facility of facilities) {
+ const facilities = state.accessibleFacilities || [];
+ const available = consumptionFacilitiesAvailable(facilities);
+ syncConsumptionEmpty(available);
+ if (!available) {
+  sel.replaceChildren();
+  return;
+ }
+ const selected = chosenConsumptionFacilityId(facilities, {
+  previous,
+  dashboard: el('dashboard-facility')?.value,
+  touched: consumptionFacilityTouched
+ });
+ const options = facilities.map(facility => {
   const opt = document.createElement('option');
   opt.value = facility.id;
   opt.textContent = facility.name;
-  sel.append(opt);
- }
- if (consumptionFacilityTouched && facilities.some(item => item.id === previous)) sel.value = previous;
- else if (facilities.some(item => item.id === dashboard)) sel.value = dashboard;
- else sel.value = facilities[0].id;
+  return opt;
+ });
+ sel.replaceChildren(...options);
+ sel.value = selected;
 }
 
 export function populateDashboardFilters() {
  const sel = el('dashboard-facility');
  if (!sel) return;
  const old = sel.value;
- sel.replaceChildren();
  const all = document.createElement('option');
  all.value = 'all';
  all.textContent = 'Alle berechtigten Betriebe';
- sel.append(all);
- for (const facility of state.accessibleFacilities) {
+ const options = [all, ...(state.accessibleFacilities || []).map(facility => {
   const opt = document.createElement('option');
   opt.value = facility.id;
   opt.textContent = facility.name;
-  sel.append(opt);
- }
- sel.value = state.accessibleFacilities.some(item => item.id === old) ? old : 'all';
+  return opt;
+ })];
+ sel.replaceChildren(...options);
+ sel.value = (state.accessibleFacilities || []).some(item => item.id === old) ? old : 'all';
  const settings = el('settings-facility');
  if (!settings) return;
  const previous = settings.value;
@@ -338,6 +364,10 @@ async function renderAnalyticsPanel() {
   userId: state.currentUser?.id,
   memberships: state.myMemberships || []
  };
+ if (!consumptionFacilitiesAvailable(state.accessibleFacilities)) {
+  box.innerHTML = '<p class="help">Für dein Konto sind keine Betriebe freigegeben.</p>';
+  return;
+ }
  if (!facility || !membershipAllowsMeterReading(facility, actor.memberships, actor.userId)) {
   box.innerHTML = '<p class="help">Keine Berechtigung für Verbrauchswerte in diesem Betrieb.</p>';
   return;

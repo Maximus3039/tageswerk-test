@@ -11,9 +11,10 @@ async function openApp(page) {
 
 test('Nexus V4.1 komprimiert den Kopf und führt die Betriebsauswahl im Spotlight', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('body.nexus-v41')).toHaveCount(1);
  await expect(page.locator('.facility-select-wrap #dashboard-facility')).toBeVisible();
@@ -30,10 +31,12 @@ test('Nexus V4.1 komprimiert den Kopf und führt die Betriebsauswahl im Spotligh
 
 test('Neon-Kacheln behalten Raster und SVG-Icons', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#view-more')?.classList.remove('hidden');
-  document.querySelector('#operations-card')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-more', true);
+  show('operations-card', true);
  });
  await expect(page.locator('#operations-tabs .neon-tile')).toHaveCount(8);
  await expect(page.locator('[data-operation="water"] .module-icon svg')).toHaveCount(1);

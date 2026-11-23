@@ -1,5 +1,5 @@
 import {priorityNames,statusNames} from './labels.js';
-import {el,status} from './utils.js';
+import {el,hideFromAssistive,status} from './utils.js';
 import {state} from './state.js';
 import {isManager} from './permissions.js';
 import {
@@ -278,7 +278,7 @@ async function defectCard(defect){
   const note=document.createElement('textarea');note.maxLength=2000;note.placeholder='Was wurde geprüft, repariert oder veranlasst?';note.style.minHeight='75px';
   const button=document.createElement('button');button.className='secondary';button.textContent='Meine Bearbeitung speichern';button.disabled=defect.status==='resolved'||defect.status==='pending_review';
   const msg=document.createElement('p');msg.className='help';
-  button.onclick=async()=>{const comment=note.value.trim();if(!comment){msg.className='error';msg.textContent='Bitte einen Arbeitsvermerk eintragen.';return}button.disabled=true;msg.textContent='Wird gespeichert …';try{
+  button.onclick=async()=>{const comment=note.value.trim();if(!comment||comment.length<3||note.value.length>2000){msg.className='error';msg.textContent='Arbeitsvermerk mit 3 bis 2000 Zeichen erforderlich.';return}button.disabled=true;msg.textContent='Wird gespeichert …';try{
    const {error}=await employeeUpdateAssignedDefect(defect.id,statusSelect.value,comment);
    if(error)throw error;status('✓ Bearbeitung gespeichert.');await loadDefects();
   }catch(e){msg.className='error';msg.textContent='Speichern fehlgeschlagen: '+e.message;button.disabled=false}};
@@ -301,7 +301,7 @@ function setDefectComposerOpen(open){
  const composer=el('defect-composer');
  if(!composer)return;
  composer.classList.toggle('hidden',!open);
- composer.setAttribute('aria-hidden',open?'false':'true');
+ hideFromAssistive(composer, !open);
  if(open){
   el('defect-title')?.focus();
  }else if(el('defect-message')){

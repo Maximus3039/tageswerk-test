@@ -127,6 +127,20 @@ function openDefect(assignee, target = facility) {
  };
 }
 
+test('Die 3.7.0-TEST-Migration legt die geprüfte Mitarbeiter-Mängelfunktion an', () => {
+ const sql = readFileSync(new URL('../../tageswerk_3_7_0_employee_update_assigned_defect.sql', import.meta.url), 'utf8');
+ const created = sql.slice(sql.indexOf('CREATE FUNCTION public.employee_update_assigned_defect'));
+ assert.equal(defectFunctionStatus(created), 'bereit');
+ assert.match(sql, /CREATE FUNCTION public\.employee_update_assigned_defect/);
+ assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION public\.employee_update_assigned_defect/);
+ assert.match(sql, /employee_update_assigned_defect entspricht nicht der geprüften Fassung und wurde nicht ersetzt/);
+ assert.match(sql, /REVOKE ALL ON FUNCTION public\.employee_update_assigned_defect/);
+ assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.employee_update_assigned_defect/);
+ assert.doesNotMatch(sql, /DROP POLICY/);
+ assert.doesNotMatch(sql, /DISABLE ROW LEVEL SECURITY/);
+ assert.doesNotMatch(sql, /tageswerk_3_4_technician_role/);
+});
+
 test('Die bekannte Mängelfunktion bleibt installierbar und unsichere Fassungen stoppen', () => {
  const sql = readFileSync(new URL('../../tageswerk_3_4_technician_role.sql', import.meta.url), 'utf8');
  const control = readFileSync(new URL('../integration/installationskontrolle.sql', import.meta.url), 'utf8');

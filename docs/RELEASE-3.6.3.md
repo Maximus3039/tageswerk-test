@@ -24,6 +24,13 @@ Stand: 21.11.2026. Produktivprojekt `eqtrifscedpsngsysxvc`. Keine produktive Ein
 
 `npm test`: 242/242.
 
+## Git
+
+- App-Commit `5d6a3b4749042bdf0906c8b1985f5bdac6fe7355` auf `modularisierung`
+- Pages-Pin `f4d543d` auf `main`
+- GitHub-Actions „Veröffentlichung prüfen“ war grün; Schritt „Auf der bestehenden Adresse veröffentlichen“ ist **fehlgeschlagen** (`https://github.com/Maximus3039/tageswerk-test/actions/runs/44890391592`)
+
 ## Offen
 
-Produktiver Einladungstest mit festgelegter Adresse folgt gesondert.
+- Live-Pages stehen, bis der Deploy-Schritt gelingt, weiter auf 3.6.2.
+- Produktiver Einladungstest mit festgelegter Adresse folgt gesondert.

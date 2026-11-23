@@ -19,6 +19,14 @@ export {
  latestConsumption
 } from './meters-domain.js';
 
+export {
+ historicalReadingDraftError,
+ monthlyConsumptionDraftError,
+ mergeMonthlySources,
+ monthlyStats,
+ yearOverYear
+} from './historical-consumption.js';
+
 export {fetchFacilityMeters} from './meters-store.js';
 
 export {

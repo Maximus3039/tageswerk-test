@@ -8,7 +8,7 @@ export default defineConfig({
  fullyParallel: false,
  retries: 0,
  reporter: 'line',
- use: {baseURL: `http://127.0.0.1:${port}`},
+ use: {baseURL: `http://127.0.0.1:${port}`, serviceWorkers: 'block'},
  webServer: {
   command: 'node scripts/static-server.mjs',
   url: `http://127.0.0.1:${port}`,

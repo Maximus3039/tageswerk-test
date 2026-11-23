@@ -11,9 +11,10 @@ async function openApp(page) {
 
 test('Nexus V4.3 integriert die Betriebsauswahl in das Spotlight', async ({page}) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('body.nexus-v43')).toHaveCount(1);
  await expect(page.locator('#facility-spotlight .facility-select-in-spotlight #dashboard-facility')).toBeVisible();
@@ -25,10 +26,12 @@ test('Nexus V4.3 integriert die Betriebsauswahl in das Spotlight', async ({page}
 
 test('Mängel-Toolbar folgt der kompakten Nexus-Struktur', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#view-dashboard')?.classList.add('hidden');
-  document.querySelector('#view-defects')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-dashboard', false);
+  show('view-defects', true);
  });
  await expect(page.locator('.nexus-defects-toolbar')).toBeVisible();
  await expect(page.locator('#nav-mine')).toBeVisible();
@@ -56,11 +59,12 @@ test('Mängel-Toolbar folgt der kompakten Nexus-Struktur', async ({page}, testIn
 
 test('Sicherheitsnotice und Mängel-Erfassung bleiben nach Design-Freeze sichtbar', async ({page}) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
-  document.querySelector('#view-dashboard')?.classList.add('hidden');
-  document.querySelector('#view-defects')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-dashboard', false);
+  show('view-defects', true);
  });
  await expect(page.locator('.notice')).toContainText('Mandantentrennung aktiv');
  await expect(page.locator('.notice')).toContainText('Kernregeln für Mängel');

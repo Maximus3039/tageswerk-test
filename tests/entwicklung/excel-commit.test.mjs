@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {prepareCommitCall, normalizeCommitResult, commitErrorMessage, commitRefreshesConsumption, runHistoricalCommit} from '../../js/meter-import-store.js';
+import {prepareCommitCall, normalizeCommitResult, commitErrorMessage, commitRefreshesConsumption, runHistoricalCommit, HISTORICAL_COMMIT_ENABLED} from '../../js/meter-import-store.js';
 
 const token = '8f1b0a6e-6c2d-4b1a-8d3e-123456789abc';
 const batchId = 'a1b2c3d4-e5f6-4711-89ab-abcdefabcdef';
@@ -22,28 +22,30 @@ function readyCall(overrides = {}) {
  });
 }
 
+function allowedDecision(fileName = 'vorschau.xlsx') {
+ return {call: true, message: '', token, hash, fileName, payload: plan.payload};
+}
+
 test('Eine freigegebene Vorschau darf erst nach Bestätigung übernommen werden', () => {
- const blocked = readyCall({confirmed: false});
- assert.equal(blocked.call, false);
- assert.match(blocked.message, /bestätigt/);
- const ready = readyCall();
- assert.equal(ready.call, true);
- assert.equal(ready.token, token);
- assert.equal(ready.payload, plan.payload);
+ assert.equal(HISTORICAL_COMMIT_ENABLED, false);
+ const gated = readyCall();
+ assert.equal(gated.call, false);
+ assert.match(gated.message, /deaktiviert/);
+ assert.match(gated.message, /manuell/);
 });
 
 test('Eine veraltete oder nicht freigegebene Vorschau startet keine Übernahme', () => {
  assert.equal(readyCall({preview: {...preview, key: 'alt'}}).call, false);
- assert.match(readyCall({preview: {...preview, key: 'alt'}}).message, /veraltet/);
+ assert.match(readyCall({preview: {...preview, key: 'alt'}}).message, /deaktiviert/);
  assert.equal(readyCall({preview: {...preview, schreibbar: false}}).call, false);
  assert.equal(readyCall({preview: {...preview, blockiert: 2}}).call, false);
  assert.equal(readyCall({busy: true}).call, false);
- assert.match(readyCall({permission: 'Historische Importe darf die Betriebsleitung oder Geschäftsführung.'}).message, /Betriebsleitung/);
+ assert.match(readyCall({permission: 'Historische Importe darf die Betriebsleitung oder Geschäftsführung.'}).message, /deaktiviert/);
 });
 
 test('Ein simulierter Import übernimmt die Antwort und aktualisiert die Verbrauchsanzeige', async () => {
  const calls = [];
- const decision = readyCall();
+ const decision = allowedDecision();
  const outcome = await runHistoricalCommit({
   decision,
   facilityId: 'fac-a',
@@ -65,7 +67,7 @@ test('Ein simulierter Import übernimmt die Antwort und aktualisiert die Verbrau
 
 test('Eine wiederholte Übernahme derselben Kennung schreibt nicht erneut', async () => {
  const calls = [];
- const decision = readyCall();
+ const decision = allowedDecision();
  const rpc = (name, args) => {
   calls.push({name, token: args.p_client_token});
   return Promise.resolve({data: {status: 'uebernommen', batch_id: batchId, zeilen: 4, erneut: calls.length > 1}, error: null});
@@ -90,14 +92,14 @@ test('Blockierte, doppelte und fehlerhafte Übernahmen rufen keine zweite Funkti
  const denied = await runHistoricalCommit({decision: readyCall({confirmed: false}), facilityId: 'fac-a', rpc});
  assert.equal(denied.called, false);
  assert.equal(calls.length, 0);
- const timeout = await runHistoricalCommit({decision: readyCall(), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'zeit'})});
+ const timeout = await runHistoricalCommit({decision: allowedDecision('zeit'), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'zeit'})});
  assert.match(timeout.message, /nichts gespeichert/);
  assert.equal(timeout.refresh, false);
- const network = await runHistoricalCommit({decision: readyCall(), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'netz'})});
+ const network = await runHistoricalCommit({decision: allowedDecision('netz'), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'netz'})});
  assert.match(network.message, /Verbrauchsanzeige prüfen/);
- const duplicate = await runHistoricalCommit({decision: readyCall(), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'doppelt'})});
+ const duplicate = await runHistoricalCommit({decision: allowedDecision('doppelt'), facilityId: 'fac-a', rpc: (name, args) => rpc(name, {...args, p_dateiname: 'doppelt'})});
  assert.match(duplicate.message, /bereits importiert/);
- const incomplete = await runHistoricalCommit({decision: readyCall(), facilityId: 'fac-a', rpc});
+ const incomplete = await runHistoricalCommit({decision: allowedDecision(), facilityId: 'fac-a', rpc});
  assert.equal(incomplete.ok, false);
  assert.deepEqual(calls, [
   'tageswerk_commit_historical_import',

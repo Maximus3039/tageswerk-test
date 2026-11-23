@@ -49,6 +49,7 @@ import {
  fetchPeriodRows,
  fetchConsumptionCalendar
 } from './meters-store.js';
+import {mountHistoricalCapture, syncHistoricalCapture} from './historical-consumption-ui.js';
 import {el} from './utils.js';
 import {state} from './state.js';
 import {mediumNames,unitNames,meterStatusNames,intervalNames,readingTypeNames} from './labels.js';
@@ -175,6 +176,7 @@ export function syncMeterEditor(){
  const facility=selectedFacility();
  const allowed=membershipAllowsMeterAdmin(facility,state.myMemberships,state.currentUser?.id);
  el('add-meter')?.classList.toggle('hidden',!allowed);
+ syncHistoricalCapture();
  if(!allowed||(formFacilityId&&formFacilityId!==facility?.id))closeMeterForm();
  if(readingFacilityId&&readingFacilityId!==facility?.id)closeReadingForm(true);
  if(correctionFacilityId&&(!allowed||correctionFacilityId!==facility?.id))closeCorrectionForm(true);
@@ -2114,13 +2116,15 @@ function mountConsumptionEvaluation(){
  more.addEventListener('click',()=>{if(!periodLoading&&periodHasMore)void loadPeriods({append:true,refreshMeters:false})});
  facilitySelect.addEventListener('change',()=>{if(periodMode==='evaluation')requestPeriods({resetMeter:true,refreshMeters:true})});
  new MutationObserver(()=>{
-  const facility=selectedFacility();
-  if(!facility){
+  if(!(state.accessibleFacilities||[]).length){
    clearPeriodDisplay('Für dein Konto sind keine Betriebe freigegeben.');
    return;
   }
+  const facility=selectedFacility();
+  if(!facility)return;
   if(periodMode==='evaluation'&&facility.id!==periodFacilityId)requestPeriods({resetMeter:true,refreshMeters:true});
  }).observe(facilitySelect,{childList:true});
 }
 
 mountConsumptionEvaluation();
+mountHistoricalCapture();

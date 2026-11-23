@@ -11,9 +11,10 @@ async function openApp(page) {
 
 test('Nexus V4.2 hat kompakte Dashboard-Struktur und Module zuerst', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('body.nexus-v42')).toHaveCount(1);
  await expect(page.locator('#facility-spotlight #dashboard-facility')).toBeVisible();
@@ -46,9 +47,11 @@ test('Nexus V4.2 hat kompakte Dashboard-Struktur und Module zuerst', async ({pag
 
 test('Betriebsführung steht vor Weitere Module', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#view-more')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-more', true);
  });
  const order = await page.evaluate(() => {
   const ops = document.querySelector('#operations-card');

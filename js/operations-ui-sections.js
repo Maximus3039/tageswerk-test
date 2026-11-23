@@ -2,7 +2,7 @@ import {el} from './utils.js';
 import {state} from './state.js';
 import {acknowledgeNotice, visibleNotices} from './notifications.js';
 import {isManager} from './permissions.js';
-import {priorityNames} from './labels.js';
+import {intervalNames, priorityNames} from './labels.js';
 import {
  canBookMaterial,
  facilityNotices,

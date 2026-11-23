@@ -2,8 +2,18 @@ import {expect, test} from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const outDir = path.resolve('docs/abnahme-mobile-3.7.0');
+const docsDir = path.resolve('docs/abnahme-mobile-3.7.0');
+const outDir = path.resolve('test-results/abnahme-mobile-3.7.0');
 fs.mkdirSync(outDir, {recursive: true});
+fs.mkdirSync(docsDir, {recursive: true});
+
+function publish(fileName) {
+ try {
+  fs.copyFileSync(path.join(outDir, fileName), path.join(docsDir, fileName));
+ } catch {
+  /* docs-Ordner kann unter Windows gesperrt sein */
+ }
+}
 
 function supabaseMock() {
  return `const tables = {
@@ -47,10 +57,23 @@ async function openApp(page) {
  await page.route(/supabase\.co/, route => route.abort());
  await page.route(/open-meteo/, route => route.abort());
  await page.goto('/');
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
+}
+
+async function saveScreenshot(page, file) {
+ const buf = await page.screenshot({fullPage: false});
+ const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+ fs.writeFileSync(tmp, buf);
+ try {
+  fs.renameSync(tmp, file);
+ } catch {
+  fs.copyFileSync(tmp, file);
+  fs.unlinkSync(tmp);
+ }
 }
 
 function metricsFn() {
@@ -87,12 +110,14 @@ test('Mobile-Abnahme speichert Screenshots und Metriken', async ({page}, testInf
    await page.locator(sel).first().click();
    await page.waitForTimeout(200);
    const file = path.join(outDir, `${width}-${name}.png`);
-   await page.screenshot({path: file, fullPage: false});
+   await saveScreenshot(page, file);
+   publish(`${width}-${name}.png`);
    report.widths[width][name] = {file: `docs/abnahme-mobile-3.7.0/${width}-${name}.png`, ...(await page.evaluate(metricsFn))};
   }
   await page.locator('#mobile-capture-fab').click({force: true});
   const file = path.join(outDir, `${width}-erfassen.png`);
-  await page.screenshot({path: file, fullPage: false});
+  await saveScreenshot(page, file);
+  publish(`${width}-erfassen.png`);
   report.widths[width].erfassen = {file: `docs/abnahme-mobile-3.7.0/${width}-erfassen.png`, ...(await page.evaluate(metricsFn))};
   await page.locator('#capture-close').click();
  }
@@ -102,7 +127,8 @@ test('Mobile-Abnahme speichert Screenshots und Metriken', async ({page}, testInf
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(150);
   const file = path.join(outDir, `390-${name}.png`);
-  await page.screenshot({path: file, fullPage: false});
+  await saveScreenshot(page, file);
+  publish(`390-${name}.png`);
   return `docs/abnahme-mobile-3.7.0/390-${name}.png`;
  };
 
@@ -165,6 +191,7 @@ test('Mobile-Abnahme speichert Screenshots und Metriken', async ({page}, testInf
  report.flows.captureClosed = await page.locator('#capture-sheet').evaluate(n => n.classList.contains('hidden'));
 
  fs.writeFileSync(path.join(outDir, 'metrics.json'), JSON.stringify(report, null, 2));
+ publish('metrics.json');
  expect(report.widths[390].dashboard.overflow).toBeLessThanOrEqual(2);
  expect(report.flows.reading.clicks).toBeLessThanOrEqual(3);
  expect(report.flows.defect.clicks).toBeLessThanOrEqual(3);

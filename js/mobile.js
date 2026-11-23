@@ -2,7 +2,7 @@ import {facilityVisibleToMember} from './permissions.js';
 import {assetNextDue, assetOverdue, berlinDay, inspectionOverdue, waterControlState, waterRowsForMember} from './operations.js';
 import {facilityNotices, missingTemperaturePoints, waterAttention} from './operations-controls.js';
 import {state} from './state.js';
-import {el} from './utils.js';
+import {el, hideFromAssistive} from './utils.js';
 
 const upcomingMs = 7 * 24 * 60 * 60 * 1000;
 const routes = {capture: null, task: null, notice: null};
@@ -208,6 +208,7 @@ export function toggleCapture(force) {
  if (!sheet) return;
  const open = force === undefined ? sheet.classList.contains('hidden') : force === true;
  sheet.classList.toggle('hidden', !open);
+ hideFromAssistive(sheet, !open);
  const active = open ? 'capture' : state.currentView;
  for (const button of document.querySelectorAll('[data-view]')) button.classList.toggle('active', button.dataset.view === active);
 }

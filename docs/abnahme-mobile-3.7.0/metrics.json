@@ -4,14 +4,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/320-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3652,
+        "scrollHeight": 3245,
         "inner": {
           "w": 320,
           "h": 844
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -45,7 +45,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -79,7 +79,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -113,7 +113,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -188,14 +188,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/360-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3512,
+        "scrollHeight": 3105,
         "inner": {
           "w": 360,
           "h": 844
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -235,7 +235,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -275,7 +275,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -315,7 +315,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -390,14 +390,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/375-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3476,
+        "scrollHeight": 3069,
         "inner": {
           "w": 375,
           "h": 844
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -437,7 +437,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -477,7 +477,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -517,7 +517,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -592,14 +592,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/390-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3455,
+        "scrollHeight": 3048,
         "inner": {
           "w": 390,
           "h": 844
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -639,7 +639,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -679,7 +679,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -719,7 +719,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -794,14 +794,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/430-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3379,
+        "scrollHeight": 2972,
         "inner": {
           "w": 430,
           "h": 844
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -841,7 +841,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -881,7 +881,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -921,7 +921,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 728,
+          "y": 704,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -996,14 +996,14 @@
       "dashboard": {
         "file": "docs/abnahme-mobile-3.7.0/768-dashboard.png",
         "overflow": 0,
-        "scrollHeight": 3203,
+        "scrollHeight": 2796,
         "inner": {
           "w": 768,
           "h": 1024
         },
         "fab": {
           "display": "block",
-          "y": 908,
+          "y": 884,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -1043,7 +1043,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 908,
+          "y": 884,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -1083,7 +1083,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 908,
+          "y": 884,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -1123,7 +1123,7 @@
         },
         "fab": {
           "display": "block",
-          "y": 908,
+          "y": 884,
           "h": 48,
           "right": 16,
           "navOverlap": false
@@ -1228,7 +1228,7 @@
       },
       "fab": {
         "display": "block",
-        "y": 728,
+        "y": 704,
         "h": 48,
         "right": 16,
         "navOverlap": false

@@ -55,7 +55,10 @@ export function readingDraftError(draft){
 
 export function readingInsertPayload(meterId,draft){
  const value=String(draft.reading_value).trim().replace(',','.');
- return {meter_id:meterId,reading_type:'regular',reading_value:value,reading_at:new Date(draft.reading_at).toISOString()};
+ const payload={meter_id:meterId,reading_type:'regular',reading_value:value,reading_at:new Date(draft.reading_at).toISOString()};
+ const note=String(draft.note||'').trim();
+ if(note)payload.note=note;
+ return payload;
 }
 
 export function correctionDraftError(draft){

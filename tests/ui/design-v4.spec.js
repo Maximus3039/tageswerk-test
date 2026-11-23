@@ -11,9 +11,10 @@ async function openApp(page) {
 
 test('Nexus V4 Marke und Betriebs-Spotlight sind vorhanden', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('body.nexus-v4')).toHaveCount(1);
  if (testInfo.project.name === 'smartphone') {
@@ -29,10 +30,12 @@ test('Nexus V4 Marke und Betriebs-Spotlight sind vorhanden', async ({page}, test
 
 test('Modul-Kacheln tragen Neon-Klassen und SVG-Icons', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#view-more')?.classList.remove('hidden');
-  document.querySelector('#operations-card')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-more', true);
+  show('operations-card', true);
  });
  await expect(page.locator('#operations-tabs .neon-tile')).toHaveCount(8);
  await expect(page.locator('[data-operation="water"] .module-icon svg')).toHaveCount(1);

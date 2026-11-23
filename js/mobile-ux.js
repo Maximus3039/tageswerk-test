@@ -1,4 +1,4 @@
-import {el} from './utils.js';
+import {el, hideFromAssistive, setHidden} from './utils.js';
 import {state} from './state.js';
 import {isManager, mayAppointManager} from './permissions.js';
 import {toggleCapture} from './mobile.js';
@@ -85,6 +85,7 @@ export function openSheet(title, fill) {
   fill?.(body);
  }
  sheet.classList.remove('hidden');
+ hideFromAssistive(sheet, false);
 }
 
 let filterHome = null;
@@ -95,7 +96,11 @@ export function closeSheet() {
   filterHome.parent.insertBefore(bar, filterHome.next);
   filterHome = null;
  }
- el('mobile-sheet')?.classList.add('hidden');
+ const sheet = el('mobile-sheet');
+ if (sheet) {
+  sheet.classList.add('hidden');
+  hideFromAssistive(sheet, true);
+ }
 }
 
 export function bindDraft(form) {
@@ -142,8 +147,18 @@ export function collapseRareSections() {
  wrapHidden(el('settings-card'), 'Eskalationsregeln');
  wrapHidden(el('orgs')?.closest('.card'), 'Unternehmen');
  wrapHidden(el('facilities')?.closest('.card'), 'Betriebe');
+ wrapHidden(el('operations-metrics'), 'Betriebskennzahlen');
  const meterManage = document.querySelector('#consumption-card form.manage, #meter-form');
  if (meterManage) wrapHidden(meterManage.closest('form') || meterManage, 'Zählerverwaltung');
+ const historicalOpen = el('historical-open');
+ const historicalBox = el('historical-capture');
+ if (historicalOpen && historicalBox && !historicalOpen.closest('details.mobile-fold')) {
+  const holder = document.createElement('div');
+  holder.id = 'historical-mobile-holder';
+  historicalOpen.parentNode?.insertBefore(holder, historicalOpen);
+  holder.append(historicalOpen, historicalBox);
+  wrapHidden(holder, 'Historische Werte erfassen');
+ }
 }
 
 export function mountCasesTabs() {
@@ -218,7 +233,8 @@ function mountMgmtBack() {
  button.className = 'secondary';
  button.textContent = 'Zurück zu Mehr';
  button.addEventListener('click', () => {
-  el('management-board-card')?.classList.add('hidden');
+  const card = el('management-board-card');
+  if (card) setHidden(card, true);
   el('more-hub')?.scrollIntoView({behavior: 'smooth', block: 'start'});
   window.scrollTo({top: 0, behavior: 'smooth'});
  });
@@ -262,7 +278,7 @@ export function mountMoreHub() {
     else {
      const fold = target?.closest('details');
      if (fold) fold.open = true;
-     target?.classList.remove('hidden');
+     setHidden(target, false);
      target?.scrollIntoView({behavior: 'smooth', block: 'start'});
     }
    });
@@ -310,7 +326,7 @@ export function bindFormDrafts() {
 
 export function mountMobileUx() {
  document.body.classList.add('nexus-v45');
- if (isMobileUx()) el('operations-card')?.classList.add('hidden');
+ if (isMobileUx()) setHidden(el('operations-card'), true);
  compactSecurityNotice();
  mountCaptureFab();
  mountCasesTabs();

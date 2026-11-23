@@ -16,10 +16,11 @@ test('Die Betriebsmodule bleiben auf dem Smartphone in der Breite', async ({page
  await expect(page.locator('#invite-role option[value="employee"]')).toHaveText('Mitarbeiter');
  await expect(page.locator('#invite-role option[value="technician"]')).toHaveText('Techniker');
  await expect(page.locator('#dash-notices')).toHaveCount(1);
- await page.evaluate(() => {
-  document.querySelector('#app').classList.remove('hidden');
-  document.querySelector('#view-more').classList.remove('hidden');
-  document.querySelector('#operations-card').classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('app', true);
+  show('view-more', true);
+  show('operations-card', true);
  });
  const tabs = await page.locator('#operations-tabs').boundingBox();
  const viewport = page.viewportSize();

@@ -7,9 +7,10 @@ test('Die mobile Navigation, das Dashboard und die Erfassung bleiben in der Brei
  }));
  await page.route(/supabase\.co/, route => route.abort());
  await page.goto('/');
- await page.evaluate(() => {
-  document.querySelector('#app').classList.remove('hidden');
-  document.querySelector('#login').classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  const mobile = testInfo.project.name === 'smartphone';
  const bottom = page.locator('.bottom-nav');

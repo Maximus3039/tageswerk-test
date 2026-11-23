@@ -49,3 +49,19 @@ export async function fetchPeriodRows(facilityId,medium,meterId,offset,pageSize)
 export function fetchConsumptionCalendar(args){
  return supabase.rpc('tageswerk_consumption_calendar',args);
 }
+
+export function fetchMonthlyConsumption(facilityId,year){
+ return supabase.from('utility_monthly_consumption').select('id,facility_id,medium,unit,meter_id,year,month,consumption_value,note,recorded_by,corrected_by,correction_reason,created_at,updated_at').eq('facility_id',facilityId).eq('year',year).order('month');
+}
+
+export function insertMonthlyConsumption(payload){
+ return supabase.from('utility_monthly_consumption').insert(payload);
+}
+
+export function updateMonthlyConsumption(id,facilityId,payload){
+ return supabase.from('utility_monthly_consumption').update(payload).eq('id',id).eq('facility_id',facilityId).select('id');
+}
+
+export function fetchMonthlyRevisions(consumptionId){
+ return supabase.from('utility_monthly_consumption_revisions').select('id,consumption_id,previous_value,previous_note,new_value,new_note,correction_reason,changed_by,changed_at').eq('consumption_id',consumptionId).order('changed_at',{ascending:false});
+}

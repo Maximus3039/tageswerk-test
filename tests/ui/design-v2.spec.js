@@ -25,9 +25,10 @@ test('Login zeigt Marke und hält technische Hinweise hinter Details', async ({p
 
 test('Dashboard bleibt kompakt und ohne horizontalen Overflow', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
  });
  await expect(page.locator('.dash-command')).toBeVisible();
  await expect(page.locator('.kpi-strip #metric-open')).toBeVisible();
@@ -44,11 +45,12 @@ test('Dashboard bleibt kompakt und ohne horizontalen Overflow', async ({page}, t
 
 test('Mängelformular öffnet erst auf Abruf', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#login')?.classList.add('hidden');
-  document.querySelector('#view-dashboard')?.classList.add('hidden');
-  document.querySelector('#view-defects')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-dashboard', false);
+  show('view-defects', true);
  });
  await expect(page.locator('#defect-composer')).toHaveClass(/hidden/);
  await page.locator('#open-defect-form').click();
@@ -64,10 +66,12 @@ test('Mängelformular öffnet erst auf Abruf', async ({page}, testInfo) => {
 
 test('Betriebsmodule nutzen Modulkarten im Raster', async ({page}, testInfo) => {
  await openApp(page);
- await page.evaluate(() => {
-  document.querySelector('#app')?.classList.remove('hidden');
-  document.querySelector('#view-more')?.classList.remove('hidden');
-  document.querySelector('#operations-card')?.classList.remove('hidden');
+ await page.evaluate(async () => {
+  const {show} = await import('./js/utils.js');
+  show('login', false);
+  show('app', true);
+  show('view-more', true);
+  show('operations-card', true);
  });
  await expect(page.locator('#operations-tabs .module-card')).toHaveCount(8);
  await expect(page.locator('[data-operation="water"] .module-label')).toHaveText('Wasserhygiene');

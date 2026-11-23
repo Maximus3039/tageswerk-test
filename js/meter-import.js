@@ -1,6 +1,6 @@
 import {PROFILES,convertTageszeitZweizeilig,notable,READING_COLUMNS,METER_COLUMNS} from './meter-import-profiles.js';
 import {needsReview,reviewRows,canMerge,dateSpan,reviewReadingsCsv,reviewMetersCsv} from './meter-import-review.js';
-import {sha256Hex,buildSnapshot,matchSnapshot,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimesForFacility,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,commitErrorMessage,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport} from './meter-import-store.js';
+import {sha256Hex,buildSnapshot,matchSnapshot,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimesForFacility,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,commitErrorMessage,HISTORICAL_COMMIT_ENABLED,HISTORICAL_COMMIT_DISABLED_MESSAGE,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport} from './meter-import-store.js';
 import {isManager} from './permissions.js';
 import {state} from './state.js';
 import {fetchFacilityMeters,loadFacilityMeters} from './meters.js';
@@ -777,11 +777,12 @@ function renderCommit(){
  if(!note||!box||!button||!summary||!error)return;
  const decision=commitDecision();
  const current=commitResult&&serverPreview&&commitResult.key===serverPreview.key?commitResult:null;
+ if(!HISTORICAL_COMMIT_ENABLED)commitConfirmed=false;
  box.checked=commitConfirmed;
- box.disabled=!serverPreview?.ok||serverPreview.schreibbar!==true||serverPreview.blockiert!==0||previewBusy||commitBusy;
+ box.disabled=!HISTORICAL_COMMIT_ENABLED||!serverPreview?.ok||serverPreview.schreibbar!==true||serverPreview.blockiert!==0||previewBusy||commitBusy;
  if(box.disabled)commitConfirmed=false;
  box.checked=commitConfirmed;
- button.disabled=!decision.call||!!(current&&current.ok);
+ button.disabled=!HISTORICAL_COMMIT_ENABLED||!decision.call||!!(current&&current.ok);
  summary.replaceChildren();
  error.textContent="";
  if(commitBusy){
@@ -797,6 +798,10 @@ function renderCommit(){
   return;
  }
  if(current&&!current.ok)error.textContent=current.message||"Die Übernahme konnte nicht ausgeführt werden.";
+ if(!HISTORICAL_COMMIT_ENABLED){
+  note.textContent=HISTORICAL_COMMIT_DISABLED_MESSAGE;
+  return;
+ }
  note.textContent=serverPreview?.ok&&serverPreview.schreibbar?"Die Übernahme speichert die freigegebenen Ablesungen erst nach dieser Bestätigung.":"Die Übernahme bleibt gesperrt, bis die aktuelle Vorschau den Import freigibt.";
  if(!decision.call&&commitConfirmed)error.textContent=decision.message;
 }

@@ -398,8 +398,11 @@ function previewErrorMessage(error){
 }
 
 const COMMIT_TOKEN=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HISTORICAL_COMMIT_ENABLED=false;
+const HISTORICAL_COMMIT_DISABLED_MESSAGE="Die historische Excel-Übernahme ist in dieser Version deaktiviert. Die Vorschau bleibt verfügbar. Historische Verbräuche erfassen Sie manuell.";
 
 function prepareCommitCall({permission,confirmed,busy,preview,plan,planKey,hash,fileName}){
+ if(!HISTORICAL_COMMIT_ENABLED)return {call:false,message:HISTORICAL_COMMIT_DISABLED_MESSAGE};
  if(busy)return {call:false,message:"Die Übernahme läuft bereits."};
  if(permission)return {call:false,message:permission};
  if(!confirmed)return {call:false,message:"Die Übernahme muss ausdrücklich bestätigt werden."};
@@ -508,4 +511,4 @@ function commitHistoricalImport(decision,facilityId){
  return runHistoricalCommit({decision,facilityId,rpc:(name,args)=>supabase.rpc(name,args)});
 }
 
-export {FORMAT,VERSION,IMPORT_LIMIT,recordId,sha256Hex,buildSnapshot,matchSnapshot,validClock,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimeForRow,historicalTimesForFacility,normalizeHistoricalTimes,importStandText,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,normalizeCommitResult,commitErrorMessage,commitRefreshesConsumption,runHistoricalCommit,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport};
+export {FORMAT,VERSION,IMPORT_LIMIT,HISTORICAL_COMMIT_ENABLED,HISTORICAL_COMMIT_DISABLED_MESSAGE,recordId,sha256Hex,buildSnapshot,matchSnapshot,validClock,defaultHistoricalTimes,reviseHistoricalTimes,historicalPreviewReady,historicalTimeForRow,historicalTimesForFacility,normalizeHistoricalTimes,importStandText,planHistoricalPayload,normalizePreviewResult,preparePreviewCall,acceptPreviewResponse,previewErrorMessage,prepareCommitCall,normalizeCommitResult,commitErrorMessage,commitRefreshesConsumption,runHistoricalCommit,loadInactiveStock,fetchImportMappings,revokeImportMappingRow,insertImportMappingRow,loadEffectContext,previewHistoricalImport,commitHistoricalImport};
